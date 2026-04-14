@@ -7,7 +7,7 @@ Point it at any directory to get a file tree on the left and a content preview o
 ## Install
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/skim.git
+git clone https://github.com/shizheng-rlfresh/skim.git
 cd skim
 uv sync
 ```
@@ -46,9 +46,21 @@ Syntax highlighting works for Python, JSON, JavaScript, TypeScript, HTML, CSS, Y
 ```bash
 uv sync --extra dev
 uv run skim-dev          # launch with CSS hot reload
-uv run pytest -v         # run tests
-uv run ruff check src/ tests/      # lint
-uv run ruff format --check src/ tests/  # format check
+uv run pytest            # run tests
+uv run ruff check .      # lint
+uv run ruff format --check .  # format check
+uv build                 # build package
+```
+
+## CI
+
+GitHub Actions runs the same validation on pull requests and on pushes to `main`:
+
+```bash
+uv run pytest
+uv run ruff check .
+uv run ruff format --check .
+uv build
 ```
 
 ## License
