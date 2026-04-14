@@ -1,0 +1,27 @@
+[project]
+name = "skim"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "shizheng-rlfresh", email = "shi.zheng.tfls@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "rich>=15.0.0",
+    "textual[syntax]>=8.2.3",
+]
+
+
+[project.scripts]
+skim = "skim:main"
+
+
+[build-system]
+requires = ["uv_build>=0.9.11,<0.10.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "textual-dev>=1.8.0",
+]
