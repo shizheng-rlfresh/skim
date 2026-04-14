@@ -407,6 +407,25 @@ async def test_nested_output_text_stdout_promotes_inner_content():
         assert "stdout" in _all_collapsible_titles(viewer)
 
 
+async def test_output_text_wrapper_does_not_duplicate_stdout_stderr_sections():
+    """Decoded output.text payloads should not also render duplicate text-wrapped sections."""
+    output = {"text": {"stdout": "done", "stderr": "warn", "returncode": 0}}
+    viewer = TrajectoryViewer(sample_trajectory(output=output))
+    app = SkimApp(path=".")
+
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        await pane.mount(viewer)
+        result_node = viewer._tree.root.children[2].children[2].children[1]
+        viewer.on_tree_node_selected(Tree.NodeSelected(result_node))
+        await pilot.pause()
+
+        titles = _all_collapsible_titles(viewer)
+        assert titles.count("stdout") == 1
+        assert titles.count("stderr") == 1
+        assert "text" not in titles
+
+
 async def test_wrapper_promotion_keeps_scalar_sibling_metadata():
     """Wrapper promotion keeps useful scalar siblings instead of dropping them."""
     output = {

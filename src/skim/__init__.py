@@ -549,16 +549,27 @@ def _tool_section_widgets(event: TrajectoryEvent | None, focus: str) -> list[Wid
 
 
 def _decoded_tool_result(output: Any) -> Any:
-    decoded = _decode_nested_json(output)
-    if isinstance(decoded, dict) and set(decoded) == {"text"}:
-        return decoded["text"]
-    if (
-        isinstance(decoded, dict)
-        and isinstance(decoded.get("text"), dict)
-        and any(key in decoded["text"] for key in ("stdout", "stderr", "returncode"))
-    ):
-        return {**decoded, **decoded["text"]}
-    return decoded
+    return _normalize_text_wrapper(_decode_nested_json(output))
+
+
+def _normalize_text_wrapper(value: Any) -> Any:
+    decoded = _decode_nested_json(value)
+    if not isinstance(decoded, dict):
+        return decoded
+    if set(decoded) == {"text"}:
+        return _normalize_text_wrapper(decoded["text"])
+    if isinstance(decoded.get("text"), dict):
+        text_payload = _normalize_text_wrapper(decoded["text"])
+        if isinstance(text_payload, dict) and any(
+            key in text_payload for key in ("stdout", "stderr", "returncode", "pages", "code")
+        ):
+            siblings = {
+                key: _normalize_text_wrapper(item)
+                for key, item in decoded.items()
+                if key != "text" and key not in text_payload
+            }
+            return {**text_payload, **siblings}
+    return {key: _normalize_text_wrapper(item) for key, item in decoded.items()}
 
 
 def _tool_identity_widgets(raw: dict[str, Any]) -> list[Widget]:
