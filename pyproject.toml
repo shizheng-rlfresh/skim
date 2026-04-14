@@ -1,11 +1,12 @@
+[build-system]
+requires = ["uv_build>=0.9.11,<0.10.0"]
+build-backend = "uv_build"
+
 [project]
 name = "skim"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-authors = [
-    { name = "shizheng-rlfresh", email = "shi.zheng.tfls@gmail.com" }
-]
 requires-python = ">=3.12"
 dependencies = [
     "rich>=15.0.0",
@@ -13,10 +14,44 @@ dependencies = [
 ]
 
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.0.3",
+    "pytest-asyncio>=1.2.0",
+    "pytest-textual-snapshot>=1.0.0",
+    "ruff>=0.15.10",
+]
+
 [project.scripts]
 skim = "skim:main"
+skim-dev = "skim:dev"
 
+[tool.ruff]
+line-length = 100
+src = ["src"]
 
-[build-system]
-requires = ["uv_build>=0.9.11,<0.10.0"]
-build-backend = "uv_build"
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "D",   # pydocstyle
+]
+ignore = []
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+    "D",
+]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = "-v"
+asyncio_mode = "auto"
