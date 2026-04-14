@@ -94,7 +94,9 @@ class PreviewPane(VerticalScroll, can_focus=True):
 
     def on_click(self) -> None:
         """Mark this pane as the active preview when clicked."""
-        self.app.set_active_pane(self.id)
+        app = self.app
+        if isinstance(app, SkimApp) and self.id is not None:
+            app.set_active_pane(self.id)
 
 
 class SkimApp(App):
