@@ -12,6 +12,8 @@ cd skim
 uv sync
 ```
 
+Requires Python 3.12 or newer.
+
 ## Usage
 
 ```bash
@@ -42,11 +44,11 @@ Syntax highlighting works for Python, JSON, JavaScript, TypeScript, HTML, CSS, Y
 ## Development
 
 ```bash
-uv add ruff pytest pytest-textual-snapshot --dev
+uv sync --extra dev
 uv run skim-dev          # launch with CSS hot reload
 uv run pytest -v         # run tests
-uv run ruff check .   # lint
-uv run ruff format .  # format
+uv run ruff check src/ tests/      # lint
+uv run ruff format --check src/ tests/  # format check
 ```
 
 ## License
