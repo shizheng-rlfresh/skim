@@ -49,7 +49,6 @@ uv run skim-dev          # launch with CSS hot reload
 uv run pytest            # run tests
 uv run ruff check .      # lint
 uv run ruff format --check .  # format check
-uv build                 # build package
 ```
 
 ## License
