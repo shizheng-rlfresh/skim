@@ -1,4 +1,4 @@
-name: checks
+name: CI
 
 on:
   pull_request:
@@ -9,31 +9,33 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: checks-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
-  checks:
+  validate:
     runs-on: ubuntu-latest
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
 
       - name: Install dependencies
-        run: uv sync --extra dev --locked
-
-      - name: Run lint
-        run: uv run ruff check src/ tests/
+        run: uv sync --extra dev
 
       - name: Run tests
-        run: uv run pytest -v
+        run: uv run pytest
+
+      - name: Run Ruff lint
+        run: uv run ruff check .
+
+      - name: Check Ruff formatting
+        run: uv run ruff format --check .
+
+      - name: Build package
+        run: uv build
