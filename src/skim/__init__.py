@@ -52,6 +52,7 @@ HUMAN_TEXT_KEYS = {
     "stdout",
     "text",
 }
+WRAPPER_KEYS = ("arguments", "content", "output", "result", "text")
 SUBMISSION_KEYS = {
     "agentic_grader_guidance",
     "prompt",
@@ -374,30 +375,6 @@ def _function_call_detail_widgets(raw: dict[str, Any]) -> list[Widget]:
 def _function_call_result_detail_widgets(raw: dict[str, Any]) -> list[Widget]:
     widgets = _tool_identity_widgets(raw)
     decoded = _decoded_tool_result(raw.get("output"))
-
-    if isinstance(decoded, dict):
-        handled = False
-        for key in ("returncode", "stdout", "stderr"):
-            if key not in decoded:
-                continue
-            handled = True
-            widgets.append(_detail_heading(key))
-            value = decoded[key]
-            if isinstance(value, str):
-                widgets.extend(_render_string_detail(value))
-            else:
-                widgets.extend(_render_payload_detail(value))
-        rest = {
-            key: value
-            for key, value in decoded.items()
-            if key not in {"returncode", "stdout", "stderr"}
-        }
-        if rest:
-            widgets.append(_detail_heading("Output"))
-            widgets.extend(_render_payload_detail(rest))
-        if handled:
-            return widgets
-
     widgets.extend(_render_payload_detail(decoded))
     return widgets
 
@@ -429,14 +406,12 @@ def _tool_identity_widgets(raw: dict[str, Any]) -> list[Widget]:
 def _render_payload_detail(value: Any) -> list[Widget]:
     decoded = _decode_nested_json(value)
     if isinstance(decoded, dict | list):
+        promoted = _promote_wrapper_value(decoded)
+        if promoted is not None:
+            return _render_structured_detail(promoted)
         if _has_human_text(decoded):
             return _render_structured_detail(decoded)
-        return [
-            Static(
-                Syntax(json.dumps(decoded, indent=2), "json", word_wrap=True),
-                classes="trajectory-detail",
-            )
-        ]
+        return _render_json_block(decoded)
     if decoded is None:
         return [Static(Text(""))]
     return _render_string_detail(str(decoded))
@@ -448,18 +423,65 @@ def _render_string_detail(value: str) -> list[Widget]:
 
     decoded = _try_decode_json(value)
     if isinstance(decoded, dict | list):
+        promoted = _promote_wrapper_value(decoded)
+        if promoted is not None:
+            return _render_structured_detail(promoted)
         if _has_human_text(decoded):
             return _render_structured_detail(decoded)
-        return [
-            Static(
-                Syntax(json.dumps(decoded, indent=2), "json", word_wrap=True),
-                classes="trajectory-detail",
-            )
-        ]
+        return _render_json_block(decoded)
 
     if _looks_like_markdown(value):
         return [Markdown(value, classes="trajectory-markdown")]
+    if _looks_like_preformatted_text(value):
+        return [Static(Syntax(value, "text", word_wrap=True), classes="trajectory-detail")]
     return [Static(Text(value), classes="trajectory-detail")]
+
+
+def _promote_wrapper_value(value: Any) -> Any | None:
+    current = _decode_nested_json(value)
+    while isinstance(current, dict):
+        candidates = [
+            key for key in WRAPPER_KEYS if key in current and _can_promote_wrapper(current, key)
+        ]
+        if not candidates:
+            return None
+        promoted_key = candidates[0]
+        promoted_value = _decode_nested_json(current[promoted_key])
+        siblings = {
+            key: item
+            for key, item in current.items()
+            if key != promoted_key and not _is_empty_value(_decode_nested_json(item))
+        }
+        if siblings:
+            current = {"value": promoted_value, **siblings}
+        else:
+            current = promoted_value
+        current = _decode_nested_json(current)
+    return current if current is not value else None
+
+
+def _can_promote_wrapper(container: dict[str, Any], key: str) -> bool:
+    value = _decode_nested_json(container.get(key))
+    siblings = {
+        sibling_key: _decode_nested_json(item)
+        for sibling_key, item in container.items()
+        if sibling_key != key and not _is_empty_value(_decode_nested_json(item))
+    }
+    if not _is_renderable_leaf(value):
+        return False
+    if not siblings:
+        return True
+    return all(not _has_human_text(item) for item in siblings.values())
+
+
+def _is_renderable_leaf(value: Any) -> bool:
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, list):
+        return any(_is_renderable_leaf(item) for item in value)
+    if isinstance(value, dict):
+        return _has_human_text(value)
+    return False
 
 
 def _render_structured_detail(value: Any) -> list[Widget]:
@@ -504,6 +526,9 @@ def _render_keyed_value(key: str, value: Any) -> list[Widget]:
     if isinstance(value, str):
         return _render_keyed_string(normalized_key, value)
     if isinstance(value, dict):
+        promoted = _promote_wrapper_value(value)
+        if promoted is not None:
+            return _render_structured_detail(promoted)
         if _has_human_text(value):
             return _render_dict_sections(value)
         return _render_json_block(value)
@@ -519,6 +544,9 @@ def _render_keyed_value(key: str, value: Any) -> list[Widget]:
 def _render_keyed_string(key: str, value: str) -> list[Widget]:
     decoded = _try_decode_json(value)
     if isinstance(decoded, dict | list):
+        promoted = _promote_wrapper_value(decoded)
+        if promoted is not None:
+            return _render_structured_detail(promoted)
         return (
             _render_structured_detail(decoded)
             if _has_human_text(decoded)
@@ -555,7 +583,12 @@ def _render_json_block(value: Any) -> list[Widget]:
 
 def _has_human_text(value: Any) -> bool:
     if isinstance(value, str):
-        return "\n" in value or _looks_like_markdown(value) or bool(value.strip())
+        return (
+            "\n" in value
+            or _looks_like_markdown(value)
+            or _looks_like_preformatted_text(value)
+            or bool(value.strip())
+        )
     if isinstance(value, dict):
         return any(
             str(key).lower() in HUMAN_TEXT_KEYS and _has_human_text(item)
@@ -596,6 +629,19 @@ def _looks_like_markdown(value: str) -> bool:
         or line[:3].isdigit()
         for line in lines
     )
+
+
+def _looks_like_preformatted_text(value: str) -> bool:
+    lines = value.splitlines()
+    if len(lines) < 2:
+        return False
+    sample = lines[:30]
+    indented = sum(1 for line in sample if line.startswith(("    ", "\t")))
+    if indented / max(len(sample), 1) > 0.3:
+        return True
+    if value.count("/") > 5 or value.count("\t") > 3:
+        return True
+    return False
 
 
 def _detail_heading(label: str) -> Static:

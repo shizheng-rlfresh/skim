@@ -323,6 +323,48 @@ async def test_tool_result_pages_render_as_readable_sections():
         assert not any('"pages":' in block.code for block in _detail_syntax_blocks(viewer))
 
 
+async def test_nested_output_text_stdout_promotes_inner_content():
+    """Nested output -> text -> stdout payloads promote the inner stdout section."""
+    output = {"text": json.dumps({"stdout": "## Nested\n\nUseful text", "returncode": 0})}
+    viewer = TrajectoryViewer(sample_trajectory(output=output))
+    app = SkimApp(path=".")
+
+    async with app.run_test():
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        await pane.mount(viewer)
+        result_node = viewer._tree.root.children[2].children[3]
+        viewer.on_tree_node_selected(Tree.NodeSelected(result_node))
+
+        detail = _detail_text(viewer)
+        assert "stdout" in detail
+        assert len(viewer._detail_wrap.query(Markdown)) >= 1
+        assert not any('"text":' in block.code for block in _detail_syntax_blocks(viewer))
+
+
+async def test_wrapper_promotion_keeps_scalar_sibling_metadata():
+    """Wrapper promotion keeps useful scalar siblings instead of dropping them."""
+    output = {
+        "output": {
+            "text": '{"stdout": "done"}',
+            "mime_type": "text/plain",
+            "returncode": 0,
+        }
+    }
+    viewer = TrajectoryViewer(sample_trajectory(output=output))
+    app = SkimApp(path=".")
+
+    async with app.run_test():
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        await pane.mount(viewer)
+        result_node = viewer._tree.root.children[2].children[3]
+        viewer.on_tree_node_selected(Tree.NodeSelected(result_node))
+
+        detail = _detail_text(viewer)
+        assert "mime_type" in detail
+        assert "text/plain" in detail
+        assert "stdout" in detail
+
+
 async def test_machine_shaped_tool_payload_still_renders_as_json():
     """Machine-shaped dicts keep the compact JSON rendering fallback."""
     viewer = TrajectoryViewer(sample_trajectory(arguments={"timeout": 10, "flags": [1, 2]}))
