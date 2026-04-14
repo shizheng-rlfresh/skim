@@ -175,22 +175,21 @@ def test_normalize_events_extracts_supported_event_kinds():
 
 
 def test_trajectory_tree_groups_step_events():
-    """Trajectory tree groups low-level events below their step."""
+    """Trajectory tree groups tool calls into paired input/output rows."""
     viewer = TrajectoryViewer(sample_trajectory())
     step = viewer._tree.root.children[2]
 
     assert _tree_labels(viewer._tree) == ["Metadata", "Final Output", "Step 1"]
     event_labels = [child.label.plain for child in step.children]
-    assert event_labels[0].startswith("001 reasoning Need inspect files.")
-    assert event_labels[1].startswith("002 message assistant I will inspect files.")
-    assert event_labels[2].startswith("003 function_call syntara__executeBash")
-    assert "ls -la" in event_labels[2]
-    assert event_labels[3].startswith("004 function_call_result syntara__executeBash")
-    assert "stdout" in event_labels[3]
+    assert event_labels[0].startswith("001 Reasoning")
+    assert event_labels[1].startswith("002 Assistant")
+    assert event_labels[2].startswith("003 executeBash #")
+    tool_node = step.children[2]
+    assert [child.label.plain for child in tool_node.children] == ["Input", "Output"]
 
 
 async def test_selecting_trajectory_tree_node_updates_detail():
-    """Selecting a trajectory tree node updates the detail state."""
+    """Selecting a tool parent shows paired input and output detail."""
     viewer = TrajectoryViewer(sample_trajectory())
     app = SkimApp(path=".")
 
@@ -200,7 +199,9 @@ async def test_selecting_trajectory_tree_node_updates_detail():
         tool_node = viewer._tree.root.children[2].children[2]
         viewer.on_tree_node_selected(Tree.NodeSelected(tool_node))
 
-        assert "function_call" in _detail_text(viewer)
+        assert "Tool:" in _detail_text(viewer)
+        assert "Input" in _detail_text(viewer)
+        assert "Output" in _detail_text(viewer)
         assert "ls -la" in _detail_text(viewer)
 
 
@@ -235,6 +236,44 @@ async def test_message_detail_renders_markdown():
         assert len(viewer._detail_wrap.query(Markdown)) >= 1
 
 
+async def test_selecting_tool_input_keeps_tool_metadata_visible():
+    """Selecting Input keeps paired tool context visible."""
+    viewer = TrajectoryViewer(sample_trajectory())
+    app = SkimApp(path=".")
+
+    async with app.run_test():
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        await pane.mount(viewer)
+        input_node = viewer._tree.root.children[2].children[2].children[0]
+        viewer.on_tree_node_selected(Tree.NodeSelected(input_node))
+
+        detail = _detail_text(viewer)
+        assert "Tool:" in detail
+        assert "Call ID:" in detail
+        assert "Input" in detail
+        assert "Output" in detail
+        assert "ls -la" in detail
+
+
+async def test_selecting_tool_output_keeps_tool_metadata_visible():
+    """Selecting Output keeps paired tool context visible."""
+    viewer = TrajectoryViewer(sample_trajectory())
+    app = SkimApp(path=".")
+
+    async with app.run_test():
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        await pane.mount(viewer)
+        output_node = viewer._tree.root.children[2].children[2].children[1]
+        viewer.on_tree_node_selected(Tree.NodeSelected(output_node))
+
+        detail = _detail_text(viewer)
+        assert "Tool:" in detail
+        assert "Call ID:" in detail
+        assert "Input" in detail
+        assert "Output" in detail
+        assert "plain terminal output" in detail
+
+
 async def test_tool_result_detail_decodes_stdout_stderr_and_returncode():
     """Tool results expose decoded stdout, stderr, and return code sections."""
     viewer = TrajectoryViewer(sample_trajectory())
@@ -243,7 +282,7 @@ async def test_tool_result_detail_decodes_stdout_stderr_and_returncode():
     async with app.run_test():
         pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
         await pane.mount(viewer)
-        result_node = viewer._tree.root.children[2].children[3]
+        result_node = viewer._tree.root.children[2].children[2].children[1]
         viewer.on_tree_node_selected(Tree.NodeSelected(result_node))
 
         detail = _detail_text(viewer)
@@ -261,7 +300,7 @@ async def test_tool_result_detail_renders_json_stdout_as_syntax():
     async with app.run_test():
         pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
         await pane.mount(viewer)
-        result_node = viewer._tree.root.children[2].children[3]
+        result_node = viewer._tree.root.children[2].children[2].children[1]
         viewer.on_tree_node_selected(Tree.NodeSelected(result_node))
 
         syntax_blocks = [
@@ -281,7 +320,7 @@ async def test_tool_result_detail_renders_markdown_stdout():
     async with app.run_test():
         pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
         await pane.mount(viewer)
-        result_node = viewer._tree.root.children[2].children[3]
+        result_node = viewer._tree.root.children[2].children[2].children[1]
         viewer.on_tree_node_selected(Tree.NodeSelected(result_node))
 
         assert len(viewer._detail_wrap.query(Markdown)) >= 1
@@ -314,7 +353,7 @@ async def test_tool_result_pages_render_as_readable_sections():
     async with app.run_test():
         pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
         await pane.mount(viewer)
-        result_node = viewer._tree.root.children[2].children[3]
+        result_node = viewer._tree.root.children[2].children[2].children[1]
         viewer.on_tree_node_selected(Tree.NodeSelected(result_node))
 
         detail = _detail_text(viewer)
@@ -332,7 +371,7 @@ async def test_nested_output_text_stdout_promotes_inner_content():
     async with app.run_test():
         pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
         await pane.mount(viewer)
-        result_node = viewer._tree.root.children[2].children[3]
+        result_node = viewer._tree.root.children[2].children[2].children[1]
         viewer.on_tree_node_selected(Tree.NodeSelected(result_node))
 
         detail = _detail_text(viewer)
@@ -356,7 +395,7 @@ async def test_wrapper_promotion_keeps_scalar_sibling_metadata():
     async with app.run_test():
         pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
         await pane.mount(viewer)
-        result_node = viewer._tree.root.children[2].children[3]
+        result_node = viewer._tree.root.children[2].children[2].children[1]
         viewer.on_tree_node_selected(Tree.NodeSelected(result_node))
 
         detail = _detail_text(viewer)
@@ -377,6 +416,16 @@ async def test_machine_shaped_tool_payload_still_renders_as_json():
         viewer.on_tree_node_selected(Tree.NodeSelected(tool_node))
 
         assert any('"timeout": 10' in block.code for block in _detail_syntax_blocks(viewer))
+
+
+async def test_unmatched_function_call_result_still_renders_safely():
+    """A result without a matching call still shows as a tool row with output."""
+    viewer = TrajectoryViewer(sample_trajectory(include_call=False))
+    step = viewer._tree.root.children[2]
+
+    assert step.children[2].label.plain.startswith("003 executeBash #")
+    assert step.children[2].label.plain.endswith(" Output")
+    assert [child.label.plain for child in step.children[2].children] == ["Input", "Output"]
 
 
 def test_submission_json_uses_submission_summary(tmp_path):
@@ -424,12 +473,55 @@ def sample_trajectory(
     stdout: str = "plain terminal output",
     arguments: dict | None = None,
     output: dict | None = None,
+    include_call: bool = True,
+    include_result: bool = True,
 ):
     """Return a small raw trajectory fixture."""
     arguments = {"command": "ls -la"} if arguments is None else arguments
     output = (
         {"stdout": stdout, "stderr": "warning text", "returncode": 0} if output is None else output
     )
+    step_output = [
+        {
+            "type": "reasoning",
+            "content": [
+                {
+                    "type": "input_text",
+                    "text": "Need inspect files.\n\n- Check data",
+                }
+            ],
+        },
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "output_text",
+                    "text": "I will inspect files.\n\n```bash\nls -la\n```",
+                }
+            ],
+        },
+    ]
+    if include_call:
+        step_output.append(
+            {
+                "type": "function_call",
+                "name": "syntara__executeBash",
+                "callId": "tool-1",
+                "status": "completed",
+                "arguments": json.dumps(arguments),
+            }
+        )
+    if include_result:
+        step_output.append(
+            {
+                "type": "function_call_result",
+                "name": "syntara__executeBash",
+                "callId": "tool-1",
+                "status": "completed",
+                "output": {"text": json.dumps(output)},
+            }
+        )
     return {
         "metadata": {
             "trajectory_id": "traj-1",
@@ -441,43 +533,7 @@ def sample_trajectory(
         },
         "context_compaction_events": [{"message_index": 3}],
         "final_output": "## Final\n\nDone.",
-        "steps": [
-            {
-                "output": [
-                    {
-                        "type": "reasoning",
-                        "content": [
-                            {
-                                "type": "input_text",
-                                "text": "Need inspect files.\n\n- Check data",
-                            }
-                        ],
-                    },
-                    {
-                        "type": "message",
-                        "role": "assistant",
-                        "content": [
-                            {
-                                "type": "output_text",
-                                "text": "I will inspect files.\n\n```bash\nls -la\n```",
-                            }
-                        ],
-                    },
-                    {
-                        "type": "function_call",
-                        "name": "syntara__executeBash",
-                        "callId": "tool-1",
-                        "arguments": json.dumps(arguments),
-                    },
-                    {
-                        "type": "function_call_result",
-                        "name": "syntara__executeBash",
-                        "callId": "tool-1",
-                        "output": {"text": json.dumps(output)},
-                    },
-                ]
-            }
-        ],
+        "steps": [{"output": step_output}],
     }
 
 

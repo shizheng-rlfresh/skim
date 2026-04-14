@@ -92,13 +92,39 @@ class TrajectoryEvent:
 
 
 @dataclass(frozen=True)
+class ToolInteraction:
+    """Paired tool call and result linked by call id."""
+
+    index: int
+    tool_name: str
+    short_name: str
+    call_id: str
+    short_call_id: str
+    call_event: TrajectoryEvent | None = None
+    result_event: TrajectoryEvent | None = None
+
+
+@dataclass(frozen=True)
+class StepTimelineItem:
+    """Display row inside one trajectory step."""
+
+    kind: str
+    index: int
+    title: Text
+    event: TrajectoryEvent | None = None
+    interaction: ToolInteraction | None = None
+
+
+@dataclass(frozen=True)
 class TrajectoryTreeItem:
     """Data attached to a trajectory tree node."""
 
     kind: str
     title: str
-    detail: Any
+    detail: Any = None
     event: TrajectoryEvent | None = None
+    interaction: ToolInteraction | None = None
+    focus: str = "full"
 
 
 def render_file(path: Path) -> list[Widget]:
@@ -195,6 +221,88 @@ def normalize_step_events(trajectory: dict[str, Any]) -> list[list[TrajectoryEve
     return groups
 
 
+def normalize_step_timeline(trajectory: dict[str, Any]) -> list[list[StepTimelineItem]]:
+    """Return step items with paired tool interactions."""
+    timeline_groups: list[list[StepTimelineItem]] = []
+    for events in normalize_step_events(trajectory):
+        group: list[StepTimelineItem] = []
+        pending_calls: dict[str, int] = {}
+        for event in events:
+            if event.kind == "function_call":
+                interaction = ToolInteraction(
+                    index=event.index,
+                    tool_name=_tool_name(event.raw),
+                    short_name=_short_tool_name(_tool_name(event.raw)),
+                    call_id=_call_id(event.raw),
+                    short_call_id=_short_call_id(_call_id(event.raw)),
+                    call_event=event,
+                )
+                group.append(
+                    StepTimelineItem(
+                        kind="tool",
+                        index=event.index,
+                        title=_tool_tree_label(interaction),
+                        interaction=interaction,
+                    )
+                )
+                if interaction.call_id:
+                    pending_calls[interaction.call_id] = len(group) - 1
+                continue
+
+            if event.kind == "function_call_result":
+                call_id = _call_id(event.raw)
+                group_index = pending_calls.pop(call_id, None) if call_id else None
+                if group_index is not None:
+                    interaction = group[group_index].interaction
+                    if interaction is None:
+                        continue
+                    updated = ToolInteraction(
+                        index=interaction.index,
+                        tool_name=interaction.tool_name,
+                        short_name=interaction.short_name,
+                        call_id=interaction.call_id,
+                        short_call_id=interaction.short_call_id,
+                        call_event=interaction.call_event,
+                        result_event=event,
+                    )
+                    group[group_index] = StepTimelineItem(
+                        kind="tool",
+                        index=updated.index,
+                        title=_tool_tree_label(updated),
+                        interaction=updated,
+                    )
+                    continue
+
+                orphan = ToolInteraction(
+                    index=event.index,
+                    tool_name=_tool_name(event.raw),
+                    short_name=_short_tool_name(_tool_name(event.raw)),
+                    call_id=call_id,
+                    short_call_id=_short_call_id(call_id),
+                    result_event=event,
+                )
+                group.append(
+                    StepTimelineItem(
+                        kind="tool",
+                        index=event.index,
+                        title=_tool_tree_label(orphan, suffix=" Output"),
+                        interaction=orphan,
+                    )
+                )
+                continue
+
+            group.append(
+                StepTimelineItem(
+                    kind=event.kind,
+                    index=event.index,
+                    title=_standalone_tree_label(event),
+                    event=event,
+                )
+            )
+        timeline_groups.append(group)
+    return timeline_groups
+
+
 def _specialized_json_widget(data: Any) -> Widget | None:
     trajectory = _extract_trajectory(data)
     if trajectory is not None:
@@ -225,6 +333,28 @@ def _event_label(raw: dict[str, Any]) -> str:
         if value:
             return str(value)
     return ""
+
+
+def _tool_name(raw: dict[str, Any]) -> str:
+    value = raw.get("name")
+    return str(value) if value else "tool"
+
+
+def _call_id(raw: dict[str, Any]) -> str:
+    value = raw.get("callId") or raw.get("call_id")
+    return str(value) if value else ""
+
+
+def _short_tool_name(name: str) -> str:
+    if "__" in name:
+        return name.split("__")[-1]
+    return name
+
+
+def _short_call_id(call_id: str) -> str:
+    if not call_id:
+        return ""
+    return call_id[-3:]
 
 
 def _event_excerpt(raw: dict[str, Any]) -> str:
@@ -330,6 +460,8 @@ def _final_output_detail(trajectory: dict[str, Any]) -> str:
 
 
 def _detail_widgets_for_item(item: TrajectoryTreeItem) -> list[Widget]:
+    if item.interaction is not None:
+        return _tool_interaction_detail_widgets(item.interaction, item.focus)
     if item.event is not None:
         return _event_detail_widgets(item.event)
     if isinstance(item.detail, Text):
@@ -340,43 +472,69 @@ def _detail_widgets_for_item(item: TrajectoryTreeItem) -> list[Widget]:
 
 
 def _event_detail_widgets(event: TrajectoryEvent) -> list[Widget]:
-    header = Text(f"{event.index + 1}. {event.kind}")
-    if event.label:
-        header.append(f"\nlabel: {event.label}")
+    header = Text(f"{event.index + 1:03d} ", style="dim")
+    header.append(_standalone_title(event), style="bold")
     widgets: list[Widget] = [Static(header, classes="trajectory-detail-heading")]
 
-    if event.kind == "function_call":
-        widgets.extend(_function_call_detail_widgets(event.raw))
-    elif event.kind == "function_call_result":
-        widgets.extend(_function_call_result_detail_widgets(event.raw))
-    else:
+    if event.kind == "message":
+        widgets.extend(
+            _metadata_fields(
+                [("Role", _message_role(event.raw)), ("Status", _status_value(event.raw))]
+            )
+        )
         text = _event_text(event.raw)
         if text:
             widgets.extend(_render_string_detail(text))
         else:
             widgets.extend(_render_payload_detail(_event_payload(event.raw)))
-    return widgets
-
-
-def _function_call_detail_widgets(raw: dict[str, Any]) -> list[Widget]:
-    widgets = _tool_identity_widgets(raw)
-    decoded = _decode_nested_json(raw.get("arguments"))
-
-    if isinstance(decoded, dict):
-        if _has_human_text(decoded):
-            widgets.extend(_render_dict_sections(decoded))
+    elif event.kind == "reasoning":
+        text = _event_text(event.raw)
+        if text:
+            widgets.extend(_render_string_detail(text))
         else:
-            widgets.extend(_render_payload_detail(decoded))
+            widgets.extend(_render_payload_detail(_event_payload(event.raw)))
     else:
-        widgets.extend(_render_payload_detail(decoded))
+        widgets.extend(_render_payload_detail(_event_payload(event.raw)))
     return widgets
 
 
-def _function_call_result_detail_widgets(raw: dict[str, Any]) -> list[Widget]:
-    widgets = _tool_identity_widgets(raw)
-    decoded = _decoded_tool_result(raw.get("output"))
-    widgets.extend(_render_payload_detail(decoded))
+def _tool_interaction_detail_widgets(
+    interaction: ToolInteraction, focus: str = "full"
+) -> list[Widget]:
+    title = Text(f"{interaction.index + 1:03d} ", style="dim")
+    title.append(interaction.short_name, style="bold cyan")
+    if interaction.short_call_id:
+        title.append(f" #{interaction.short_call_id}", style="magenta")
+    widgets: list[Widget] = [Static(title, classes="trajectory-detail-heading")]
+    widgets.extend(
+        _metadata_fields(
+            [
+                ("Tool", interaction.tool_name),
+                ("Call ID", interaction.call_id),
+                ("Status", _interaction_status(interaction)),
+            ]
+        )
+    )
+
+    if focus == "output":
+        sections = [("Output", interaction.result_event), ("Input", interaction.call_event)]
+    elif focus == "input":
+        sections = [("Input", interaction.call_event), ("Output", interaction.result_event)]
+    else:
+        sections = [("Input", interaction.call_event), ("Output", interaction.result_event)]
+
+    for section_title, event in sections:
+        widgets.append(_detail_heading(section_title))
+        widgets.extend(_tool_section_widgets(event, section_title.lower()))
     return widgets
+
+
+def _tool_section_widgets(event: TrajectoryEvent | None, focus: str) -> list[Widget]:
+    if event is None:
+        return [Static(Text(f"No {focus}"), classes="trajectory-detail")]
+    if focus == "input":
+        return _render_payload_detail(_decode_nested_json(event.raw.get("arguments")))
+    return _render_payload_detail(_decoded_tool_result(event.raw.get("output")))
 
 
 def _decoded_tool_result(output: Any) -> Any:
@@ -398,6 +556,13 @@ def _tool_identity_widgets(raw: dict[str, Any]) -> list[Widget]:
         value = raw.get(key)
         if value:
             lines.append(f"{key}: {value}")
+    if not lines:
+        return []
+    return [Static(Text("\n".join(lines)), classes="trajectory-detail")]
+
+
+def _metadata_fields(fields: list[tuple[str, str | None]]) -> list[Widget]:
+    lines = [f"{label}: {value}" for label, value in fields if value not in (None, "")]
     if not lines:
         return []
     return [Static(Text("\n".join(lines)), classes="trajectory-detail")]
@@ -648,9 +813,60 @@ def _detail_heading(label: str) -> Static:
     return Static(Text(label, style="bold"), classes="trajectory-detail-heading")
 
 
-def _event_tree_label(event: TrajectoryEvent) -> str:
-    label = f" {event.label}" if event.label else ""
-    return f"{event.index + 1:03d} {event.kind}{label} {event.excerpt}"
+def _standalone_title(event: TrajectoryEvent) -> str:
+    if event.kind == "reasoning":
+        return "Reasoning"
+    if event.kind == "message":
+        return _message_role(event.raw)
+    return event.kind.replace("_", " ").title()
+
+
+def _standalone_tree_label(event: TrajectoryEvent) -> Text:
+    label = Text(f"{event.index + 1:03d} ", style="dim")
+    label.append(_standalone_title(event), style=_tree_kind_style(event.kind))
+    if event.excerpt:
+        label.append(f" {_clip(event.excerpt, 64)}", style="default")
+    return label
+
+
+def _tool_tree_label(interaction: ToolInteraction, suffix: str = "") -> Text:
+    label = Text(f"{interaction.index + 1:03d} ", style="dim")
+    label.append(interaction.short_name, style="bold cyan")
+    if interaction.short_call_id:
+        label.append(f" #{interaction.short_call_id}", style="magenta")
+    if suffix:
+        label.append(suffix, style="bold yellow")
+    return label
+
+
+def _message_role(raw: dict[str, Any]) -> str:
+    role = raw.get("role")
+    if not role:
+        return "Message"
+    return str(role).title()
+
+
+def _status_value(raw: dict[str, Any]) -> str | None:
+    value = raw.get("status")
+    return str(value) if value else None
+
+
+def _interaction_status(interaction: ToolInteraction) -> str | None:
+    for event in (interaction.result_event, interaction.call_event):
+        if event is None:
+            continue
+        status = _status_value(event.raw)
+        if status:
+            return status
+    return None
+
+
+def _tree_kind_style(kind: str) -> str:
+    if kind == "reasoning":
+        return "yellow"
+    if kind == "message":
+        return "green"
+    return "cyan"
 
 
 def _format_submission(data: dict[str, Any]) -> Text:
@@ -671,6 +887,7 @@ class TrajectoryViewer(Vertical):
         super().__init__(classes="trajectory-viewer")
         self.trajectory = trajectory
         self.step_events = normalize_step_events(trajectory)
+        self.step_items = normalize_step_timeline(trajectory)
         self.events = normalize_events(trajectory)
         self._summary = Static(Text(_metadata_header(trajectory)), classes="trajectory-summary")
         self._tree: Tree[TrajectoryTreeItem] = Tree("Trajectory", classes="trajectory-tree")
@@ -714,26 +931,55 @@ class TrajectoryViewer(Vertical):
                 "final_output", "Final Output", _final_output_detail(self.trajectory)
             ),
         )
-        for step_index, events in enumerate(self.step_events, start=1):
+        for step_index, items in enumerate(self.step_items, start=1):
             step = self._tree.root.add(
                 f"Step {step_index}",
                 data=TrajectoryTreeItem(
                     "step",
                     f"Step {step_index}",
-                    Text(f"Step {step_index}\n\n{len(events)} events"),
+                    Text(f"Step {step_index}\n\n{len(items)} items"),
                 ),
                 expand=True,
             )
-            for event in events:
-                step.add_leaf(
-                    _event_tree_label(event),
-                    data=TrajectoryTreeItem(
-                        "event",
-                        _event_tree_label(event),
-                        None,
-                        event=event,
-                    ),
-                )
+            for item in items:
+                if item.interaction is not None:
+                    parent = step.add(
+                        item.title,
+                        data=TrajectoryTreeItem(
+                            "tool",
+                            item.title.plain,
+                            interaction=item.interaction,
+                            focus="full",
+                        ),
+                        expand=True,
+                    )
+                    parent.add_leaf(
+                        Text("Input", style="bold yellow"),
+                        data=TrajectoryTreeItem(
+                            "tool_input",
+                            "Input",
+                            interaction=item.interaction,
+                            focus="input",
+                        ),
+                    )
+                    parent.add_leaf(
+                        Text("Output", style="bold yellow"),
+                        data=TrajectoryTreeItem(
+                            "tool_output",
+                            "Output",
+                            interaction=item.interaction,
+                            focus="output",
+                        ),
+                    )
+                elif item.event is not None:
+                    step.add_leaf(
+                        item.title,
+                        data=TrajectoryTreeItem(
+                            "event",
+                            item.title.plain,
+                            event=item.event,
+                        ),
+                    )
 
 
 class SubmissionSummary(Static):
