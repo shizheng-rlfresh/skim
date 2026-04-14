@@ -1025,6 +1025,10 @@ class TrajectoryViewer(Vertical):
         self._detail_wrap.mount(*_detail_widgets_for_item(item))
         self._detail_wrap.scroll_home(animate=False)
 
+    def scroll_detail(self, delta: int) -> None:
+        """Scroll the rendered detail panel."""
+        self._detail_wrap.scroll_relative(y=delta, animate=False)
+
     def _build_tree(self) -> None:
         """Populate the trajectory tree."""
         self._tree.root.expand()
@@ -1126,6 +1130,14 @@ class PreviewPane(VerticalScroll, can_focus=True):
         app = self.app
         if isinstance(app, SkimApp) and self.id is not None:
             app.set_active_pane(self.id)
+
+    def scroll_content(self, delta: int) -> None:
+        """Scroll specialized inner content when present, else scroll the pane."""
+        viewer = self.query(TrajectoryViewer).first()
+        if isinstance(viewer, TrajectoryViewer):
+            viewer.scroll_detail(delta)
+            return
+        self.scroll_relative(y=delta, animate=False)
 
 
 class SkimApp(App):
@@ -1301,7 +1313,7 @@ class SkimApp(App):
             return
         try:
             pane = self.query_one(f"#{self.active_pane_id}", PreviewPane)
-            pane.scroll_relative(y=SCROLL_STEP, animate=False)
+            pane.scroll_content(SCROLL_STEP)
         except Exception:
             pass
 
@@ -1313,7 +1325,7 @@ class SkimApp(App):
             return
         try:
             pane = self.query_one(f"#{self.active_pane_id}", PreviewPane)
-            pane.scroll_relative(y=-SCROLL_STEP, animate=False)
+            pane.scroll_content(-SCROLL_STEP)
         except Exception:
             pass
 
