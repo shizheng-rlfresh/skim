@@ -12,7 +12,6 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.events import Key
 from textual.widgets import DirectoryTree, Footer, Header, Markdown, Static
 
-
 SYNTAX_MAP = {
     ".py": "python",
     ".json": "json",
@@ -138,7 +137,7 @@ class SkimApp(App):
 
     def __init__(self, path: str | Path = "."):
         super().__init__()
-        self.browse_path = Path(path).resolve()
+        self.browse_path = Path(path).expanduser().resolve()
         self.pane_counter = 0
         self.active_pane_id: str = ""
         self.grid: list[list[str]] = []
@@ -254,7 +253,7 @@ class SkimApp(App):
             tree.action_cursor_up()
             event.prevent_default()
             event.stop()
-        elif event.key == "shift+right":
+        elif event.key == "shift+right" or event.key == "enter":
             tree.action_select_cursor()
             event.prevent_default()
             event.stop()
@@ -353,3 +352,9 @@ def main():
     path = sys.argv[1] if len(sys.argv) > 1 else "."
     app = SkimApp(path)
     app.run()
+
+
+def dev():
+    import subprocess
+
+    subprocess.run(["textual", "run", "--dev", "skim:SkimApp"])

@@ -15,3 +15,4 @@ CLAUDE.md
 .codex
 docs/v1/
 data/
+.ruff_cache/
