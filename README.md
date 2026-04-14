@@ -52,17 +52,6 @@ uv run ruff format --check .  # format check
 uv build                 # build package
 ```
 
-## CI
-
-GitHub Actions runs the same validation on pull requests and on pushes to `main`:
-
-```bash
-uv run pytest
-uv run ruff check .
-uv run ruff format --check .
-uv build
-```
-
 ## License
 
 MIT
