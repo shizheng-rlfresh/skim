@@ -13,7 +13,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.events import Key
 from textual.widget import Widget
-from textual.widgets import DirectoryTree, Header, Markdown, Static, Tree
+from textual.widgets import Collapsible, DirectoryTree, Header, Markdown, Static, Tree
 
 SYNTAX_MAP = {
     ".py": "python",
@@ -53,6 +53,8 @@ HUMAN_TEXT_KEYS = {
     "text",
 }
 WRAPPER_KEYS = ("arguments", "content", "output", "result", "text")
+PRIMARY_CONTENT_KEYS = ("stdout", "code", "command", "text", "value")
+SECONDARY_COLLAPSED_KEYS = {"stderr", "pages", "json", "metadata", "other"}
 SUBMISSION_KEYS = {
     "agentic_grader_guidance",
     "prompt",
@@ -506,26 +508,35 @@ def _tool_interaction_detail_widgets(
     if interaction.short_call_id:
         title.append(f" #{interaction.short_call_id}", style="magenta")
     widgets: list[Widget] = [Static(title, classes="trajectory-detail-heading")]
-    widgets.extend(
-        _metadata_fields(
-            [
-                ("Tool", interaction.tool_name),
-                ("Call ID", interaction.call_id),
-                ("Status", _interaction_status(interaction)),
-            ]
+    widgets.append(
+        _section_widget(
+            "Tool",
+            _metadata_fields(
+                [
+                    ("Tool", interaction.tool_name),
+                    ("Call ID", interaction.call_id),
+                    ("Status", _interaction_status(interaction)),
+                ]
+            ),
+            collapsed=False,
         )
     )
-
-    if focus == "output":
-        sections = [("Output", interaction.result_event), ("Input", interaction.call_event)]
-    elif focus == "input":
-        sections = [("Input", interaction.call_event), ("Output", interaction.result_event)]
-    else:
-        sections = [("Input", interaction.call_event), ("Output", interaction.result_event)]
-
-    for section_title, event in sections:
-        widgets.append(_detail_heading(section_title))
-        widgets.extend(_tool_section_widgets(event, section_title.lower()))
+    widgets.append(
+        _section_widget(
+            "Input",
+            _tool_section_widgets(interaction.call_event, "input"),
+            collapsed=False,
+            selected=focus == "input",
+        )
+    )
+    widgets.append(
+        _section_widget(
+            "Output",
+            _tool_section_widgets(interaction.result_event, "output"),
+            collapsed=False,
+            selected=focus == "output",
+        )
+    )
     return widgets
 
 
@@ -562,10 +573,15 @@ def _tool_identity_widgets(raw: dict[str, Any]) -> list[Widget]:
 
 
 def _metadata_fields(fields: list[tuple[str, str | None]]) -> list[Widget]:
-    lines = [f"{label}: {value}" for label, value in fields if value not in (None, "")]
-    if not lines:
-        return []
-    return [Static(Text("\n".join(lines)), classes="trajectory-detail")]
+    widgets: list[Widget] = []
+    for label, value in fields:
+        if value in (None, ""):
+            continue
+        text = Text()
+        text.append(f"{label}: ", style="bold cyan")
+        text.append(str(value), style="white")
+        widgets.append(Static(text, classes="trajectory-detail-field"))
+    return widgets
 
 
 def _render_payload_detail(value: Any) -> list[Widget]:
@@ -573,9 +589,9 @@ def _render_payload_detail(value: Any) -> list[Widget]:
     if isinstance(decoded, dict | list):
         promoted = _promote_wrapper_value(decoded)
         if promoted is not None:
-            return _render_structured_detail(promoted)
+            return _render_structured_detail(promoted, nested=True)
         if _has_human_text(decoded):
-            return _render_structured_detail(decoded)
+            return _render_structured_detail(decoded, nested=True)
         return _render_json_block(decoded)
     if decoded is None:
         return [Static(Text(""))]
@@ -590,9 +606,9 @@ def _render_string_detail(value: str) -> list[Widget]:
     if isinstance(decoded, dict | list):
         promoted = _promote_wrapper_value(decoded)
         if promoted is not None:
-            return _render_structured_detail(promoted)
+            return _render_structured_detail(promoted, nested=True)
         if _has_human_text(decoded):
-            return _render_structured_detail(decoded)
+            return _render_structured_detail(decoded, nested=True)
         return _render_json_block(decoded)
 
     if _looks_like_markdown(value):
@@ -649,28 +665,44 @@ def _is_renderable_leaf(value: Any) -> bool:
     return False
 
 
-def _render_structured_detail(value: Any) -> list[Widget]:
+def _render_structured_detail(value: Any, nested: bool = False) -> list[Widget]:
     if isinstance(value, dict):
-        return _render_dict_sections(value)
+        return _render_dict_sections(value, nested=nested)
     if isinstance(value, list):
-        return _render_list_sections(value)
+        return _render_list_sections(value, nested=nested)
     return _render_payload_detail(value)
 
 
-def _render_dict_sections(value: dict[str, Any]) -> list[Widget]:
+def _render_dict_sections(value: dict[str, Any], nested: bool = True) -> list[Widget]:
     widgets: list[Widget] = []
+    metadata: list[tuple[str, str | None]] = []
+    if "value" in value and not _is_empty_value(_decode_nested_json(value["value"])):
+        widgets.extend(_render_payload_detail(_decode_nested_json(value["value"])))
     for key, item in value.items():
+        if key == "value":
+            continue
         decoded = _decode_nested_json(item)
         if _is_empty_value(decoded):
             continue
-        widgets.append(_detail_heading(str(key)))
-        widgets.extend(_render_keyed_value(str(key), decoded))
+        if _is_scalar_metadata(key, decoded):
+            metadata.append((_display_label(key), str(decoded)))
+            continue
+        widgets.append(
+            _section_widget(
+                _display_label(key),
+                _render_keyed_value(str(key), decoded),
+                collapsed=_section_collapsed(key, nested=nested),
+                secondary=_section_collapsed(key, nested=nested),
+            )
+        )
+    if metadata:
+        widgets = _metadata_fields(metadata) + widgets
     if widgets:
         return widgets
     return _render_json_block(value)
 
 
-def _render_list_sections(value: list[Any]) -> list[Widget]:
+def _render_list_sections(value: list[Any], nested: bool = True) -> list[Widget]:
     if not _has_human_text(value):
         return _render_json_block(value)
 
@@ -679,8 +711,14 @@ def _render_list_sections(value: list[Any]) -> list[Widget]:
         decoded = _decode_nested_json(item)
         if _is_empty_value(decoded):
             continue
-        widgets.append(_detail_heading(f"Item {index}"))
-        widgets.extend(_render_keyed_value("", decoded))
+        widgets.append(
+            _section_widget(
+                f"Item {index}",
+                _render_keyed_value("", decoded),
+                collapsed=nested,
+                secondary=nested,
+            )
+        )
     if widgets:
         return widgets
     return _render_json_block(value)
@@ -693,15 +731,15 @@ def _render_keyed_value(key: str, value: Any) -> list[Widget]:
     if isinstance(value, dict):
         promoted = _promote_wrapper_value(value)
         if promoted is not None:
-            return _render_structured_detail(promoted)
+            return _render_structured_detail(promoted, nested=True)
         if _has_human_text(value):
-            return _render_dict_sections(value)
+            return _render_dict_sections(value, nested=True)
         return _render_json_block(value)
     if isinstance(value, list):
         if normalized_key == "pages":
             return _render_pages(value)
         if _has_human_text(value):
-            return _render_list_sections(value)
+            return _render_list_sections(value, nested=True)
         return _render_json_block(value)
     return [Static(Text(str(value)), classes="trajectory-detail")]
 
@@ -711,9 +749,9 @@ def _render_keyed_string(key: str, value: str) -> list[Widget]:
     if isinstance(decoded, dict | list):
         promoted = _promote_wrapper_value(decoded)
         if promoted is not None:
-            return _render_structured_detail(promoted)
+            return _render_structured_detail(promoted, nested=True)
         return (
-            _render_structured_detail(decoded)
+            _render_structured_detail(decoded, nested=True)
             if _has_human_text(decoded)
             else _render_json_block(decoded)
         )
@@ -732,8 +770,14 @@ def _render_pages(value: list[Any]) -> list[Widget]:
     widgets: list[Widget] = []
     for index, item in enumerate(value, start=1):
         decoded = _decode_nested_json(item)
-        widgets.append(_detail_heading(f"Page {index}"))
-        widgets.extend(_render_keyed_value("text", decoded))
+        widgets.append(
+            _section_widget(
+                f"Page {index}",
+                _render_keyed_value("text", decoded),
+                collapsed=True,
+                secondary=True,
+            )
+        )
     return widgets or _render_json_block(value)
 
 
@@ -811,6 +855,58 @@ def _looks_like_preformatted_text(value: str) -> bool:
 
 def _detail_heading(label: str) -> Static:
     return Static(Text(label, style="bold"), classes="trajectory-detail-heading")
+
+
+def _section_widget(
+    title: str,
+    body: list[Widget],
+    *,
+    collapsed: bool,
+    selected: bool = False,
+    secondary: bool = False,
+) -> Collapsible:
+    if not body:
+        body = [Static(Text("(empty)"), classes="trajectory-detail")]
+    classes = ["trajectory-section"]
+    if selected:
+        classes.append("trajectory-section-selected")
+    if secondary:
+        classes.append("trajectory-section-secondary")
+    return Collapsible(*body, title=title, collapsed=collapsed, classes=" ".join(classes))
+
+
+def _display_label(key: str) -> str:
+    special = {
+        "call_id": "Call ID",
+        "code": "code",
+        "command": "command",
+        "pages": "pages",
+        "returncode": "returncode",
+        "stderr": "stderr",
+        "stdout": "stdout",
+        "text": "text",
+    }
+    if key in special:
+        return special[key]
+    return key
+
+
+def _section_collapsed(key: str, *, nested: bool) -> bool:
+    if key.lower() in PRIMARY_CONTENT_KEYS:
+        return False
+    if key.lower() in SECONDARY_COLLAPSED_KEYS:
+        return True
+    return nested
+
+
+def _is_scalar_metadata(key: str, value: Any) -> bool:
+    if isinstance(value, bool | int | float):
+        return True
+    if isinstance(value, str):
+        if key.lower() in {"stdout", "stderr", "text", "code", "command"}:
+            return False
+        return "\n" not in value and len(value) <= 120
+    return False
 
 
 def _standalone_title(event: TrajectoryEvent) -> str:
@@ -1064,6 +1160,18 @@ class SkimApp(App):
         width: 2fr;
         height: 1fr;
         padding: 0 1;
+    }
+    .trajectory-detail-field {
+        padding: 0 1;
+    }
+    Collapsible.trajectory-section {
+        margin: 0 0 1 0;
+    }
+    Collapsible.trajectory-section-selected {
+        border: round $accent;
+    }
+    Collapsible.trajectory-section-secondary {
+        border: round $panel-lighten-1;
     }
     #status-bar {
         dock: bottom;

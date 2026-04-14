@@ -4,7 +4,7 @@ import json
 
 from rich.syntax import Syntax
 from rich.text import Text
-from textual.widgets import Markdown, Static, Tree
+from textual.widgets import Collapsible, Markdown, Static, Tree
 
 from skim import (
     PreviewPane,
@@ -193,15 +193,14 @@ async def test_selecting_trajectory_tree_node_updates_detail():
     viewer = TrajectoryViewer(sample_trajectory())
     app = SkimApp(path=".")
 
-    async with app.run_test():
+    async with app.run_test() as pilot:
         pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
         await pane.mount(viewer)
         tool_node = viewer._tree.root.children[2].children[2]
         viewer.on_tree_node_selected(Tree.NodeSelected(tool_node))
+        await pilot.pause()
 
-        assert "Tool:" in _detail_text(viewer)
-        assert "Input" in _detail_text(viewer)
-        assert "Output" in _detail_text(viewer)
+        assert _top_level_collapsible_titles(viewer) == ["Tool", "Input", "Output"]
         assert "ls -la" in _detail_text(viewer)
 
 
@@ -210,7 +209,7 @@ async def test_final_output_only_shows_when_selected():
     viewer = TrajectoryViewer(sample_trajectory())
     app = SkimApp(path=".")
 
-    async with app.run_test():
+    async with app.run_test() as pilot:
         pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
         await pane.mount(viewer)
 
@@ -218,6 +217,7 @@ async def test_final_output_only_shows_when_selected():
 
         final_node = viewer._tree.root.children[1]
         viewer.on_tree_node_selected(Tree.NodeSelected(final_node))
+        await pilot.pause()
 
         assert len(viewer._detail_wrap.query(Markdown)) >= 1
 
@@ -227,11 +227,12 @@ async def test_message_detail_renders_markdown():
     viewer = TrajectoryViewer(sample_trajectory())
     app = SkimApp(path=".")
 
-    async with app.run_test():
+    async with app.run_test() as pilot:
         pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
         await pane.mount(viewer)
         message_node = viewer._tree.root.children[2].children[1]
         viewer.on_tree_node_selected(Tree.NodeSelected(message_node))
+        await pilot.pause()
 
         assert len(viewer._detail_wrap.query(Markdown)) >= 1
 
@@ -241,17 +242,17 @@ async def test_selecting_tool_input_keeps_tool_metadata_visible():
     viewer = TrajectoryViewer(sample_trajectory())
     app = SkimApp(path=".")
 
-    async with app.run_test():
+    async with app.run_test() as pilot:
         pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
         await pane.mount(viewer)
         input_node = viewer._tree.root.children[2].children[2].children[0]
         viewer.on_tree_node_selected(Tree.NodeSelected(input_node))
+        await pilot.pause()
 
         detail = _detail_text(viewer)
         assert "Tool:" in detail
         assert "Call ID:" in detail
-        assert "Input" in detail
-        assert "Output" in detail
+        assert _top_level_collapsible_titles(viewer) == ["Tool", "Input", "Output"]
         assert "ls -la" in detail
 
 
@@ -260,18 +261,33 @@ async def test_selecting_tool_output_keeps_tool_metadata_visible():
     viewer = TrajectoryViewer(sample_trajectory())
     app = SkimApp(path=".")
 
-    async with app.run_test():
+    async with app.run_test() as pilot:
         pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
         await pane.mount(viewer)
         output_node = viewer._tree.root.children[2].children[2].children[1]
         viewer.on_tree_node_selected(Tree.NodeSelected(output_node))
+        await pilot.pause()
 
         detail = _detail_text(viewer)
         assert "Tool:" in detail
         assert "Call ID:" in detail
-        assert "Input" in detail
-        assert "Output" in detail
+        assert _top_level_collapsible_titles(viewer) == ["Tool", "Input", "Output"]
         assert "plain terminal output" in detail
+
+
+async def test_selecting_output_does_not_reorder_sections():
+    """Selecting Output keeps Input above Output in the detail pane."""
+    viewer = TrajectoryViewer(sample_trajectory())
+    app = SkimApp(path=".")
+
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        await pane.mount(viewer)
+        output_node = viewer._tree.root.children[2].children[2].children[1]
+        viewer.on_tree_node_selected(Tree.NodeSelected(output_node))
+        await pilot.pause()
+
+        assert _top_level_collapsible_titles(viewer) == ["Tool", "Input", "Output"]
 
 
 async def test_tool_result_detail_decodes_stdout_stderr_and_returncode():
@@ -279,17 +295,20 @@ async def test_tool_result_detail_decodes_stdout_stderr_and_returncode():
     viewer = TrajectoryViewer(sample_trajectory())
     app = SkimApp(path=".")
 
-    async with app.run_test():
+    async with app.run_test() as pilot:
         pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
         await pane.mount(viewer)
         result_node = viewer._tree.root.children[2].children[2].children[1]
         viewer.on_tree_node_selected(Tree.NodeSelected(result_node))
+        await pilot.pause()
 
         detail = _detail_text(viewer)
         assert "returncode" in detail
         assert "stdout" in detail
         assert "stderr" in detail
         assert "plain terminal output" in detail
+        assert "stdout" in _all_collapsible_titles(viewer)
+        assert "stderr" in _all_collapsible_titles(viewer)
 
 
 async def test_tool_result_detail_renders_json_stdout_as_syntax():
@@ -297,11 +316,12 @@ async def test_tool_result_detail_renders_json_stdout_as_syntax():
     viewer = TrajectoryViewer(sample_trajectory(stdout='{"alpha": [1, 2]}'))
     app = SkimApp(path=".")
 
-    async with app.run_test():
+    async with app.run_test() as pilot:
         pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
         await pane.mount(viewer)
         result_node = viewer._tree.root.children[2].children[2].children[1]
         viewer.on_tree_node_selected(Tree.NodeSelected(result_node))
+        await pilot.pause()
 
         syntax_blocks = [
             _static_content(widget)
@@ -317,11 +337,12 @@ async def test_tool_result_detail_renders_markdown_stdout():
     viewer = TrajectoryViewer(sample_trajectory(stdout=stdout))
     app = SkimApp(path=".")
 
-    async with app.run_test():
+    async with app.run_test() as pilot:
         pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
         await pane.mount(viewer)
         result_node = viewer._tree.root.children[2].children[2].children[1]
         viewer.on_tree_node_selected(Tree.NodeSelected(result_node))
+        await pilot.pause()
 
         assert len(viewer._detail_wrap.query(Markdown)) >= 1
 
@@ -333,15 +354,17 @@ async def test_tool_call_arguments_render_code_string_outside_json_blob():
     )
     app = SkimApp(path=".")
 
-    async with app.run_test():
+    async with app.run_test() as pilot:
         pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
         await pane.mount(viewer)
         tool_node = viewer._tree.root.children[2].children[2]
         viewer.on_tree_node_selected(Tree.NodeSelected(tool_node))
+        await pilot.pause()
 
         syntax_blocks = _detail_syntax_blocks(viewer)
         assert any("import pandas as pd" in block.code for block in syntax_blocks)
         assert not any('"code":' in block.code for block in syntax_blocks)
+        assert "code" in _all_collapsible_titles(viewer)
 
 
 async def test_tool_result_pages_render_as_readable_sections():
@@ -350,16 +373,18 @@ async def test_tool_result_pages_render_as_readable_sections():
     viewer = TrajectoryViewer(sample_trajectory(output=output))
     app = SkimApp(path=".")
 
-    async with app.run_test():
+    async with app.run_test() as pilot:
         pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
         await pane.mount(viewer)
         result_node = viewer._tree.root.children[2].children[2].children[1]
         viewer.on_tree_node_selected(Tree.NodeSelected(result_node))
+        await pilot.pause()
 
-        detail = _detail_text(viewer)
-        assert "Page 1" in detail
+        assert "pages" in _all_collapsible_titles(viewer)
+        assert "Page 1" in _all_collapsible_titles(viewer)
         assert len(viewer._detail_wrap.query(Markdown)) >= 1
         assert not any('"pages":' in block.code for block in _detail_syntax_blocks(viewer))
+        assert _collapsible_by_title(viewer, "pages").collapsed
 
 
 async def test_nested_output_text_stdout_promotes_inner_content():
@@ -368,16 +393,18 @@ async def test_nested_output_text_stdout_promotes_inner_content():
     viewer = TrajectoryViewer(sample_trajectory(output=output))
     app = SkimApp(path=".")
 
-    async with app.run_test():
+    async with app.run_test() as pilot:
         pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
         await pane.mount(viewer)
         result_node = viewer._tree.root.children[2].children[2].children[1]
         viewer.on_tree_node_selected(Tree.NodeSelected(result_node))
+        await pilot.pause()
 
         detail = _detail_text(viewer)
         assert "stdout" in detail
         assert len(viewer._detail_wrap.query(Markdown)) >= 1
         assert not any('"text":' in block.code for block in _detail_syntax_blocks(viewer))
+        assert "stdout" in _all_collapsible_titles(viewer)
 
 
 async def test_wrapper_promotion_keeps_scalar_sibling_metadata():
@@ -392,11 +419,12 @@ async def test_wrapper_promotion_keeps_scalar_sibling_metadata():
     viewer = TrajectoryViewer(sample_trajectory(output=output))
     app = SkimApp(path=".")
 
-    async with app.run_test():
+    async with app.run_test() as pilot:
         pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
         await pane.mount(viewer)
         result_node = viewer._tree.root.children[2].children[2].children[1]
         viewer.on_tree_node_selected(Tree.NodeSelected(result_node))
+        await pilot.pause()
 
         detail = _detail_text(viewer)
         assert "mime_type" in detail
@@ -409,11 +437,12 @@ async def test_machine_shaped_tool_payload_still_renders_as_json():
     viewer = TrajectoryViewer(sample_trajectory(arguments={"timeout": 10, "flags": [1, 2]}))
     app = SkimApp(path=".")
 
-    async with app.run_test():
+    async with app.run_test() as pilot:
         pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
         await pane.mount(viewer)
         tool_node = viewer._tree.root.children[2].children[2]
         viewer.on_tree_node_selected(Tree.NodeSelected(tool_node))
+        await pilot.pause()
 
         assert any('"timeout": 10' in block.code for block in _detail_syntax_blocks(viewer))
 
@@ -564,3 +593,18 @@ def _detail_syntax_blocks(viewer: TrajectoryViewer) -> list[Syntax]:
         for widget in viewer._detail_wrap.query(Static)
         if isinstance(_static_content(widget), Syntax)
     ]
+
+
+def _top_level_collapsible_titles(viewer: TrajectoryViewer) -> list[str]:
+    return [child.title for child in viewer._detail_wrap.children if isinstance(child, Collapsible)]
+
+
+def _all_collapsible_titles(viewer: TrajectoryViewer) -> list[str]:
+    return [widget.title for widget in viewer._detail_wrap.query(Collapsible)]
+
+
+def _collapsible_by_title(viewer: TrajectoryViewer, title: str) -> Collapsible:
+    for widget in viewer._detail_wrap.query(Collapsible):
+        if widget.title == title:
+            return widget
+    raise AssertionError(f"Collapsible with title {title!r} not found")
