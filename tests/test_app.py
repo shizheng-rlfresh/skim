@@ -287,6 +287,56 @@ async def test_tool_result_detail_renders_markdown_stdout():
         assert len(viewer._detail_wrap.query(Markdown)) >= 1
 
 
+async def test_tool_call_arguments_render_code_string_outside_json_blob():
+    """Code argument strings render as code instead of quoted JSON values."""
+    viewer = TrajectoryViewer(
+        sample_trajectory(arguments={"code": "import pandas as pd\nprint(pd.__version__)"})
+    )
+    app = SkimApp(path=".")
+
+    async with app.run_test():
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        await pane.mount(viewer)
+        tool_node = viewer._tree.root.children[2].children[2]
+        viewer.on_tree_node_selected(Tree.NodeSelected(tool_node))
+
+        syntax_blocks = _detail_syntax_blocks(viewer)
+        assert any("import pandas as pd" in block.code for block in syntax_blocks)
+        assert not any('"code":' in block.code for block in syntax_blocks)
+
+
+async def test_tool_result_pages_render_as_readable_sections():
+    """Nested page arrays render page text outside a JSON object."""
+    output = {"pages": ["## Page One\n\nUseful text"], "page_count": 1}
+    viewer = TrajectoryViewer(sample_trajectory(output=output))
+    app = SkimApp(path=".")
+
+    async with app.run_test():
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        await pane.mount(viewer)
+        result_node = viewer._tree.root.children[2].children[3]
+        viewer.on_tree_node_selected(Tree.NodeSelected(result_node))
+
+        detail = _detail_text(viewer)
+        assert "Page 1" in detail
+        assert len(viewer._detail_wrap.query(Markdown)) >= 1
+        assert not any('"pages":' in block.code for block in _detail_syntax_blocks(viewer))
+
+
+async def test_machine_shaped_tool_payload_still_renders_as_json():
+    """Machine-shaped dicts keep the compact JSON rendering fallback."""
+    viewer = TrajectoryViewer(sample_trajectory(arguments={"timeout": 10, "flags": [1, 2]}))
+    app = SkimApp(path=".")
+
+    async with app.run_test():
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        await pane.mount(viewer)
+        tool_node = viewer._tree.root.children[2].children[2]
+        viewer.on_tree_node_selected(Tree.NodeSelected(tool_node))
+
+        assert any('"timeout": 10' in block.code for block in _detail_syntax_blocks(viewer))
+
+
 def test_submission_json_uses_submission_summary(tmp_path):
     """Worker submission JSON uses the submission summary viewer."""
     test_file = tmp_path / "submission.json"
@@ -328,9 +378,16 @@ async def test_split_panes_keep_specialized_preview(tmp_path):
         assert isinstance(pane.query_one(TrajectoryViewer), TrajectoryViewer)
 
 
-def sample_trajectory(stdout: str = "plain terminal output"):
+def sample_trajectory(
+    stdout: str = "plain terminal output",
+    arguments: dict | None = None,
+    output: dict | None = None,
+):
     """Return a small raw trajectory fixture."""
-    output = {"stdout": stdout, "stderr": "warning text", "returncode": 0}
+    arguments = {"command": "ls -la"} if arguments is None else arguments
+    output = (
+        {"stdout": stdout, "stderr": "warning text", "returncode": 0} if output is None else output
+    )
     return {
         "metadata": {
             "trajectory_id": "traj-1",
@@ -368,7 +425,7 @@ def sample_trajectory(stdout: str = "plain terminal output"):
                         "type": "function_call",
                         "name": "syntara__executeBash",
                         "callId": "tool-1",
-                        "arguments": '{"command": "ls -la"}',
+                        "arguments": json.dumps(arguments),
                     },
                     {
                         "type": "function_call_result",
@@ -401,3 +458,11 @@ def _detail_text(viewer: TrajectoryViewer) -> str:
         else:
             parts.append(str(content))
     return "\n".join(parts)
+
+
+def _detail_syntax_blocks(viewer: TrajectoryViewer) -> list[Syntax]:
+    return [
+        _static_content(widget)
+        for widget in viewer._detail_wrap.query(Static)
+        if isinstance(_static_content(widget), Syntax)
+    ]

@@ -39,6 +39,19 @@ MAX_FILE_SIZE = 1_000_000
 MAX_ROWS = 2
 MAX_COLS = 3
 SCROLL_STEP = 3
+HUMAN_TEXT_KEYS = {
+    "arguments",
+    "code",
+    "command",
+    "content",
+    "markdown",
+    "output",
+    "pages",
+    "result",
+    "stderr",
+    "stdout",
+    "text",
+}
 SUBMISSION_KEYS = {
     "agentic_grader_guidance",
     "prompt",
@@ -349,17 +362,9 @@ def _function_call_detail_widgets(raw: dict[str, Any]) -> list[Widget]:
     decoded = _decode_nested_json(raw.get("arguments"))
 
     if isinstance(decoded, dict):
-        command = decoded.get("command")
-        rest = {key: value for key, value in decoded.items() if key != "command"}
-        if isinstance(command, str) and command.strip():
-            widgets.append(_detail_heading("Command"))
-            widgets.append(
-                Static(Syntax(command, "bash", word_wrap=True), classes="trajectory-detail")
-            )
-        if rest:
-            widgets.append(_detail_heading("Arguments"))
-            widgets.extend(_render_payload_detail(rest))
-        elif not isinstance(command, str):
+        if _has_human_text(decoded):
+            widgets.extend(_render_dict_sections(decoded))
+        else:
             widgets.extend(_render_payload_detail(decoded))
     else:
         widgets.extend(_render_payload_detail(decoded))
@@ -424,6 +429,8 @@ def _tool_identity_widgets(raw: dict[str, Any]) -> list[Widget]:
 def _render_payload_detail(value: Any) -> list[Widget]:
     decoded = _decode_nested_json(value)
     if isinstance(decoded, dict | list):
+        if _has_human_text(decoded):
+            return _render_structured_detail(decoded)
         return [
             Static(
                 Syntax(json.dumps(decoded, indent=2), "json", word_wrap=True),
@@ -441,6 +448,8 @@ def _render_string_detail(value: str) -> list[Widget]:
 
     decoded = _try_decode_json(value)
     if isinstance(decoded, dict | list):
+        if _has_human_text(decoded):
+            return _render_structured_detail(decoded)
         return [
             Static(
                 Syntax(json.dumps(decoded, indent=2), "json", word_wrap=True),
@@ -451,6 +460,123 @@ def _render_string_detail(value: str) -> list[Widget]:
     if _looks_like_markdown(value):
         return [Markdown(value, classes="trajectory-markdown")]
     return [Static(Text(value), classes="trajectory-detail")]
+
+
+def _render_structured_detail(value: Any) -> list[Widget]:
+    if isinstance(value, dict):
+        return _render_dict_sections(value)
+    if isinstance(value, list):
+        return _render_list_sections(value)
+    return _render_payload_detail(value)
+
+
+def _render_dict_sections(value: dict[str, Any]) -> list[Widget]:
+    widgets: list[Widget] = []
+    for key, item in value.items():
+        decoded = _decode_nested_json(item)
+        if _is_empty_value(decoded):
+            continue
+        widgets.append(_detail_heading(str(key)))
+        widgets.extend(_render_keyed_value(str(key), decoded))
+    if widgets:
+        return widgets
+    return _render_json_block(value)
+
+
+def _render_list_sections(value: list[Any]) -> list[Widget]:
+    if not _has_human_text(value):
+        return _render_json_block(value)
+
+    widgets: list[Widget] = []
+    for index, item in enumerate(value, start=1):
+        decoded = _decode_nested_json(item)
+        if _is_empty_value(decoded):
+            continue
+        widgets.append(_detail_heading(f"Item {index}"))
+        widgets.extend(_render_keyed_value("", decoded))
+    if widgets:
+        return widgets
+    return _render_json_block(value)
+
+
+def _render_keyed_value(key: str, value: Any) -> list[Widget]:
+    normalized_key = key.lower()
+    if isinstance(value, str):
+        return _render_keyed_string(normalized_key, value)
+    if isinstance(value, dict):
+        if _has_human_text(value):
+            return _render_dict_sections(value)
+        return _render_json_block(value)
+    if isinstance(value, list):
+        if normalized_key == "pages":
+            return _render_pages(value)
+        if _has_human_text(value):
+            return _render_list_sections(value)
+        return _render_json_block(value)
+    return [Static(Text(str(value)), classes="trajectory-detail")]
+
+
+def _render_keyed_string(key: str, value: str) -> list[Widget]:
+    decoded = _try_decode_json(value)
+    if isinstance(decoded, dict | list):
+        return (
+            _render_structured_detail(decoded)
+            if _has_human_text(decoded)
+            else _render_json_block(decoded)
+        )
+    if key == "command":
+        return [Static(Syntax(value, "bash", word_wrap=True), classes="trajectory-detail")]
+    if key == "code":
+        return [
+            Static(
+                Syntax(value, _guess_code_lexer(value), word_wrap=True), classes="trajectory-detail"
+            )
+        ]
+    return _render_string_detail(value)
+
+
+def _render_pages(value: list[Any]) -> list[Widget]:
+    widgets: list[Widget] = []
+    for index, item in enumerate(value, start=1):
+        decoded = _decode_nested_json(item)
+        widgets.append(_detail_heading(f"Page {index}"))
+        widgets.extend(_render_keyed_value("text", decoded))
+    return widgets or _render_json_block(value)
+
+
+def _render_json_block(value: Any) -> list[Widget]:
+    return [
+        Static(
+            Syntax(json.dumps(value, indent=2), "json", word_wrap=True),
+            classes="trajectory-detail",
+        )
+    ]
+
+
+def _has_human_text(value: Any) -> bool:
+    if isinstance(value, str):
+        return "\n" in value or _looks_like_markdown(value) or bool(value.strip())
+    if isinstance(value, dict):
+        return any(
+            str(key).lower() in HUMAN_TEXT_KEYS and _has_human_text(item)
+            for key, item in value.items()
+        )
+    if isinstance(value, list):
+        return any(_has_human_text(item) for item in value)
+    return False
+
+
+def _is_empty_value(value: Any) -> bool:
+    return value is None or value == "" or value == []
+
+
+def _guess_code_lexer(value: str) -> str:
+    stripped = value.lstrip()
+    if stripped.startswith(("import ", "from ", "def ", "class ")):
+        return "python"
+    if stripped.startswith(("#!", "set -", "cd ", "ls ", "find ")):
+        return "bash"
+    return "text"
 
 
 def _try_decode_json(value: str) -> Any:
