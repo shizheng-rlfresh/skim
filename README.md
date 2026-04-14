@@ -45,8 +45,8 @@ Syntax highlighting works for Python, JSON, JavaScript, TypeScript, HTML, CSS, Y
 uv add ruff pytest pytest-textual-snapshot --dev
 uv run skim-dev          # launch with CSS hot reload
 uv run pytest -v         # run tests
-uv run ruff check src/   # lint
-uv run ruff format src/  # format
+uv run ruff check .   # lint
+uv run ruff format .  # format
 ```
 
 ## License

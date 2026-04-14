@@ -260,7 +260,7 @@ dependencies = [
     { name = "textual", extra = ["syntax"] },
 ]
 
-[package.dev-dependencies]
+[package.optional-dependencies]
 dev = [
     { name = "pytest" },
     { name = "pytest-textual-snapshot" },
@@ -269,16 +269,13 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0.3" },
+    { name = "pytest-textual-snapshot", marker = "extra == 'dev'", specifier = ">=1.0.0" },
     { name = "rich", specifier = ">=15.0.0" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15.10" },
     { name = "textual", extras = ["syntax"], specifier = ">=8.2.3" },
 ]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pytest", specifier = ">=9.0.3" },
-    { name = "pytest-textual-snapshot", specifier = ">=1.0.0" },
-    { name = "ruff", specifier = ">=0.15.10" },
-]
+provides-extras = ["dev"]
 
 [[package]]
 name = "syrupy"

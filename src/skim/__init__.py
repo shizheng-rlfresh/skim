@@ -10,7 +10,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.events import Key
-from textual.widgets import DirectoryTree, Footer, Header, Markdown, Static
+from textual.widgets import DirectoryTree, Header, Markdown, Static
 
 SYNTAX_MAP = {
     ".py": "python",
@@ -121,19 +121,40 @@ class SkimApp(App):
     PreviewPane.active-pane {
         border: round $accent;
     }
+    #status-bar {
+        dock: bottom;
+        height: 1;
+        background: $surface;
+        color: $text-muted;
+        padding: 0 1;
+    }
+    .key {
+        background: $primary-background;
+        color: $text;
+        padding: 0 1;
+    }
     """
 
     BINDINGS = [
-        Binding("q", "quit", "Quit"),
-        Binding("s", "enter_split", "Split"),
-        Binding("d", "close_pane", "Close"),
-        Binding("w", "cycle_pane", "Next pane"),
-        # priority=True so these fire before any widget sees them
-        Binding("up", "scroll_up", "Scroll up", show=False, priority=True),
-        Binding("down", "scroll_down", "Scroll down", show=False, priority=True),
+        Binding("q", "quit", show=False),
+        Binding("up", "scroll_up", show=False, priority=True),
+        Binding("down", "scroll_down", show=False, priority=True),
         Binding("j", "scroll_down", show=False, priority=True),
         Binding("k", "scroll_up", show=False, priority=True),
+        Binding("s", "enter_split", show=False),
+        Binding("d", "close_pane", show=False),
+        Binding("w", "cycle_pane", show=False),
     ]
+
+    STATUS_TEXT = (
+        " [bold]q[/] Quit  "
+        "[bold]↑↓[/] Scroll  "
+        "[bold]⇧↑↓[/] Tree  "
+        "[bold]Enter[/] Open  "
+        "[bold]s[/]+arrow Split  "
+        "[bold]d[/] Close  "
+        "[bold]w[/] Next pane"
+    )
 
     def __init__(self, path: str | Path = "."):
         super().__init__()
@@ -164,7 +185,7 @@ class SkimApp(App):
         with Horizontal(id="outer"):
             yield DirectoryTree(str(self.browse_path))
             yield Vertical(id="preview-area")
-        yield Footer()
+        yield Static(self.STATUS_TEXT, id="status-bar")
 
     def on_mount(self) -> None:
         pid = self._new_pane_id()
@@ -198,15 +219,17 @@ class SkimApp(App):
         for pane in self.query(PreviewPane):
             pane.remove_class("active-pane")
         try:
-            self.query_one(f"#{self.active_pane_id}", PreviewPane).add_class(
-                "active-pane"
-            )
+            self.query_one(f"#{self.active_pane_id}", PreviewPane).add_class("active-pane")
         except Exception:
             pass
 
     # --- scrolling the active pane ---
 
     def action_scroll_down(self) -> None:
+        if self.split_mode:
+            self.split_mode = False
+            self._split("down")
+            return
         try:
             pane = self.query_one(f"#{self.active_pane_id}", PreviewPane)
             pane.scroll_relative(y=SCROLL_STEP, animate=False)
@@ -214,16 +237,30 @@ class SkimApp(App):
             pass
 
     def action_scroll_up(self) -> None:
+        if self.split_mode:
+            self.split_mode = False
+            self._split("up")
+            return
         try:
             pane = self.query_one(f"#{self.active_pane_id}", PreviewPane)
             pane.scroll_relative(y=-SCROLL_STEP, animate=False)
         except Exception:
             pass
 
-    # --- tree navigation via shift+arrows ---
+    # --- tree navigation ---
+
+    def action_tree_up(self) -> None:
+        self.query_one(DirectoryTree).action_cursor_up()
+
+    def action_tree_down(self) -> None:
+        self.query_one(DirectoryTree).action_cursor_down()
+
+    def action_tree_select(self) -> None:
+        self.query_one(DirectoryTree).action_select_cursor()
+
+    # --- split mode and tree nav key handler ---
 
     def on_key(self, event: Key) -> None:
-        # split mode: next key picks direction
         if self.split_mode:
             direction_map = {
                 "left": "left",
@@ -243,26 +280,23 @@ class SkimApp(App):
             event.stop()
             return
 
-        # shift+arrows navigate the file tree
-        tree = self.query_one(DirectoryTree)
+        # shift+arrows navigate the file tree, enter opens
         if event.key == "shift+down":
-            tree.action_cursor_down()
+            self.action_tree_down()
             event.prevent_default()
             event.stop()
         elif event.key == "shift+up":
-            tree.action_cursor_up()
+            self.action_tree_up()
             event.prevent_default()
             event.stop()
-        elif event.key == "shift+right" or event.key == "enter":
-            tree.action_select_cursor()
+        elif event.key == "enter":
+            self.action_tree_select()
             event.prevent_default()
             event.stop()
 
     # --- file selection ---
 
-    def on_directory_tree_file_selected(
-        self, event: DirectoryTree.FileSelected
-    ) -> None:
+    def on_directory_tree_file_selected(self, event: DirectoryTree.FileSelected) -> None:
         path = Path(event.path)
         pane = self.query_one(f"#{self.active_pane_id}", PreviewPane)
         pane.show_file(path)
@@ -336,6 +370,10 @@ class SkimApp(App):
         col_idx = min(c, len(self.grid[row_idx]) - 1)
         self.active_pane_id = self.grid[row_idx][col_idx]
         self._rebuild_layout()
+        try:
+            self.query_one(f"#{self.active_pane_id}", PreviewPane).focus()
+        except Exception:
+            pass
 
     # --- cycle panes ---
 
