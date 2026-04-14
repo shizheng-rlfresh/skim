@@ -3,7 +3,7 @@
 import json
 
 from rich.syntax import Syntax
-from textual.widgets import Static
+from textual.widgets import Static, Tree
 
 from skim import (
     PreviewPane,
@@ -143,6 +143,7 @@ def test_wrapped_trajectory_json_uses_trajectory_viewer(tmp_path):
     assert len(widgets) == 1
     assert isinstance(widgets[0], TrajectoryViewer)
     assert len(widgets[0].events) == 4
+    assert _tree_labels(widgets[0]._tree) == ["Metadata", "Final Output", "Step 1"]
 
 
 def test_bare_trajectory_json_uses_trajectory_viewer(tmp_path):
@@ -172,19 +173,52 @@ def test_normalize_events_extracts_supported_event_kinds():
     assert "ls -la" in events[2].excerpt
 
 
-async def test_clicking_trajectory_event_updates_detail():
-    """Clicking an event item updates the trajectory detail state."""
+def test_trajectory_tree_groups_step_events():
+    """Trajectory tree groups low-level events below their step."""
+    viewer = TrajectoryViewer(sample_trajectory())
+    step = viewer._tree.root.children[2]
+
+    assert _tree_labels(viewer._tree) == ["Metadata", "Final Output", "Step 1"]
+    event_labels = [child.label.plain for child in step.children]
+    assert event_labels[0] == "001 reasoning Need inspect files."
+    assert event_labels[1] == "002 message assistant I will inspect files."
+    assert event_labels[2].startswith("003 function_call syntara__executeBash")
+    assert "ls -la" in event_labels[2]
+    assert event_labels[3].startswith("004 function_call_result syntara__executeBash")
+    assert "stdout" in event_labels[3]
+
+
+async def test_selecting_trajectory_tree_node_updates_detail():
+    """Selecting a trajectory tree node updates the detail state."""
     viewer = TrajectoryViewer(sample_trajectory())
     app = SkimApp(path=".")
 
     async with app.run_test():
         pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
         await pane.mount(viewer)
-        await viewer._event_items[2].on_click()
+        tool_node = viewer._tree.root.children[2].children[2]
+        viewer.on_tree_node_selected(Tree.NodeSelected(tool_node))
 
-        assert viewer.selected_index == 2
         assert "function_call" in viewer.detail_text.plain
         assert "ls -la" in viewer.detail_text.plain
+
+
+async def test_final_output_only_shows_when_selected():
+    """Final output is a tree item rather than the initial detail content."""
+    viewer = TrajectoryViewer(sample_trajectory())
+    app = SkimApp(path=".")
+
+    async with app.run_test():
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        await pane.mount(viewer)
+
+        assert "## Final" not in viewer.detail_text.plain
+
+        final_node = viewer._tree.root.children[1]
+        viewer.on_tree_node_selected(Tree.NodeSelected(final_node))
+
+        assert "## Final" in viewer.detail_text.plain
+        assert "Done." in viewer.detail_text.plain
 
 
 def test_submission_json_uses_submission_summary(tmp_path):
@@ -273,3 +307,7 @@ def sample_trajectory():
 
 def _static_content(widget: Static):
     return widget._Static__content
+
+
+def _tree_labels(tree: Tree):
+    return [child.label.plain for child in tree.root.children]

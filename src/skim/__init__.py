@@ -13,7 +13,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.events import Key
 from textual.widget import Widget
-from textual.widgets import DirectoryTree, Header, Markdown, Static
+from textual.widgets import DirectoryTree, Header, Markdown, Static, Tree
 
 SYNTAX_MAP = {
     ".py": "python",
@@ -75,6 +75,16 @@ class TrajectoryEvent:
     label: str
     excerpt: str
     raw: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class TrajectoryTreeItem:
+    """Data attached to a trajectory tree node."""
+
+    kind: str
+    title: str
+    detail: Text
+    event: TrajectoryEvent | None = None
 
 
 def render_file(path: Path) -> list[Widget]:
@@ -141,6 +151,34 @@ def normalize_events(trajectory: dict[str, Any]) -> list[TrajectoryEvent]:
                 )
             )
     return events
+
+
+def normalize_step_events(trajectory: dict[str, Any]) -> list[list[TrajectoryEvent]]:
+    """Return normalized events grouped by top-level step."""
+    groups: list[list[TrajectoryEvent]] = []
+    steps = trajectory.get("steps")
+    if not isinstance(steps, list):
+        return groups
+
+    index = 0
+    for step in steps:
+        group: list[TrajectoryEvent] = []
+        if isinstance(step, dict) and isinstance(step.get("output"), list):
+            for output in step["output"]:
+                if not isinstance(output, dict):
+                    continue
+                kind = str(output.get("type") or "event")
+                event = TrajectoryEvent(
+                    index=index,
+                    kind=kind,
+                    label=_event_label(output),
+                    excerpt=_event_excerpt(output),
+                    raw=output,
+                )
+                group.append(event)
+                index += 1
+        groups.append(group)
+    return groups
 
 
 def _specialized_json_widget(data: Any) -> Widget | None:
@@ -235,7 +273,7 @@ def _format_payload(value: Any) -> str:
     return str(decoded)
 
 
-def _metadata_summary(trajectory: dict[str, Any]) -> str:
+def _metadata_lines(trajectory: dict[str, Any]) -> list[str]:
     metadata = trajectory.get("metadata")
     if not isinstance(metadata, dict):
         metadata = {}
@@ -246,7 +284,7 @@ def _metadata_summary(trajectory: dict[str, Any]) -> str:
     compactions = trajectory.get("context_compaction_events")
     compaction_count = len(compactions) if isinstance(compactions, list) else 0
 
-    lines = ["Trajectory"]
+    lines = []
     if model_line:
         lines.append(f"model: {model_line}")
     for key in ("trajectory_id", "task_id", "input_tokens", "output_tokens"):
@@ -254,11 +292,20 @@ def _metadata_summary(trajectory: dict[str, Any]) -> str:
         if value is not None:
             lines.append(f"{key}: {value}")
     lines.append(f"compactions: {compaction_count}")
+    return lines
 
-    final_output = trajectory.get("final_output")
-    if isinstance(final_output, str) and final_output.strip():
-        lines.extend(["", "Final Output", _clip(final_output.strip(), 4_000)])
-    return "\n".join(lines)
+
+def _metadata_header(trajectory: dict[str, Any]) -> str:
+    lines = _metadata_lines(trajectory)
+    if not lines:
+        return "Trajectory"
+    return "Trajectory | " + " | ".join(lines[:3])
+
+
+def _metadata_detail(trajectory: dict[str, Any]) -> Text:
+    lines = ["Metadata", ""]
+    lines.extend(_metadata_lines(trajectory))
+    return Text("\n".join(lines))
 
 
 def _event_detail(event: TrajectoryEvent) -> Text:
@@ -276,6 +323,18 @@ def _event_detail(event: TrajectoryEvent) -> Text:
     return Text("\n".join(line for line in lines if line is not None))
 
 
+def _final_output_detail(trajectory: dict[str, Any]) -> Text:
+    final_output = trajectory.get("final_output")
+    if isinstance(final_output, str) and final_output.strip():
+        return Text(final_output.strip())
+    return Text("No final output")
+
+
+def _event_tree_label(event: TrajectoryEvent) -> str:
+    label = f" {event.label}" if event.label else ""
+    return f"{event.index + 1:03d} {event.kind}{label} {event.excerpt}"
+
+
 def _format_submission(data: dict[str, Any]) -> Text:
     lines = ["Submission Summary"]
     for key, title in SUBMISSION_SECTIONS:
@@ -286,32 +345,6 @@ def _format_submission(data: dict[str, Any]) -> Text:
     return Text("\n".join(lines))
 
 
-class TrajectoryEventItem(Static):
-    """Clickable item for a normalized trajectory event."""
-
-    def __init__(
-        self, event: TrajectoryEvent, viewer: "TrajectoryViewer", selected: bool = False
-    ) -> None:
-        """Initialize an event row."""
-        self.event = event
-        self.viewer = viewer
-        super().__init__(self._render_row(selected=selected), classes="trajectory-event")
-
-    async def on_click(self) -> None:
-        """Select this event in the parent trajectory viewer."""
-        self.viewer.select_event(self.event.index)
-
-    def _set_selected(self, selected: bool) -> None:
-        self.update(self._render_row(selected=selected))
-
-    def _render_row(self, selected: bool) -> Text:
-        marker = ">" if selected else " "
-        label = f" {self.event.label}" if self.event.label else ""
-        return Text(
-            f"{marker} {self.event.index + 1:03d} {self.event.kind}{label} {self.event.excerpt}"
-        )
-
-
 class TrajectoryViewer(Vertical):
     """Structured preview for a single raw trajectory."""
 
@@ -319,34 +352,63 @@ class TrajectoryViewer(Vertical):
         """Initialize the trajectory viewer."""
         super().__init__(classes="trajectory-viewer")
         self.trajectory = trajectory
+        self.step_events = normalize_step_events(trajectory)
         self.events = normalize_events(trajectory)
-        self.selected_index = 0 if self.events else -1
-        self._summary = Static(Text(_metadata_summary(trajectory)), classes="trajectory-summary")
-        self.detail_text = _event_detail(self.events[0]) if self.events else Text("No events")
+        self._summary = Static(Text(_metadata_header(trajectory)), classes="trajectory-summary")
+        self.detail_text = _metadata_detail(trajectory)
         self._detail = Static(self.detail_text, classes="trajectory-detail")
-        self._event_items = [
-            TrajectoryEventItem(event, self, selected=event.index == self.selected_index)
-            for event in self.events
-        ]
+        self._tree: Tree[TrajectoryTreeItem] = Tree("Trajectory", classes="trajectory-tree")
+        self._build_tree()
 
     def compose(self) -> ComposeResult:
-        """Compose the trajectory summary, event list, and detail panel."""
+        """Compose the trajectory summary, event tree, and detail panel."""
         yield self._summary
         with Horizontal(classes="trajectory-body"):
-            with VerticalScroll(classes="trajectory-events"):
-                yield from self._event_items
+            yield self._tree
             with VerticalScroll(classes="trajectory-detail-wrap"):
                 yield self._detail
 
-    def select_event(self, index: int) -> None:
-        """Select an event and update the detail panel."""
-        if index < 0 or index >= len(self.events):
-            return
-        self.selected_index = index
-        for item in self._event_items:
-            item._set_selected(item.event.index == index)
-        self.detail_text = _event_detail(self.events[index])
-        self._detail.update(self.detail_text)
+    def on_tree_node_selected(self, event: Tree.NodeSelected[TrajectoryTreeItem]) -> None:
+        """Update detail when a trajectory tree node is selected."""
+        item = event.node.data
+        if isinstance(item, TrajectoryTreeItem):
+            self.detail_text = item.detail
+            self._detail.update(self.detail_text)
+        event.stop()
+
+    def _build_tree(self) -> None:
+        """Populate the trajectory tree."""
+        self._tree.root.expand()
+        self._tree.root.add_leaf(
+            "Metadata",
+            data=TrajectoryTreeItem("metadata", "Metadata", _metadata_detail(self.trajectory)),
+        )
+        self._tree.root.add_leaf(
+            "Final Output",
+            data=TrajectoryTreeItem(
+                "final_output", "Final Output", _final_output_detail(self.trajectory)
+            ),
+        )
+        for step_index, events in enumerate(self.step_events, start=1):
+            step = self._tree.root.add(
+                f"Step {step_index}",
+                data=TrajectoryTreeItem(
+                    "step",
+                    f"Step {step_index}",
+                    Text(f"Step {step_index}\n\n{len(events)} events"),
+                ),
+                expand=True,
+            )
+            for event in events:
+                step.add_leaf(
+                    _event_tree_label(event),
+                    data=TrajectoryTreeItem(
+                        "event",
+                        _event_tree_label(event),
+                        _event_detail(event),
+                        event=event,
+                    ),
+                )
 
 
 class SubmissionSummary(Static):
@@ -415,6 +477,22 @@ class SkimApp(App):
     }
     PreviewPane.active-pane {
         border: round $accent;
+    }
+    TrajectoryViewer {
+        width: 1fr;
+    }
+    .trajectory-body {
+        height: 1fr;
+    }
+    .trajectory-tree {
+        width: 1fr;
+        min-width: 28;
+        height: 1fr;
+    }
+    .trajectory-detail-wrap {
+        width: 2fr;
+        height: 1fr;
+        padding: 0 1;
     }
     #status-bar {
         dock: bottom;
