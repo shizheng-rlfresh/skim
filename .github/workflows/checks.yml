@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
+  checks:
     runs-on: ubuntu-latest
 
     steps:
@@ -29,6 +29,9 @@ jobs:
 
       - name: Install dependencies
         run: uv sync --extra dev --locked
+
+      - name: Run lint
+        run: uv run ruff check src/ tests/
 
       - name: Run tests
         run: uv run pytest -v

@@ -74,15 +74,18 @@ class PreviewPane(VerticalScroll, can_focus=True):
     """Scrollable panel that shows file contents."""
 
     def __init__(self, **kwargs) -> None:
+        """Initialize an empty preview pane."""
         super().__init__(**kwargs)
         self.current_path: Path | None = None
 
     def show_placeholder(self, message: str = "Select a file") -> None:
+        """Show placeholder text when no file is selected."""
         self.current_path = None
         self.remove_children()
         self.mount(Static(Text(message, style="dim italic")))
 
     def show_file(self, path: Path) -> None:
+        """Render a file into the pane."""
         self.current_path = path
         self.remove_children()
         for widget in render_file(path):
@@ -90,6 +93,7 @@ class PreviewPane(VerticalScroll, can_focus=True):
         self.scroll_home(animate=False)
 
     def on_click(self) -> None:
+        """Mark this pane as the active preview when clicked."""
         self.app.set_active_pane(self.id)
 
 
@@ -157,6 +161,7 @@ class SkimApp(App):
     )
 
     def __init__(self, path: str | Path = "."):
+        """Initialize the app for a directory path."""
         super().__init__()
         self.browse_path = Path(path).expanduser().resolve()
         self.pane_counter = 0
@@ -181,6 +186,7 @@ class SkimApp(App):
         return None, None
 
     def compose(self) -> ComposeResult:
+        """Compose the directory tree and preview area."""
         yield Header()
         with Horizontal(id="outer"):
             yield DirectoryTree(str(self.browse_path))
@@ -188,6 +194,7 @@ class SkimApp(App):
         yield Static(self.STATUS_TEXT, id="status-bar")
 
     def on_mount(self) -> None:
+        """Create the first preview pane and focus the tree."""
         pid = self._new_pane_id()
         self.grid = [[pid]]
         self.pane_files[pid] = None
@@ -196,9 +203,10 @@ class SkimApp(App):
         self.query_one(DirectoryTree).focus()
 
     def _rebuild_layout(self) -> None:
+        """Rebuild the preview pane grid from current state."""
         area = self.query_one("#preview-area")
         area.remove_children()
-        for r, row in enumerate(self.grid):
+        for row in self.grid:
             h = Horizontal(classes="pane-row")
             area.mount(h)
             for pid in row:
@@ -212,6 +220,7 @@ class SkimApp(App):
         self._update_active_indicator()
 
     def set_active_pane(self, pane_id: str) -> None:
+        """Set the active preview pane by id."""
         self.active_pane_id = pane_id
         self._update_active_indicator()
 
@@ -226,6 +235,7 @@ class SkimApp(App):
     # --- scrolling the active pane ---
 
     def action_scroll_down(self) -> None:
+        """Scroll down in the active pane or confirm a downward split."""
         if self.split_mode:
             self.split_mode = False
             self._split("down")
@@ -237,6 +247,7 @@ class SkimApp(App):
             pass
 
     def action_scroll_up(self) -> None:
+        """Scroll up in the active pane or confirm an upward split."""
         if self.split_mode:
             self.split_mode = False
             self._split("up")
@@ -250,17 +261,21 @@ class SkimApp(App):
     # --- tree navigation ---
 
     def action_tree_up(self) -> None:
+        """Move the directory tree cursor up."""
         self.query_one(DirectoryTree).action_cursor_up()
 
     def action_tree_down(self) -> None:
+        """Move the directory tree cursor down."""
         self.query_one(DirectoryTree).action_cursor_down()
 
     def action_tree_select(self) -> None:
+        """Open the currently selected tree item."""
         self.query_one(DirectoryTree).action_select_cursor()
 
     # --- split mode and tree nav key handler ---
 
     def on_key(self, event: Key) -> None:
+        """Handle split-mode keys and tree navigation shortcuts."""
         if self.split_mode:
             direction_map = {
                 "left": "left",
@@ -297,6 +312,7 @@ class SkimApp(App):
     # --- file selection ---
 
     def on_directory_tree_file_selected(self, event: DirectoryTree.FileSelected) -> None:
+        """Open a selected file in the active preview pane."""
         path = Path(event.path)
         pane = self.query_one(f"#{self.active_pane_id}", PreviewPane)
         pane.show_file(path)
@@ -305,6 +321,7 @@ class SkimApp(App):
     # --- split ---
 
     def action_enter_split(self) -> None:
+        """Enter split mode for the next direction key."""
         if self._total_panes() >= MAX_ROWS * MAX_COLS:
             self.notify("Maximum 6 panes reached", severity="warning")
             return
@@ -353,6 +370,7 @@ class SkimApp(App):
     # --- close pane ---
 
     def action_close_pane(self) -> None:
+        """Close the active pane unless it is the last one."""
         if self._total_panes() <= 1:
             self.notify("Cannot close last pane", severity="warning")
             return
@@ -378,6 +396,7 @@ class SkimApp(App):
     # --- cycle panes ---
 
     def action_cycle_pane(self) -> None:
+        """Cycle the active pane through the current grid order."""
         all_panes = [pid for row in self.grid for pid in row]
         if len(all_panes) <= 1:
             return
@@ -387,12 +406,14 @@ class SkimApp(App):
 
 
 def main():
+    """Run the app from the command line."""
     path = sys.argv[1] if len(sys.argv) > 1 else "."
     app = SkimApp(path)
     app.run()
 
 
 def dev():
+    """Run the app through Textual's dev server."""
     import subprocess
 
     subprocess.run(["textual", "run", "--dev", "skim:SkimApp"])
