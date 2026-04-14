@@ -3,7 +3,8 @@
 import json
 
 from rich.syntax import Syntax
-from textual.widgets import Static, Tree
+from rich.text import Text
+from textual.widgets import Markdown, Static, Tree
 
 from skim import (
     PreviewPane,
@@ -180,8 +181,8 @@ def test_trajectory_tree_groups_step_events():
 
     assert _tree_labels(viewer._tree) == ["Metadata", "Final Output", "Step 1"]
     event_labels = [child.label.plain for child in step.children]
-    assert event_labels[0] == "001 reasoning Need inspect files."
-    assert event_labels[1] == "002 message assistant I will inspect files."
+    assert event_labels[0].startswith("001 reasoning Need inspect files.")
+    assert event_labels[1].startswith("002 message assistant I will inspect files.")
     assert event_labels[2].startswith("003 function_call syntara__executeBash")
     assert "ls -la" in event_labels[2]
     assert event_labels[3].startswith("004 function_call_result syntara__executeBash")
@@ -199,8 +200,8 @@ async def test_selecting_trajectory_tree_node_updates_detail():
         tool_node = viewer._tree.root.children[2].children[2]
         viewer.on_tree_node_selected(Tree.NodeSelected(tool_node))
 
-        assert "function_call" in viewer.detail_text.plain
-        assert "ls -la" in viewer.detail_text.plain
+        assert "function_call" in _detail_text(viewer)
+        assert "ls -la" in _detail_text(viewer)
 
 
 async def test_final_output_only_shows_when_selected():
@@ -212,13 +213,78 @@ async def test_final_output_only_shows_when_selected():
         pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
         await pane.mount(viewer)
 
-        assert "## Final" not in viewer.detail_text.plain
+        assert "## Final" not in _detail_text(viewer)
 
         final_node = viewer._tree.root.children[1]
         viewer.on_tree_node_selected(Tree.NodeSelected(final_node))
 
-        assert "## Final" in viewer.detail_text.plain
-        assert "Done." in viewer.detail_text.plain
+        assert len(viewer._detail_wrap.query(Markdown)) >= 1
+
+
+async def test_message_detail_renders_markdown():
+    """Message strings render as Markdown when selected."""
+    viewer = TrajectoryViewer(sample_trajectory())
+    app = SkimApp(path=".")
+
+    async with app.run_test():
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        await pane.mount(viewer)
+        message_node = viewer._tree.root.children[2].children[1]
+        viewer.on_tree_node_selected(Tree.NodeSelected(message_node))
+
+        assert len(viewer._detail_wrap.query(Markdown)) >= 1
+
+
+async def test_tool_result_detail_decodes_stdout_stderr_and_returncode():
+    """Tool results expose decoded stdout, stderr, and return code sections."""
+    viewer = TrajectoryViewer(sample_trajectory())
+    app = SkimApp(path=".")
+
+    async with app.run_test():
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        await pane.mount(viewer)
+        result_node = viewer._tree.root.children[2].children[3]
+        viewer.on_tree_node_selected(Tree.NodeSelected(result_node))
+
+        detail = _detail_text(viewer)
+        assert "returncode" in detail
+        assert "stdout" in detail
+        assert "stderr" in detail
+        assert "plain terminal output" in detail
+
+
+async def test_tool_result_detail_renders_json_stdout_as_syntax():
+    """JSON-like stdout is shown as formatted JSON."""
+    viewer = TrajectoryViewer(sample_trajectory(stdout='{"alpha": [1, 2]}'))
+    app = SkimApp(path=".")
+
+    async with app.run_test():
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        await pane.mount(viewer)
+        result_node = viewer._tree.root.children[2].children[3]
+        viewer.on_tree_node_selected(Tree.NodeSelected(result_node))
+
+        syntax_blocks = [
+            _static_content(widget)
+            for widget in viewer._detail_wrap.query(Static)
+            if isinstance(_static_content(widget), Syntax)
+        ]
+        assert any('"alpha": [' in block.code for block in syntax_blocks)
+
+
+async def test_tool_result_detail_renders_markdown_stdout():
+    """Markdown and fenced code stdout render through Markdown."""
+    stdout = "## Report\n\n```python\nprint('hi')\n```"
+    viewer = TrajectoryViewer(sample_trajectory(stdout=stdout))
+    app = SkimApp(path=".")
+
+    async with app.run_test():
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        await pane.mount(viewer)
+        result_node = viewer._tree.root.children[2].children[3]
+        viewer.on_tree_node_selected(Tree.NodeSelected(result_node))
+
+        assert len(viewer._detail_wrap.query(Markdown)) >= 1
 
 
 def test_submission_json_uses_submission_summary(tmp_path):
@@ -262,8 +328,9 @@ async def test_split_panes_keep_specialized_preview(tmp_path):
         assert isinstance(pane.query_one(TrajectoryViewer), TrajectoryViewer)
 
 
-def sample_trajectory():
+def sample_trajectory(stdout: str = "plain terminal output"):
     """Return a small raw trajectory fixture."""
+    output = {"stdout": stdout, "stderr": "warning text", "returncode": 0}
     return {
         "metadata": {
             "trajectory_id": "traj-1",
@@ -280,12 +347,22 @@ def sample_trajectory():
                 "output": [
                     {
                         "type": "reasoning",
-                        "content": [{"type": "input_text", "text": "Need inspect files."}],
+                        "content": [
+                            {
+                                "type": "input_text",
+                                "text": "Need inspect files.\n\n- Check data",
+                            }
+                        ],
                     },
                     {
                         "type": "message",
                         "role": "assistant",
-                        "content": [{"type": "output_text", "text": "I will inspect files."}],
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": "I will inspect files.\n\n```bash\nls -la\n```",
+                            }
+                        ],
                     },
                     {
                         "type": "function_call",
@@ -297,7 +374,7 @@ def sample_trajectory():
                         "type": "function_call_result",
                         "name": "syntara__executeBash",
                         "callId": "tool-1",
-                        "output": {"text": '{"stdout": "ok", "returncode": 0}'},
+                        "output": {"text": json.dumps(output)},
                     },
                 ]
             }
@@ -311,3 +388,16 @@ def _static_content(widget: Static):
 
 def _tree_labels(tree: Tree):
     return [child.label.plain for child in tree.root.children]
+
+
+def _detail_text(viewer: TrajectoryViewer) -> str:
+    parts = []
+    for widget in viewer._detail_wrap.query(Static):
+        content = _static_content(widget)
+        if isinstance(content, Text):
+            parts.append(content.plain)
+        elif isinstance(content, Syntax):
+            parts.append(content.code)
+        else:
+            parts.append(str(content))
+    return "\n".join(parts)

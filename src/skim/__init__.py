@@ -83,7 +83,7 @@ class TrajectoryTreeItem:
 
     kind: str
     title: str
-    detail: Text
+    detail: Any
     event: TrajectoryEvent | None = None
 
 
@@ -308,26 +308,172 @@ def _metadata_detail(trajectory: dict[str, Any]) -> Text:
     return Text("\n".join(lines))
 
 
-def _event_detail(event: TrajectoryEvent) -> Text:
-    lines = [
-        f"{event.index + 1}. {event.kind}",
-        f"label: {event.label}" if event.label else "",
-        "",
-    ]
-
-    text = _event_text(event.raw)
-    if text:
-        lines.append(text)
-    else:
-        lines.append(_format_payload(_event_payload(event.raw)))
-    return Text("\n".join(line for line in lines if line is not None))
-
-
-def _final_output_detail(trajectory: dict[str, Any]) -> Text:
+def _final_output_detail(trajectory: dict[str, Any]) -> str:
     final_output = trajectory.get("final_output")
     if isinstance(final_output, str) and final_output.strip():
-        return Text(final_output.strip())
-    return Text("No final output")
+        return final_output.strip()
+    return "No final output"
+
+
+def _detail_widgets_for_item(item: TrajectoryTreeItem) -> list[Widget]:
+    if item.event is not None:
+        return _event_detail_widgets(item.event)
+    if isinstance(item.detail, Text):
+        return [Static(item.detail, classes="trajectory-detail")]
+    if isinstance(item.detail, str):
+        return _render_string_detail(item.detail)
+    return _render_payload_detail(item.detail)
+
+
+def _event_detail_widgets(event: TrajectoryEvent) -> list[Widget]:
+    header = Text(f"{event.index + 1}. {event.kind}")
+    if event.label:
+        header.append(f"\nlabel: {event.label}")
+    widgets: list[Widget] = [Static(header, classes="trajectory-detail-heading")]
+
+    if event.kind == "function_call":
+        widgets.extend(_function_call_detail_widgets(event.raw))
+    elif event.kind == "function_call_result":
+        widgets.extend(_function_call_result_detail_widgets(event.raw))
+    else:
+        text = _event_text(event.raw)
+        if text:
+            widgets.extend(_render_string_detail(text))
+        else:
+            widgets.extend(_render_payload_detail(_event_payload(event.raw)))
+    return widgets
+
+
+def _function_call_detail_widgets(raw: dict[str, Any]) -> list[Widget]:
+    widgets = _tool_identity_widgets(raw)
+    decoded = _decode_nested_json(raw.get("arguments"))
+
+    if isinstance(decoded, dict):
+        command = decoded.get("command")
+        rest = {key: value for key, value in decoded.items() if key != "command"}
+        if isinstance(command, str) and command.strip():
+            widgets.append(_detail_heading("Command"))
+            widgets.append(
+                Static(Syntax(command, "bash", word_wrap=True), classes="trajectory-detail")
+            )
+        if rest:
+            widgets.append(_detail_heading("Arguments"))
+            widgets.extend(_render_payload_detail(rest))
+        elif not isinstance(command, str):
+            widgets.extend(_render_payload_detail(decoded))
+    else:
+        widgets.extend(_render_payload_detail(decoded))
+    return widgets
+
+
+def _function_call_result_detail_widgets(raw: dict[str, Any]) -> list[Widget]:
+    widgets = _tool_identity_widgets(raw)
+    decoded = _decoded_tool_result(raw.get("output"))
+
+    if isinstance(decoded, dict):
+        handled = False
+        for key in ("returncode", "stdout", "stderr"):
+            if key not in decoded:
+                continue
+            handled = True
+            widgets.append(_detail_heading(key))
+            value = decoded[key]
+            if isinstance(value, str):
+                widgets.extend(_render_string_detail(value))
+            else:
+                widgets.extend(_render_payload_detail(value))
+        rest = {
+            key: value
+            for key, value in decoded.items()
+            if key not in {"returncode", "stdout", "stderr"}
+        }
+        if rest:
+            widgets.append(_detail_heading("Output"))
+            widgets.extend(_render_payload_detail(rest))
+        if handled:
+            return widgets
+
+    widgets.extend(_render_payload_detail(decoded))
+    return widgets
+
+
+def _decoded_tool_result(output: Any) -> Any:
+    decoded = _decode_nested_json(output)
+    if isinstance(decoded, dict) and set(decoded) == {"text"}:
+        return decoded["text"]
+    if (
+        isinstance(decoded, dict)
+        and isinstance(decoded.get("text"), dict)
+        and any(key in decoded["text"] for key in ("stdout", "stderr", "returncode"))
+    ):
+        return {**decoded, **decoded["text"]}
+    return decoded
+
+
+def _tool_identity_widgets(raw: dict[str, Any]) -> list[Widget]:
+    lines = []
+    for key in ("name", "callId", "call_id"):
+        value = raw.get(key)
+        if value:
+            lines.append(f"{key}: {value}")
+    if not lines:
+        return []
+    return [Static(Text("\n".join(lines)), classes="trajectory-detail")]
+
+
+def _render_payload_detail(value: Any) -> list[Widget]:
+    decoded = _decode_nested_json(value)
+    if isinstance(decoded, dict | list):
+        return [
+            Static(
+                Syntax(json.dumps(decoded, indent=2), "json", word_wrap=True),
+                classes="trajectory-detail",
+            )
+        ]
+    if decoded is None:
+        return [Static(Text(""))]
+    return _render_string_detail(str(decoded))
+
+
+def _render_string_detail(value: str) -> list[Widget]:
+    if not value:
+        return [Static(Text(""))]
+
+    decoded = _try_decode_json(value)
+    if isinstance(decoded, dict | list):
+        return [
+            Static(
+                Syntax(json.dumps(decoded, indent=2), "json", word_wrap=True),
+                classes="trajectory-detail",
+            )
+        ]
+
+    if _looks_like_markdown(value):
+        return [Markdown(value, classes="trajectory-markdown")]
+    return [Static(Text(value), classes="trajectory-detail")]
+
+
+def _try_decode_json(value: str) -> Any:
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return None
+
+
+def _looks_like_markdown(value: str) -> bool:
+    lines = value.splitlines()
+    if "```" in value:
+        return True
+    return any(
+        line.startswith(("# ", "## ", "### ", "> ", "- ", "* "))
+        or "| " in line
+        or line[:3].isdigit()
+        for line in lines
+    )
+
+
+def _detail_heading(label: str) -> Static:
+    return Static(Text(label, style="bold"), classes="trajectory-detail-heading")
 
 
 def _event_tree_label(event: TrajectoryEvent) -> str:
@@ -355,26 +501,33 @@ class TrajectoryViewer(Vertical):
         self.step_events = normalize_step_events(trajectory)
         self.events = normalize_events(trajectory)
         self._summary = Static(Text(_metadata_header(trajectory)), classes="trajectory-summary")
-        self.detail_text = _metadata_detail(trajectory)
-        self._detail = Static(self.detail_text, classes="trajectory-detail")
         self._tree: Tree[TrajectoryTreeItem] = Tree("Trajectory", classes="trajectory-tree")
         self._build_tree()
+        first_item = self._tree.root.children[0].data
+        initial_widgets: list[Widget] = []
+        if isinstance(first_item, TrajectoryTreeItem):
+            initial_widgets = _detail_widgets_for_item(first_item)
+        self._detail_wrap = VerticalScroll(*initial_widgets, classes="trajectory-detail-wrap")
 
     def compose(self) -> ComposeResult:
         """Compose the trajectory summary, event tree, and detail panel."""
         yield self._summary
         with Horizontal(classes="trajectory-body"):
             yield self._tree
-            with VerticalScroll(classes="trajectory-detail-wrap"):
-                yield self._detail
+            yield self._detail_wrap
 
     def on_tree_node_selected(self, event: Tree.NodeSelected[TrajectoryTreeItem]) -> None:
         """Update detail when a trajectory tree node is selected."""
         item = event.node.data
         if isinstance(item, TrajectoryTreeItem):
-            self.detail_text = item.detail
-            self._detail.update(self.detail_text)
+            self._show_detail(item)
         event.stop()
+
+    def _show_detail(self, item: TrajectoryTreeItem) -> None:
+        """Replace the detail pane with widgets for the selected tree item."""
+        self._detail_wrap.remove_children()
+        self._detail_wrap.mount(*_detail_widgets_for_item(item))
+        self._detail_wrap.scroll_home(animate=False)
 
     def _build_tree(self) -> None:
         """Populate the trajectory tree."""
@@ -405,7 +558,7 @@ class TrajectoryViewer(Vertical):
                     data=TrajectoryTreeItem(
                         "event",
                         _event_tree_label(event),
-                        _event_detail(event),
+                        None,
                         event=event,
                     ),
                 )
