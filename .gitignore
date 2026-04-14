@@ -9,10 +9,11 @@ build/
 *.so
 .DS_Store
 .textual/
-AGENTS.md
 CLAUDE.md
 .claude
-.codex
+.codex/*
+!.codex/skills/
+!.codex/skills/**
 docs/v1/
 data/
 .ruff_cache/

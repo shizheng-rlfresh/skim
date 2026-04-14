@@ -1,0 +1,4 @@
+interface:
+  display_name: "Trajectory Review UI"
+  short_description: "Build skim views for local review artifacts"
+  default_prompt: "Use $trajectory-review-ui to add or refine skim's local trajectory and submission review surfaces."
