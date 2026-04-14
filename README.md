@@ -41,16 +41,6 @@ You can have up to 6 panes arranged in a 2 row by 3 column grid. Press `s` follo
 
 Syntax highlighting works for Python, JSON, JavaScript, TypeScript, HTML, CSS, YAML, TOML, Bash, Rust, Go, SQL, XML, and CSV. Markdown files are rendered with formatting. JSON files are pretty printed automatically. Files over 1MB are skipped to keep things responsive.
 
-## Development
-
-```bash
-uv sync --extra dev
-uv run skim-dev          # launch with CSS hot reload
-uv run pytest            # run tests
-uv run ruff check .      # lint
-uv run ruff format --check .  # format check
-```
-
 ## License
 
 MIT
