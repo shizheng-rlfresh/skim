@@ -545,7 +545,9 @@ async def test_scroll_keys_scroll_trajectory_detail_panel():
         pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
         await pane.mount(viewer)
         output_node = viewer._tree.root.children[2].children[2].children[1]
-        viewer.on_tree_node_selected(Tree.NodeSelected(output_node))
+        await pilot.pause()
+        viewer._tree.move_cursor(output_node, animate=False)
+        await pilot.press("enter")
         await pilot.pause()
 
         before = viewer._detail_wrap.scroll_y
@@ -553,6 +555,60 @@ async def test_scroll_keys_scroll_trajectory_detail_panel():
         await pilot.pause()
 
         assert viewer._detail_wrap.scroll_y > before
+
+
+async def test_trajectory_viewer_arrows_drive_tree_until_enter():
+    """Trajectory previews should use arrows for tree navigation before entering detail mode."""
+    viewer = TrajectoryViewer(sample_trajectory())
+    app = SkimApp(path=".")
+
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        await pane.mount(viewer)
+        await pilot.pause()
+        viewer.focus_tree_mode()
+
+        assert viewer.is_tree_mode()
+        assert viewer._tree.cursor_node is viewer._tree.root.children[0]
+
+        await pilot.press("down")
+        await pilot.pause()
+
+        assert viewer._tree.cursor_node is viewer._tree.root.children[1]
+        assert viewer._detail_wrap.scroll_y == 0
+
+
+async def test_escape_returns_from_trajectory_detail_to_tree_mode():
+    """Escape should return keyboard control from detail scrolling back to the tree."""
+    stdout = "\n".join(f"line {index}" for index in range(200))
+    viewer = TrajectoryViewer(sample_trajectory(stdout=stdout))
+    app = SkimApp(path=".")
+
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        await pane.mount(viewer)
+        output_node = viewer._tree.root.children[2].children[2].children[1]
+        await pilot.pause()
+
+        viewer._tree.move_cursor(output_node, animate=False)
+        await pilot.press("enter")
+        await pilot.pause()
+        assert not viewer.is_tree_mode()
+
+        await pilot.press("down")
+        await pilot.pause()
+        scrolled = viewer._detail_wrap.scroll_y
+        assert scrolled > 0
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert viewer.is_tree_mode()
+
+        await pilot.press("up")
+        await pilot.pause()
+
+        assert viewer._tree.cursor_node is viewer._tree.root.children[2].children[2].children[0]
+        assert viewer._detail_wrap.scroll_y == scrolled
 
 
 def sample_trajectory(

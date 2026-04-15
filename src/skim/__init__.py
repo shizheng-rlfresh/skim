@@ -997,6 +997,7 @@ class TrajectoryViewer(Vertical):
         self.step_events = normalize_step_events(trajectory)
         self.step_items = normalize_step_timeline(trajectory)
         self.events = normalize_events(trajectory)
+        self._input_mode = "tree"
         self._summary = Static(Text(_metadata_header(trajectory)), classes="trajectory-summary")
         self._tree: Tree[TrajectoryTreeItem] = Tree("Trajectory", classes="trajectory-tree")
         self._build_tree()
@@ -1004,7 +1005,7 @@ class TrajectoryViewer(Vertical):
         initial_widgets: list[Widget] = []
         if isinstance(first_item, TrajectoryTreeItem):
             initial_widgets = _detail_widgets_for_item(first_item)
-        self._detail_wrap = VerticalScroll(*initial_widgets, classes="trajectory-detail-wrap")
+        self._detail_wrap = FocusableDetailWrap(*initial_widgets, classes="trajectory-detail-wrap")
 
     def compose(self) -> ComposeResult:
         """Compose the trajectory summary, event tree, and detail panel."""
@@ -1029,6 +1030,77 @@ class TrajectoryViewer(Vertical):
     def scroll_detail(self, delta: int) -> None:
         """Scroll the rendered detail panel."""
         self._detail_wrap.scroll_relative(y=delta, animate=False)
+
+    def is_tree_mode(self) -> bool:
+        """Return whether keyboard navigation is driving the left tree."""
+        return self._input_mode == "tree"
+
+    def focus_tree_mode(self) -> None:
+        """Route navigation input to the tree."""
+        self._input_mode = "tree"
+        self._ensure_tree_cursor()
+        if self.is_attached:
+            self._tree.focus(scroll_visible=False)
+
+    def focus_detail_mode(self) -> None:
+        """Route navigation input to the rendered detail pane."""
+        self._input_mode = "detail"
+        if self.is_attached:
+            self._detail_wrap.focus(scroll_visible=False)
+
+    def handle_vertical_key(self, delta: int) -> bool:
+        """Handle up/down keys for the active trajectory sub-view."""
+        if self.is_tree_mode():
+            if delta < 0:
+                self._tree.action_cursor_up()
+            else:
+                self._tree.action_cursor_down()
+            return True
+        self.scroll_detail(delta)
+        return True
+
+    def handle_horizontal_key(self, key: str) -> bool:
+        """Handle left/right tree navigation."""
+        if not self.is_tree_mode():
+            return False
+        node = self._tree.cursor_node
+        if node is None:
+            return False
+        if key == "left":
+            if node.allow_expand and node.is_expanded:
+                node.collapse()
+            elif node.parent is not None:
+                self._tree.move_cursor(node.parent, animate=False)
+            return True
+        if key == "right":
+            if node.allow_expand and node.is_collapsed:
+                node.expand()
+            elif node.children:
+                self._tree.move_cursor(node.children[0], animate=False)
+            return True
+        return False
+
+    def handle_enter_key(self) -> bool:
+        """Select the current tree item and move focus to the detail pane."""
+        if not self.is_tree_mode():
+            return False
+        self._ensure_tree_cursor()
+        self._tree.action_select_cursor()
+        self.focus_detail_mode()
+        return True
+
+    def handle_escape_key(self) -> bool:
+        """Return keyboard control from detail back to the tree."""
+        if self.is_tree_mode():
+            return False
+        self.focus_tree_mode()
+        return True
+
+    def _ensure_tree_cursor(self) -> None:
+        """Keep the tree cursor on the first visible child instead of the root."""
+        cursor = self._tree.cursor_node
+        if (cursor is None or cursor.is_root) and self._tree.root.children:
+            self._tree.move_cursor(self._tree.root.children[0], animate=False)
 
     def _build_tree(self) -> None:
         """Populate the trajectory tree."""
@@ -1104,6 +1176,10 @@ class SubmissionSummary(Static):
         super().__init__(self.summary_text, classes="submission-summary")
 
 
+class FocusableDetailWrap(VerticalScroll, can_focus=True):
+    """Focusable scroll container for trajectory detail rendering."""
+
+
 class PreviewPane(VerticalScroll, can_focus=True):
     """Scrollable panel that shows file contents."""
 
@@ -1122,9 +1198,17 @@ class PreviewPane(VerticalScroll, can_focus=True):
         """Render a file into the pane."""
         self.current_path = path
         self.remove_children()
-        for widget in render_file(path):
+        widgets = render_file(path)
+        for widget in widgets:
             self.mount(widget)
         self.scroll_home(animate=False)
+        if (
+            widgets
+            and isinstance(widgets[0], TrajectoryViewer)
+            and isinstance(self.app, SkimApp)
+            and self.id == self.app.active_pane_id
+        ):
+            self.call_after_refresh(widgets[0].focus_tree_mode)
 
     def on_click(self) -> None:
         """Mark this pane as the active preview when clicked."""
@@ -1139,9 +1223,17 @@ class PreviewPane(VerticalScroll, can_focus=True):
         except NoMatches:
             viewer = None
         if isinstance(viewer, TrajectoryViewer):
-            viewer.scroll_detail(delta)
+            viewer.handle_vertical_key(delta)
         else:
             self.scroll_relative(y=delta, animate=False)
+
+    def active_trajectory_viewer(self) -> TrajectoryViewer | None:
+        """Return the mounted trajectory viewer, if this pane has one."""
+        try:
+            viewer = self.query(TrajectoryViewer).first()
+        except NoMatches:
+            return None
+        return viewer if isinstance(viewer, TrajectoryViewer) else None
 
 
 class SkimApp(App):
@@ -1227,9 +1319,11 @@ class SkimApp(App):
 
     STATUS_TEXT = (
         " [bold]q[/] Quit  "
-        "[bold]↑↓[/] Scroll  "
+        "[bold]↑↓[/] Scroll / JSON tree  "
+        "[bold]←→[/] JSON branches  "
+        "[bold]Esc[/] JSON tree  "
         "[bold]⇧↑↓[/] Tree  "
-        "[bold]Enter[/] Open  "
+        "[bold]Enter[/] Open / Detail  "
         "[bold]s[/]+arrow Split  "
         "[bold]d[/] Close  "
         "[bold]w[/] Next pane"
@@ -1369,6 +1463,31 @@ class SkimApp(App):
             event.prevent_default()
             event.stop()
             return
+
+        viewer: TrajectoryViewer | None = None
+        try:
+            active_pane = self.query_one(f"#{self.active_pane_id}", PreviewPane)
+            viewer = active_pane.active_trajectory_viewer()
+        except Exception:
+            viewer = None
+
+        if viewer is not None and event.key in {"left", "right"}:
+            if viewer.handle_horizontal_key(event.key):
+                event.prevent_default()
+                event.stop()
+                return
+
+        if viewer is not None and event.key == "escape":
+            if viewer.handle_escape_key():
+                event.prevent_default()
+                event.stop()
+                return
+
+        if viewer is not None and event.key == "enter":
+            if viewer.handle_enter_key():
+                event.prevent_default()
+                event.stop()
+                return
 
         # shift+arrows navigate the file tree, enter opens
         if event.key == "shift+down":
