@@ -24,9 +24,11 @@ from rich.syntax import Syntax
 from rich.text import Text
 from textual.widgets import Collapsible, Input, Markdown, Static, TextArea, Tree
 
+import skim.trajectory as trajectory_module
 from skim import JsonInspector, PreviewPane, SkimApp, render_file
 from skim.preview import CsvPreview
 from skim.scrolling import FocusableDetailWrap
+from skim.trajectory import AnnotationStore
 
 
 def test_generic_json_uses_json_inspector(tmp_path):
@@ -346,6 +348,82 @@ async def test_persisted_annotations_mark_tree_and_detail_on_reload(tmp_path):
         assert "evidence, bug" in annotation
         assert "First concrete failure appears here." in annotation
         assert "First concrete failure appears here." not in detail
+
+
+def test_annotation_store_caches_one_file_lookup(tmp_path, monkeypatch):
+    """Repeated annotation reads for one file should reuse the normalized cache."""
+    source = tmp_path / "plain.json"
+    source.write_text(json.dumps({"hello": "world"}))
+    review_file = tmp_path / ".skim" / "review.json"
+    review_file.parent.mkdir()
+    review_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "files": {
+                    "plain.json": {
+                        "annotations": {
+                            "$.hello": {
+                                "tags": ["evidence"],
+                                "note": "cached",
+                            }
+                        }
+                    }
+                },
+            }
+        )
+    )
+
+    store = AnnotationStore(tmp_path)
+    calls = 0
+    original = store._build_annotations_for_relative_path
+
+    def wrapped(relative_path: str):
+        nonlocal calls
+        calls += 1
+        return original(relative_path)
+
+    monkeypatch.setattr(store, "_build_annotations_for_relative_path", wrapped)
+
+    first = store.get_annotation(source, "$.hello")
+    second = store.get_annotation(source, "$.hello")
+    records = store.annotations_for_file(source)
+
+    assert first is not None
+    assert second is not None
+    assert first.note == "cached"
+    assert second.note == "cached"
+    assert records["$.hello"].note == "cached"
+    assert calls == 1
+
+    store.set_annotation(source, "$.hello", tags=("updated",), note="changed")
+
+    updated = store.get_annotation(source, "$.hello")
+    assert updated is not None
+    assert updated.note == "changed"
+    assert calls == 1
+
+
+def test_trajectory_json_inspector_uses_one_overlay_normalization_pass(tmp_path, monkeypatch):
+    """Opening trajectory JSON should normalize overlay data through one shared pass."""
+    test_file = tmp_path / "trajectory.json"
+    test_file.write_text(json.dumps(sample_trajectory()))
+
+    calls = 0
+    original = trajectory_module.normalize_step_overlay
+
+    def wrapped(trajectory):
+        nonlocal calls
+        calls += 1
+        return original(trajectory)
+
+    monkeypatch.setattr(trajectory_module, "normalize_step_overlay", wrapped)
+
+    widgets = render_file(test_file, browse_root=tmp_path)
+
+    assert len(widgets) == 1
+    assert isinstance(widgets[0], JsonInspector)
+    assert calls == 1
 
 
 async def test_annotation_modal_saves_selected_node_annotation(tmp_path):

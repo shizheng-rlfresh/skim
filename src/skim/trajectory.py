@@ -121,25 +121,16 @@ class AnnotationStore:
         self.review_root = review_root.resolve()
         self.path = self.review_root / ".skim" / "review.json"
         self._payload = self._load()
+        self._file_annotations: dict[str, dict[str, AnnotationRecord]] = {}
 
     def annotations_for_file(self, source_path: Path) -> dict[str, AnnotationRecord]:
         """Return stored annotations for one source file."""
         relative_path = self.relative_file_path(source_path)
-        files = self._payload.get("files", {})
-        file_entry = files.get(relative_path, {})
-        annotations = file_entry.get("annotations", {})
-        result: dict[str, AnnotationRecord] = {}
-        for path, payload in annotations.items():
-            if not isinstance(path, str) or not isinstance(payload, dict):
-                continue
-            tags = payload.get("tags", [])
-            note = payload.get("note", "")
-            if isinstance(tags, list) and isinstance(note, str):
-                result[path] = AnnotationRecord(
-                    tags=tuple(str(tag) for tag in tags if str(tag).strip()),
-                    note=note,
-                )
-        return result
+        cached = self._file_annotations.get(relative_path)
+        if cached is None:
+            cached = self._build_annotations_for_relative_path(relative_path)
+            self._file_annotations[relative_path] = cached
+        return cached
 
     def get_annotation(self, source_path: Path, path: str) -> AnnotationRecord | None:
         """Return one annotation by file-relative JSON path."""
@@ -159,6 +150,7 @@ class AnnotationStore:
         file_entry = files.setdefault(relative_path, {"annotations": {}})
         annotations = file_entry.setdefault("annotations", {})
         annotations[path] = {"tags": list(tags), "note": note}
+        self.annotations_for_file(source_path)[path] = AnnotationRecord(tags=tags, note=note)
         self._save()
 
     def delete_annotation(self, source_path: Path, path: str) -> None:
@@ -168,6 +160,7 @@ class AnnotationStore:
         file_entry = files.setdefault(relative_path, {"annotations": {}})
         annotations = file_entry.setdefault("annotations", {})
         annotations.pop(path, None)
+        self.annotations_for_file(source_path).pop(path, None)
         self._save()
 
     def relative_file_path(self, source_path: Path) -> str:
@@ -191,6 +184,27 @@ class AnnotationStore:
         payload.setdefault("version", 1)
         payload.setdefault("files", {})
         return payload
+
+    def _build_annotations_for_relative_path(
+        self,
+        relative_path: str,
+    ) -> dict[str, AnnotationRecord]:
+        """Normalize stored annotations for one file path."""
+        files = self._payload.get("files", {})
+        file_entry = files.get(relative_path, {})
+        annotations = file_entry.get("annotations", {})
+        result: dict[str, AnnotationRecord] = {}
+        for path, payload in annotations.items():
+            if not isinstance(path, str) or not isinstance(payload, dict):
+                continue
+            tags = payload.get("tags", [])
+            note = payload.get("note", "")
+            if isinstance(tags, list) and isinstance(note, str):
+                result[path] = AnnotationRecord(
+                    tags=tuple(str(tag) for tag in tags if str(tag).strip()),
+                    note=note,
+                )
+        return result
 
     def _save(self) -> None:
         """Write the annotation payload to disk."""
@@ -418,11 +432,26 @@ def normalize_step_events(trajectory: dict[str, Any]) -> list[list[TrajectoryEve
 
 def normalize_step_timeline(trajectory: dict[str, Any]) -> list[list[StepTimelineItem]]:
     """Return per-step display rows, pairing tool calls with matching results."""
+    return _normalize_step_timeline_from_events(normalize_step_events(trajectory))
+
+
+def normalize_step_overlay(
+    trajectory: dict[str, Any],
+) -> tuple[list[list[TrajectoryEvent]], list[list[StepTimelineItem]]]:
+    """Return grouped trajectory events plus their paired timeline rows."""
+    step_events = normalize_step_events(trajectory)
+    return step_events, _normalize_step_timeline_from_events(step_events)
+
+
+def _normalize_step_timeline_from_events(
+    step_events: list[list[TrajectoryEvent]],
+) -> list[list[StepTimelineItem]]:
+    """Return per-step display rows from pre-normalized events."""
     timeline_groups: list[list[StepTimelineItem]] = []
-    for step_events in normalize_step_events(trajectory):
+    for events in step_events:
         group: list[StepTimelineItem] = []
         pending_calls: dict[str, int] = {}
-        for event in step_events:
+        for event in events:
             if event.kind == "function_call":
                 interaction = ToolInteraction(
                     index=event.index,
@@ -1160,8 +1189,7 @@ class TrajectoryViewer(Vertical):
         """Initialize the trajectory viewer."""
         super().__init__(classes="trajectory-viewer")
         self.trajectory = trajectory
-        self.step_events = normalize_step_events(trajectory)
-        self.step_items = normalize_step_timeline(trajectory)
+        self.step_events, self.step_items = normalize_step_overlay(trajectory)
         self.events = normalize_events(trajectory)
         self._input_mode = "tree"
         self._summary = Static(Text(_metadata_header(trajectory)), classes="trajectory-summary")
@@ -1394,6 +1422,11 @@ class JsonInspector(Vertical):
         resolved_root = review_root or (self.source_path.parent if self.source_path else Path.cwd())
         self.review_root = resolved_root.resolve()
         self._annotation_store = annotation_store or AnnotationStore(self.review_root)
+        self._file_annotations = (
+            self._annotation_store.annotations_for_file(self.source_path)
+            if self.source_path is not None
+            else {}
+        )
         self._current_item: JsonInspectorItem | None = None
         self._tree: DragTree = DragTree("JSON", classes="trajectory-tree")
         self._build_tree()
@@ -1653,12 +1686,12 @@ class JsonInspector(Vertical):
             data=final_output_item,
         )
 
-        step_items = normalize_step_timeline(trajectory)
-        step_events = normalize_step_events(trajectory)
+        step_events, step_items = normalize_step_overlay(trajectory)
         steps = trajectory.get("steps", []) if isinstance(trajectory.get("steps"), list) else []
         for step_index, (items, events) in enumerate(zip(step_items, step_events, strict=False)):
             step_path = base_path + ("steps", step_index)
             step_raw_value = steps[step_index] if step_index < len(steps) else None
+            event_paths = _trajectory_event_paths(base_path, step_index, events)
             step_item = JsonInspectorItem(
                 kind="trajectory_step",
                 title=f"Step {step_index + 1}",
@@ -1680,10 +1713,8 @@ class JsonInspector(Vertical):
                 if item.interaction is not None:
                     call_event = item.interaction.call_event
                     result_event = item.interaction.result_event
-                    call_path = _trajectory_event_path(base_path, step_index, events, call_event)
-                    result_path = _trajectory_event_path(
-                        base_path, step_index, events, result_event
-                    )
+                    call_path = event_paths.get(id(call_event.raw)) if call_event else None
+                    result_path = event_paths.get(id(result_event.raw)) if result_event else None
                     parent_path = call_path or result_path or step_path
                     tool_item = JsonInspectorItem(
                         kind="trajectory_tool",
@@ -1743,7 +1774,7 @@ class JsonInspector(Vertical):
                     continue
 
                 if item.event is not None:
-                    event_path = _trajectory_event_path(base_path, step_index, events, item.event)
+                    event_path = event_paths.get(id(item.event.raw))
                     event_item = JsonInspectorItem(
                         kind="trajectory_event",
                         title=item.title.plain,
@@ -1838,12 +1869,10 @@ class JsonInspector(Vertical):
 
     def _annotation_for_item(self, item: JsonInspectorItem) -> AnnotationRecord | None:
         """Return the stored annotation for one item, if any."""
-        if self.source_path is None:
-            return None
         path = self._annotation_key(item)
         if path is None:
             return None
-        return self._annotation_store.get_annotation(self.source_path, path)
+        return self._file_annotations.get(path)
 
     def _tree_label_for_item(self, item: JsonInspectorItem) -> Text:
         """Return the rendered tree label for one item, including annotation state."""
@@ -2248,19 +2277,16 @@ def _hermes_summary(value: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _trajectory_event_path(
+def _trajectory_event_paths(
     base_path: tuple[str | int, ...],
     step_index: int,
     events: list[TrajectoryEvent],
-    event: TrajectoryEvent | None,
-) -> tuple[str | int, ...] | None:
-    """Return the raw path for one normalized trajectory event."""
-    if event is None:
-        return None
-    for output_index, candidate in enumerate(events):
-        if candidate.raw is event.raw:
-            return base_path + ("steps", step_index, "output", output_index)
-    return None
+) -> dict[int, tuple[str | int, ...]]:
+    """Return the raw-path lookup for one step's normalized events."""
+    return {
+        id(event.raw): base_path + ("steps", step_index, "output", output_index)
+        for output_index, event in enumerate(events)
+    }
 
 
 def _interaction_payload(interaction: ToolInteraction) -> dict[str, Any]:
