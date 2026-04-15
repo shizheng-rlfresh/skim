@@ -111,9 +111,6 @@ class SkimApp(App):
         padding: 0 1;
         border: round $panel-lighten-1;
     }
-    .annotation-modal-panel-active {
-        border: round $accent;
-    }
     #annotation-editor-panel {
         width: 2fr;
         margin: 0 1 0 0;
@@ -283,6 +280,12 @@ class SkimApp(App):
         """Return whether a modal screen currently owns keyboard interaction."""
         return isinstance(self.screen, ModalScreen)
 
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        """Disable app-level arrow scrolling while a modal owns focus."""
+        if self._modal_is_active() and action in {"scroll_up", "scroll_down"}:
+            return False
+        return super().check_action(action, parameters)
+
     def action_quit(self) -> None:
         """Quit the app unless a modal screen is active."""
         if self._modal_is_active():
@@ -313,10 +316,6 @@ class SkimApp(App):
     def action_scroll_down(self) -> None:
         """Scroll down in the active pane or confirm a downward split."""
         if self._modal_is_active():
-            screen = self.screen
-            action = getattr(screen, "action_move_editor_down", None)
-            if callable(action):
-                action()
             return
         if self.split_mode:
             self.split_mode = False
@@ -334,10 +333,6 @@ class SkimApp(App):
     def action_scroll_up(self) -> None:
         """Scroll up in the active pane or confirm an upward split."""
         if self._modal_is_active():
-            screen = self.screen
-            action = getattr(screen, "action_move_editor_up", None)
-            if callable(action):
-                action()
             return
         if self.split_mode:
             self.split_mode = False

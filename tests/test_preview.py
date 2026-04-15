@@ -480,8 +480,8 @@ async def test_annotation_modal_shows_split_editor_and_node_preview(tmp_path):
         assert "1" in preview_text
 
 
-async def test_annotation_modal_right_switches_to_preview_panel(tmp_path):
-    """Right should switch the active modal panel from editor to preview."""
+async def test_annotation_modal_left_right_do_not_switch_focus(tmp_path):
+    """Left/right should stay local to the focused editor control."""
     test_file = tmp_path / "plain.json"
     test_file.write_text(json.dumps({"alpha": 1}))
     app = SkimApp(path=str(tmp_path))
@@ -493,17 +493,23 @@ async def test_annotation_modal_right_switches_to_preview_panel(tmp_path):
 
         await pilot.press("a")
         await pilot.pause()
-        assert app.screen.query_one("#annotation-tags", Input).has_focus
+        tags = app.screen.query_one("#annotation-tags", Input)
+        preview = app.screen.query_one("#annotation-preview", FocusableDetailWrap)
+        assert tags.has_focus
 
         await pilot.press("right")
         await pilot.pause()
+        assert tags.has_focus
+        assert not preview.has_focus
 
-        preview = app.screen.query_one("#annotation-preview", FocusableDetailWrap)
-        assert preview.has_focus
+        await pilot.press("left")
+        await pilot.pause()
+        assert tags.has_focus
+        assert not preview.has_focus
 
 
-async def test_annotation_modal_up_down_navigate_editor_controls(tmp_path):
-    """Up/down should navigate the left editor controls without using Tab."""
+async def test_annotation_modal_up_down_stay_local_to_note_editor(tmp_path):
+    """Up/down should not move focus out of the note editor."""
     test_file = tmp_path / "plain.json"
     test_file.write_text(json.dumps({"alpha": 1}))
     app = SkimApp(path=str(tmp_path))
@@ -516,27 +522,25 @@ async def test_annotation_modal_up_down_navigate_editor_controls(tmp_path):
         await pilot.press("a")
         await pilot.pause()
 
-        tags = app.screen.query_one("#annotation-tags", Input)
         note = app.screen.query_one("#annotation-note", TextArea)
         save = app.screen.query_one("#annotation-save")
 
-        assert tags.has_focus
-
-        await pilot.press("down")
+        await pilot.press("enter")
         await pilot.pause()
         assert note.has_focus
 
         await pilot.press("down")
         await pilot.pause()
-        assert save.has_focus
+        assert note.has_focus
+        assert not save.has_focus
 
         await pilot.press("up")
         await pilot.pause()
         assert note.has_focus
 
 
-async def test_annotation_modal_pagedown_scrolls_preview_panel(tmp_path):
-    """PageDown should scroll the right preview when that panel is active."""
+async def test_annotation_modal_pagedown_scrolls_preview_panel_from_editor_focus(tmp_path):
+    """PageDown should scroll the right preview even while editing on the left."""
     test_file = tmp_path / "plain.json"
     long_text = "\n".join(f"line {index}" for index in range(200))
     test_file.write_text(json.dumps({"log": long_text}))
@@ -549,12 +553,21 @@ async def test_annotation_modal_pagedown_scrolls_preview_panel(tmp_path):
 
         await pilot.press("a")
         await pilot.pause()
-        await pilot.press("right")
-        await pilot.pause()
 
         preview = app.screen.query_one("#annotation-preview", FocusableDetailWrap)
+        note = app.screen.query_one("#annotation-note", TextArea)
         before = preview.scroll_y
 
+        await pilot.press("pagedown")
+        await pilot.pause()
+
+        assert preview.scroll_y > before
+
+        await pilot.press("enter")
+        await pilot.pause()
+        assert note.has_focus
+
+        before = preview.scroll_y
         await pilot.press("pagedown")
         await pilot.pause()
 
