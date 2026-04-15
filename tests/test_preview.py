@@ -12,6 +12,7 @@ import pytest
 from conftest import (
     _annotation_text,
     _detail_text,
+    _modal_preview_text,
     _static_content,
     _tree_labels,
     sample_bundle,
@@ -25,6 +26,7 @@ from textual.widgets import Collapsible, Input, Markdown, Static, TextArea, Tree
 
 from skim import JsonInspector, PreviewPane, SkimApp, render_file
 from skim.preview import CsvPreview
+from skim.scrolling import FocusableDetailWrap
 
 
 def test_generic_json_uses_json_inspector(tmp_path):
@@ -455,6 +457,108 @@ async def test_annotation_modal_enter_moves_focus_to_note_without_saving(tmp_pat
         assert note.has_focus
         assert inspector._tree.cursor_node is first_node
         assert not (tmp_path / ".skim" / "review.json").exists()
+
+
+async def test_annotation_modal_shows_split_editor_and_node_preview(tmp_path):
+    """The annotation modal should show editor controls and selected-node preview."""
+    test_file = tmp_path / "plain.json"
+    test_file.write_text(json.dumps({"alpha": 1, "beta": 2}))
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        pane.show_file(test_file)
+        await pilot.pause()
+
+        await pilot.press("a")
+        await pilot.pause()
+
+        assert app.screen.query_one("#annotation-tags", Input).has_focus
+        preview_text = _modal_preview_text(app.screen)
+        assert "Path: $.alpha" in preview_text
+        assert "Type: int" in preview_text
+        assert "1" in preview_text
+
+
+async def test_annotation_modal_right_switches_to_preview_panel(tmp_path):
+    """Right should switch the active modal panel from editor to preview."""
+    test_file = tmp_path / "plain.json"
+    test_file.write_text(json.dumps({"alpha": 1}))
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        pane.show_file(test_file)
+        await pilot.pause()
+
+        await pilot.press("a")
+        await pilot.pause()
+        assert app.screen.query_one("#annotation-tags", Input).has_focus
+
+        await pilot.press("right")
+        await pilot.pause()
+
+        preview = app.screen.query_one("#annotation-preview", FocusableDetailWrap)
+        assert preview.has_focus
+
+
+async def test_annotation_modal_up_down_navigate_editor_controls(tmp_path):
+    """Up/down should navigate the left editor controls without using Tab."""
+    test_file = tmp_path / "plain.json"
+    test_file.write_text(json.dumps({"alpha": 1}))
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        pane.show_file(test_file)
+        await pilot.pause()
+
+        await pilot.press("a")
+        await pilot.pause()
+
+        tags = app.screen.query_one("#annotation-tags", Input)
+        note = app.screen.query_one("#annotation-note", TextArea)
+        save = app.screen.query_one("#annotation-save")
+
+        assert tags.has_focus
+
+        await pilot.press("down")
+        await pilot.pause()
+        assert note.has_focus
+
+        await pilot.press("down")
+        await pilot.pause()
+        assert save.has_focus
+
+        await pilot.press("up")
+        await pilot.pause()
+        assert note.has_focus
+
+
+async def test_annotation_modal_pagedown_scrolls_preview_panel(tmp_path):
+    """PageDown should scroll the right preview when that panel is active."""
+    test_file = tmp_path / "plain.json"
+    long_text = "\n".join(f"line {index}" for index in range(200))
+    test_file.write_text(json.dumps({"log": long_text}))
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        pane.show_file(test_file)
+        await pilot.pause()
+
+        await pilot.press("a")
+        await pilot.pause()
+        await pilot.press("right")
+        await pilot.pause()
+
+        preview = app.screen.query_one("#annotation-preview", FocusableDetailWrap)
+        before = preview.scroll_y
+
+        await pilot.press("pagedown")
+        await pilot.pause()
+
+        assert preview.scroll_y > before
 
 
 async def test_annotation_modal_blocks_tree_and_pane_shortcuts(tmp_path):

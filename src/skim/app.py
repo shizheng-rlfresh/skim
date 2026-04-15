@@ -98,13 +98,32 @@ class SkimApp(App):
         margin: 1 0 0 0;
     }
     #annotation-modal {
-        width: 80;
-        max-width: 90%;
-        height: auto;
-        max-height: 85%;
-        padding: 1 2;
+        width: 140;
+        max-width: 96%;
+        height: 80%;
+        max-height: 90%;
+        padding: 1;
         border: round $accent;
         background: $surface;
+    }
+    .annotation-modal-panel {
+        height: 1fr;
+        padding: 0 1;
+        border: round $panel-lighten-1;
+    }
+    .annotation-modal-panel-active {
+        border: round $accent;
+    }
+    #annotation-editor-panel {
+        width: 2fr;
+        margin: 0 1 0 0;
+    }
+    #annotation-preview-panel {
+        width: 3fr;
+    }
+    .annotation-modal-preview {
+        height: 1fr;
+        margin: 1 0 0 0;
     }
     .annotation-modal-actions {
         height: auto;
@@ -114,7 +133,8 @@ class SkimApp(App):
         margin: 1 0 0 0;
     }
     #annotation-note {
-        height: 8;
+        height: 1fr;
+        min-height: 8;
         margin: 1 0 0 0;
     }
     Collapsible.trajectory-section {
@@ -293,6 +313,10 @@ class SkimApp(App):
     def action_scroll_down(self) -> None:
         """Scroll down in the active pane or confirm a downward split."""
         if self._modal_is_active():
+            screen = self.screen
+            action = getattr(screen, "action_move_editor_down", None)
+            if callable(action):
+                action()
             return
         if self.split_mode:
             self.split_mode = False
@@ -310,6 +334,10 @@ class SkimApp(App):
     def action_scroll_up(self) -> None:
         """Scroll up in the active pane or confirm an upward split."""
         if self._modal_is_active():
+            screen = self.screen
+            action = getattr(screen, "action_move_editor_up", None)
+            if callable(action):
+                action()
             return
         if self.split_mode:
             self.split_mode = False
@@ -345,6 +373,10 @@ class SkimApp(App):
     def action_page_down(self) -> None:
         """Scroll the active content by a page-sized amount."""
         if self._modal_is_active():
+            screen = self.screen
+            action = getattr(screen, "action_scroll_preview_down", None)
+            if callable(action):
+                action()
             return
         try:
             pane = self.query_one(f"#{self.active_pane_id}", PreviewPane)
@@ -359,6 +391,10 @@ class SkimApp(App):
     def action_page_up(self) -> None:
         """Scroll the active content up by a page-sized amount."""
         if self._modal_is_active():
+            screen = self.screen
+            action = getattr(screen, "action_scroll_preview_up", None)
+            if callable(action):
+                action()
             return
         try:
             pane = self.query_one(f"#{self.active_pane_id}", PreviewPane)

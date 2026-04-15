@@ -15,6 +15,7 @@ from typing import Any
 
 from rich.syntax import Syntax
 from rich.text import Text
+from textual import events as textual_events
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -201,53 +202,146 @@ class AnnotationStore:
 class AnnotationEditor(ModalScreen[AnnotationEditorResult | None]):
     """Small modal form for editing one annotation."""
 
-    BINDINGS = [Binding("escape", "cancel", show=False)]
+    PREVIEW_SCROLL_STEP = 20
+    BINDINGS = [
+        Binding("escape", "cancel", show=False),
+        Binding("left", "focus_editor_panel", show=False),
+        Binding("right", "focus_preview_panel", show=False),
+        Binding("up", "move_editor_up", show=False),
+        Binding("down", "move_editor_down", show=False),
+        Binding("pageup", "scroll_preview_up", show=False),
+        Binding("pagedown", "scroll_preview_down", show=False),
+    ]
 
     def __init__(
         self,
         path: str,
         annotation: AnnotationRecord | None,
+        item: JsonInspectorItem,
         on_submit: Callable[[AnnotationEditorResult], None] | None = None,
     ) -> None:
         """Initialize the modal for one selected annotation target."""
         super().__init__()
         self.path = path
         self.annotation = annotation
+        self.item = item
         self._on_submit = on_submit
+        self._active_panel = "editor"
+        self._editor_index = 0
 
     def compose(self) -> ComposeResult:
         """Compose the modal editor widgets."""
         tags = ", ".join(self.annotation.tags) if self.annotation is not None else ""
         note = self.annotation.note if self.annotation is not None else ""
-        yield Vertical(
-            Static(Text("Edit Annotation", style="bold"), classes="annotation-modal-title"),
-            Static(Text(f"Path: {self.path}", style="dim"), classes="annotation-modal-path"),
-            Input(value=tags, placeholder="tags, comma, separated", id="annotation-tags"),
-            TextArea(note, id="annotation-note"),
-            Horizontal(
-                Button("Save", id="annotation-save", variant="primary"),
-                Button(
-                    "Delete",
-                    id="annotation-delete",
-                    variant="error",
-                    disabled=self.annotation is None,
+        yield Horizontal(
+            Vertical(
+                Static(Text("Edit Annotation", style="bold"), classes="annotation-modal-title"),
+                Static(Text(f"Path: {self.path}", style="dim"), classes="annotation-modal-path"),
+                Input(value=tags, placeholder="tags, comma, separated", id="annotation-tags"),
+                TextArea(note, id="annotation-note"),
+                Horizontal(
+                    Button("Save", id="annotation-save", variant="primary"),
+                    Button(
+                        "Delete",
+                        id="annotation-delete",
+                        variant="error",
+                        disabled=self.annotation is None,
+                    ),
+                    Button("Cancel", id="annotation-cancel"),
+                    classes="annotation-modal-actions",
                 ),
-                Button("Cancel", id="annotation-cancel"),
-                classes="annotation-modal-actions",
+                id="annotation-editor-panel",
+                classes="annotation-modal-panel",
+            ),
+            Vertical(
+                Static(
+                    Text("Node Preview", style="bold"),
+                    classes="annotation-modal-preview-title",
+                ),
+                FocusableDetailWrap(
+                    *_json_detail_widgets(self.item),
+                    id="annotation-preview",
+                    classes="annotation-modal-preview",
+                ),
+                id="annotation-preview-panel",
+                classes="annotation-modal-panel",
             ),
             id="annotation-modal",
         )
 
     def on_mount(self) -> None:
         """Focus the tags field when the modal opens."""
-        self.query_one("#annotation-tags", Input).focus()
+        self._focus_editor_index(0)
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         """Advance from tags input to note instead of submitting the modal."""
         if event.input.id != "annotation-tags":
             return
-        self.query_one("#annotation-note", TextArea).focus()
+        self._editor_index = min(1, len(self._editor_controls()) - 1)
+        self._focus_editor_index(self._editor_index)
         event.stop()
+
+    def on_key(self, event: textual_events.Key) -> None:
+        """Handle modal-local navigation before focused widgets consume it."""
+        if event.key == "left":
+            self.action_focus_editor_panel()
+        elif event.key == "right":
+            self.action_focus_preview_panel()
+        elif event.key == "up":
+            self.action_move_editor_up()
+        elif event.key == "down":
+            self.action_move_editor_down()
+        elif event.key == "pageup":
+            self.action_scroll_preview_up()
+        elif event.key == "pagedown":
+            self.action_scroll_preview_down()
+        else:
+            return
+        event.prevent_default()
+        event.stop()
+
+    def action_focus_editor_panel(self) -> None:
+        """Move modal focus back to the editor panel."""
+        self._active_panel = "editor"
+        self._focus_editor_index(self._editor_index)
+
+    def action_focus_preview_panel(self) -> None:
+        """Move modal focus to the read-only preview panel."""
+        self._active_panel = "preview"
+        self.query_one("#annotation-preview", FocusableDetailWrap).focus()
+        self._update_panel_classes()
+
+    def action_move_editor_up(self) -> None:
+        """Move focus to the previous editor control."""
+        if self._active_panel != "editor":
+            return
+        self._editor_index = max(0, self._editor_index - 1)
+        self._focus_editor_index(self._editor_index)
+
+    def action_move_editor_down(self) -> None:
+        """Move focus to the next editor control."""
+        if self._active_panel != "editor":
+            return
+        self._editor_index = min(len(self._editor_controls()) - 1, self._editor_index + 1)
+        self._focus_editor_index(self._editor_index)
+
+    def action_scroll_preview_up(self) -> None:
+        """Scroll the right preview up when it is the active panel."""
+        if self._active_panel != "preview":
+            return
+        self.query_one("#annotation-preview", FocusableDetailWrap).scroll_relative(
+            y=-self.PREVIEW_SCROLL_STEP,
+            animate=False,
+        )
+
+    def action_scroll_preview_down(self) -> None:
+        """Scroll the right preview down when it is the active panel."""
+        if self._active_panel != "preview":
+            return
+        self.query_one("#annotation-preview", FocusableDetailWrap).scroll_relative(
+            y=self.PREVIEW_SCROLL_STEP,
+            animate=False,
+        )
 
     def action_cancel(self) -> None:
         """Dismiss the modal without changes."""
@@ -283,6 +377,38 @@ class AnnotationEditor(ModalScreen[AnnotationEditorResult | None]):
         if self._on_submit is not None:
             self._on_submit(result)
         self.dismiss(result)
+
+    def _editor_controls(self) -> list[Widget]:
+        """Return the keyboard navigation order for editor controls."""
+        controls: list[Widget] = [
+            self.query_one("#annotation-tags", Input),
+            self.query_one("#annotation-note", TextArea),
+            self.query_one("#annotation-save", Button),
+        ]
+        delete = self.query_one("#annotation-delete", Button)
+        if not delete.disabled:
+            controls.append(delete)
+        controls.append(self.query_one("#annotation-cancel", Button))
+        return controls
+
+    def _focus_editor_index(self, index: int) -> None:
+        """Focus one editor control by navigation order index."""
+        controls = self._editor_controls()
+        self._editor_index = max(0, min(index, len(controls) - 1))
+        self._active_panel = "editor"
+        controls[self._editor_index].focus()
+        self._update_panel_classes()
+
+    def _update_panel_classes(self) -> None:
+        """Reflect which modal panel is currently active."""
+        editor = self.query_one("#annotation-editor-panel")
+        preview = self.query_one("#annotation-preview-panel")
+        editor.remove_class("annotation-modal-panel-active")
+        preview.remove_class("annotation-modal-panel-active")
+        if self._active_panel == "preview":
+            preview.add_class("annotation-modal-panel-active")
+        else:
+            editor.add_class("annotation-modal-panel-active")
 
 
 def extract_trajectory(data: Any) -> dict[str, Any] | None:
@@ -1460,6 +1586,7 @@ class JsonInspector(Vertical):
             AnnotationEditor(
                 path,
                 self._annotation_for_item(item),
+                item,
                 on_submit=self._handle_annotation_result,
             )
         )
