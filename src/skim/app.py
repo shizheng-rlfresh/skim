@@ -51,6 +51,9 @@ class SkimApp(App):
         padding: 0 1;
         border: round $background;
     }
+    PreviewPane:focus {
+        border: round $accent;
+    }
     PreviewPane.active-pane {
         border: round $accent;
     }
@@ -208,7 +211,7 @@ class SkimApp(App):
         return (
             " [bold]q[/] Quit  "
             "[bold]↑↓[/] Scroll  "
-            "[bold]f[/] File tree  "
+            "[bold]f[/] Toggle tree  "
             "[bold]⇧↑↓[/] Tree shortcut  "
             "[bold]Enter[/] Open  "
             "[bold]s[/]+arrow Split  "
@@ -221,7 +224,10 @@ class SkimApp(App):
         self.query_one("#status-bar", Static).update(self._status_text())
 
     def action_focus_file_tree(self) -> None:
-        """Enter file-tree focus mode."""
+        """Toggle focus between the file tree and the active preview pane."""
+        if self.file_tree_mode:
+            self.exit_file_tree_mode()
+            return
         self.file_tree_mode = True
         self.query_one(DirectoryTree).focus(scroll_visible=False)
         self._update_status_bar()
@@ -229,6 +235,7 @@ class SkimApp(App):
     def exit_file_tree_mode(self) -> None:
         """Leave file-tree focus mode and return to the active preview pane."""
         self.file_tree_mode = False
+        self._update_active_indicator()
         try:
             self.query_one(f"#{self.active_pane_id}", PreviewPane).focus(scroll_visible=False)
         except Exception:

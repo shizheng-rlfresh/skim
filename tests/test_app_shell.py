@@ -117,6 +117,28 @@ async def test_f_enters_file_tree_mode(tmp_path):
         assert app.focused is tree
 
 
+async def test_f_toggles_back_to_active_pane(tmp_path):
+    """Pressing f twice should return focus from the tree to the active pane."""
+    (tmp_path / "one.txt").write_text("x")
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        tree = app.query_one("DirectoryTree")
+
+        await pilot.press("f")
+        await pilot.pause()
+        assert app.file_tree_mode
+        assert app.focused is tree
+
+        await pilot.press("f")
+        await pilot.pause()
+        assert not app.file_tree_mode
+        assert app.focused is pane
+        assert pane.has_class("active-pane")
+
+
 async def test_file_tree_mode_up_down_moves_tree_cursor(tmp_path):
     """While file-tree mode is active, up/down should move the tree cursor."""
     for index in range(4):
