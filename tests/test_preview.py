@@ -20,6 +20,7 @@ from conftest import (
     sample_trajectory,
 )
 from rich.syntax import Syntax
+from rich.text import Text
 from textual.widgets import Collapsible, Input, Markdown, Static, TextArea, Tree
 
 from skim import JsonInspector, PreviewPane, SkimApp, render_file
@@ -228,6 +229,56 @@ async def test_json_inspector_shows_empty_annotation_section_for_annotatable_nod
         assert "No annotation yet" in annotation
         assert "Press a to annotate" in annotation
         assert "No annotation yet" not in detail
+
+
+async def test_json_inspector_detail_follows_tree_cursor_without_enter(tmp_path):
+    """Moving the JSON tree cursor should update the right panel immediately."""
+    test_file = tmp_path / "plain.json"
+    test_file.write_text(json.dumps({"alpha": 1, "beta": 2}))
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        pane.show_file(test_file)
+        await pilot.pause()
+
+        inspector = pane.query_one(JsonInspector)
+        inspector.focus_tree_mode()
+        await pilot.pause()
+
+        assert inspector._tree.cursor_node is inspector._tree.root.children[0]
+        assert "Path: $.alpha" in _detail_text(inspector)
+
+        await pilot.press("down")
+        await pilot.pause()
+
+        assert inspector._tree.cursor_node is inspector._tree.root.children[1]
+        assert "Path: $.beta" in _detail_text(inspector)
+
+
+async def test_json_inspector_pagedown_scrolls_detail_without_leaving_tree(tmp_path):
+    """PageDown should scroll long JSON detail while arrows remain tree-only."""
+    test_file = tmp_path / "plain.json"
+    long_text = "\n".join(f"line {index}" for index in range(200))
+    test_file.write_text(json.dumps({"log": long_text, "other": "x"}))
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        pane.show_file(test_file)
+        await pilot.pause()
+
+        inspector = pane.query_one(JsonInspector)
+        inspector.focus_tree_mode()
+        await pilot.pause()
+
+        first_node = inspector._tree.root.children[0]
+        before_scroll = inspector._detail_wrap.scroll_y
+        await pilot.press("pagedown")
+        await pilot.pause()
+
+        assert inspector._detail_wrap.scroll_y > before_scroll
+        assert inspector._tree.cursor_node is first_node
 
 
 async def test_json_inspector_shows_unavailable_state_for_summary_nodes(tmp_path):
@@ -443,6 +494,29 @@ async def test_annotation_modal_blocks_tree_and_pane_shortcuts(tmp_path):
         assert inspector._tree.cursor_node is first_node
         assert inspector._tree.cursor_node is not second_node
         assert app.active_pane_id == active_before
+
+
+async def test_json_inspector_footer_shows_live_preview_controls(tmp_path):
+    """The JSON footer should describe the always-visible detail model."""
+    test_file = tmp_path / "plain.json"
+    test_file.write_text(json.dumps({"hello": "world"}))
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        pane.show_file(test_file)
+        await pilot.pause()
+
+        inspector = pane.query_one(JsonInspector)
+        footer = inspector.query_one(".trajectory-footer", Static)
+        content = _static_content(footer)
+
+        assert isinstance(content, Text)
+        assert "Move" in content.plain
+        assert "Branch" in content.plain
+        assert "PgUp/Dn" in content.plain
+        assert "Detail" not in content.plain
+        assert "Back to JSON" not in content.plain
 
 
 def test_bundle_json_uses_json_inspector_with_human_run_labels(tmp_path):

@@ -1335,7 +1335,6 @@ class JsonInspector(Vertical):
         self.review_root = resolved_root.resolve()
         self._annotation_store = annotation_store or AnnotationStore(self.review_root)
         self._current_item: JsonInspectorItem | None = None
-        self._input_mode = "tree"
         self._tree: DragTree = DragTree("JSON", classes="trajectory-tree")
         self._build_tree()
         first_item = self._tree.root.children[0].data if self._tree.root.children else None
@@ -1374,6 +1373,16 @@ class JsonInspector(Vertical):
             self._show_detail(item)
         event.stop()
 
+    def on_tree_node_highlighted(
+        self,
+        event: TextualTree.NodeHighlighted[JsonInspectorItem],
+    ) -> None:
+        """Update detail when the highlighted JSON tree node changes."""
+        item = event.node.data
+        if isinstance(item, JsonInspectorItem):
+            self._show_detail(item)
+        event.stop()
+
     def _show_detail(self, item: JsonInspectorItem) -> None:
         """Replace the detail pane with widgets for the selected tree item."""
         self._current_item = item
@@ -1389,38 +1398,29 @@ class JsonInspector(Vertical):
 
     def is_tree_mode(self) -> bool:
         """Return whether keyboard navigation is driving the left tree."""
-        return self._input_mode == "tree"
+        return True
 
     def focus_tree_mode(self) -> None:
-        """Route navigation input to the tree."""
-        self._input_mode = "tree"
-        self._update_footer()
+        """Route keyboard focus to the JSON tree."""
         self._ensure_tree_cursor()
         if self.is_attached:
             self._tree.focus(scroll_visible=False)
 
     def focus_detail_mode(self) -> None:
-        """Route navigation input to the rendered detail pane."""
-        self._input_mode = "detail"
-        self._update_footer()
-        if self.is_attached:
-            self._detail_wrap.focus(scroll_visible=False)
+        """Keep compatibility with callers that expect a detail-focus method."""
+        self.focus_tree_mode()
 
     def handle_vertical_key(self, delta: int) -> bool:
-        """Handle up/down keys for the active JSON sub-view."""
-        if self.is_tree_mode():
-            if delta < 0:
-                self._tree.action_cursor_up()
-            else:
-                self._tree.action_cursor_down()
-            return True
-        self.scroll_detail(delta)
+        """Handle up/down keys by moving the JSON tree cursor."""
+        self._ensure_tree_cursor()
+        if delta < 0:
+            self._tree.action_cursor_up()
+        else:
+            self._tree.action_cursor_down()
         return True
 
     def handle_horizontal_key(self, key: str) -> bool:
         """Handle left/right tree navigation."""
-        if not self.is_tree_mode():
-            return False
         node = self._tree.cursor_node
         if node is None:
             return False
@@ -1439,19 +1439,12 @@ class JsonInspector(Vertical):
         return False
 
     def handle_enter_key(self) -> bool:
-        """Select the current tree item and move focus to the detail pane."""
-        if not self.is_tree_mode():
-            return False
+        """Consume Enter without switching JSON focus modes."""
         self._ensure_tree_cursor()
-        self._tree.action_select_cursor()
-        self.focus_detail_mode()
         return True
 
     def handle_escape_key(self) -> bool:
-        """Return keyboard control from detail back to the tree."""
-        if self.is_tree_mode():
-            return False
-        self.focus_tree_mode()
+        """Consume Escape without switching JSON focus modes."""
         return True
 
     def handle_annotation_key(self) -> bool:
@@ -1479,32 +1472,22 @@ class JsonInspector(Vertical):
             self._tree.move_cursor(self._tree.root.children[0], animate=False)
 
     def _footer_text(self) -> Text:
-        """Build the mode-aware local footer text."""
+        """Build the JSON-inspector footer text."""
         text = Text()
-        if self.is_tree_mode():
-            text.append(" JSON ", style="reverse")
-            text.append(" ")
-            text.append("↑↓", style="bold")
-            text.append(" Move  ")
-            text.append("←→", style="bold")
-            text.append(" Branch  ")
-            text.append("a", style="bold")
-            text.append(" Annotate  ")
-            text.append("Enter", style="bold")
-            text.append(" Detail")
-        else:
-            text.append(" Detail ", style="reverse")
-            text.append(" ")
-            text.append("↑↓", style="bold")
-            text.append(" Scroll  ")
-            text.append("a", style="bold")
-            text.append(" Annotate  ")
-            text.append("Esc", style="bold")
-            text.append(" Back to JSON")
+        text.append(" JSON ", style="reverse")
+        text.append(" ")
+        text.append("↑↓", style="bold")
+        text.append(" Move  ")
+        text.append("←→", style="bold")
+        text.append(" Branch  ")
+        text.append("PgUp/Dn", style="bold")
+        text.append(" Scroll  ")
+        text.append("a", style="bold")
+        text.append(" Annotate")
         return text
 
     def _update_footer(self) -> None:
-        """Refresh the local footer after mode changes."""
+        """Refresh the local footer."""
         self._footer.update(self._footer_text())
 
     def _build_tree(self) -> None:

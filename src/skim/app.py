@@ -25,6 +25,7 @@ from .trajectory import JsonInspector, TrajectoryViewer
 MAX_ROWS = 2
 MAX_COLS = 3
 SCROLL_STEP = 3
+PAGE_SCROLL_STEP = 20
 
 
 class SkimApp(App):
@@ -145,6 +146,8 @@ class SkimApp(App):
         Binding("down", "scroll_down", show=False, priority=True),
         Binding("j", "scroll_down", show=False, priority=True),
         Binding("k", "scroll_up", show=False, priority=True),
+        Binding("pageup", "page_up", show=False, priority=True),
+        Binding("pagedown", "page_down", show=False, priority=True),
         Binding("f", "focus_file_tree", show=False),
         Binding("s", "enter_split", show=False),
         Binding("d", "close_pane", show=False),
@@ -338,6 +341,34 @@ class SkimApp(App):
         if self._modal_is_active():
             return
         self.query_one(DirectoryTree).action_select_cursor()
+
+    def action_page_down(self) -> None:
+        """Scroll the active content by a page-sized amount."""
+        if self._modal_is_active():
+            return
+        try:
+            pane = self.query_one(f"#{self.active_pane_id}", PreviewPane)
+            viewer = pane.active_json_navigator()
+            if isinstance(viewer, JsonInspector):
+                viewer.scroll_detail(PAGE_SCROLL_STEP)
+                return
+            pane.scroll_relative(y=PAGE_SCROLL_STEP, animate=False)
+        except Exception:
+            pass
+
+    def action_page_up(self) -> None:
+        """Scroll the active content up by a page-sized amount."""
+        if self._modal_is_active():
+            return
+        try:
+            pane = self.query_one(f"#{self.active_pane_id}", PreviewPane)
+            viewer = pane.active_json_navigator()
+            if isinstance(viewer, JsonInspector):
+                viewer.scroll_detail(-PAGE_SCROLL_STEP)
+                return
+            pane.scroll_relative(y=-PAGE_SCROLL_STEP, animate=False)
+        except Exception:
+            pass
 
     def on_key(self, event: Key) -> None:
         """Handle split-mode keys and tree navigation shortcuts."""
