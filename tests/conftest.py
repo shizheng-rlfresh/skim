@@ -92,6 +92,62 @@ def multi_step_trajectory(step_count: int) -> dict[str, Any]:
     return trajectory
 
 
+def sample_submission() -> dict[str, Any]:
+    """Return a small worker-submission fixture for the JSON inspector."""
+    return {
+        "task_name": "Factors affecting WHPs",
+        "submission_type": "Complete task",
+        "prompt": "Compare spray diary information.",
+        "quick_scores": "Model A: 32%",
+        "quick_stats": "2 strong signals",
+        "agentic_grader_guidance": "Identify Chlorpyrifos.",
+        "task_solution": "Chlorpyrifos appears slower to decay than expected.",
+        "load_trajectories_s3": "https://example.invalid/trajectory.json",
+        "export_task_data_json": json.dumps(
+            {
+                "task_name": "Factors affecting WHPs",
+                "notes": ["Look for repeated residue issues."],
+            }
+        ),
+    }
+
+
+def sample_bundle() -> list[dict[str, str]]:
+    """Return a small bundle fixture with embedded task and trajectory JSON strings."""
+    trajectory = sample_trajectory()
+    trajectory["metadata"]["trajectory_id"] = "bundle-traj-c98cf3"
+    trajectory["metadata"]["llm_model"] = "claude-opus-4-6"
+    return [
+        {
+            "version": "1.0.0",
+            "task": json.dumps(
+                {
+                    "task_id": "bundle-task-1",
+                    "prompt": "Compare industry spray diary information.",
+                }
+            ),
+            "trajectory": json.dumps(trajectory),
+            "setup_files_url": "https://example.invalid/setup.zip",
+        }
+    ]
+
+
+def sample_hermes_transcript() -> dict[str, Any]:
+    """Return a small Hermes-style transcript fixture."""
+    return {
+        "model": "anthropic/claude-sonnet-4.6",
+        "timestamp": "2026-04-14T22:00:00Z",
+        "completed": True,
+        "conversations": [
+            {"from": "system", "value": "You are a structured reviewer."},
+            {"from": "human", "value": "Please inspect the trajectories."},
+            {"from": "assistant", "value": "I will start with the summary."},
+            {"from": "tool", "value": '{"stdout": "Report line 1\\nReport line 2"}'},
+            {"from": "assistant", "value": "The key issue is Chlorpyrifos."},
+        ],
+    }
+
+
 def _static_content(widget: Static) -> object:
     """Return the private Static content object for focused test inspection."""
     return widget._Static__content

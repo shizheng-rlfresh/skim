@@ -2,21 +2,27 @@
 
 This module covers how files are classified and routed into generic previews,
 the unified JSON inspector, or specialized non-JSON widgets such as CSV. It
-does not own app-shell interaction tests or trajectory-detail rendering behavior.
+uses tracked synthetic fixtures instead of ignored local sample files so CI and
+local runs exercise the same inputs.
 """
 
 import json
-from pathlib import Path
 
 import pytest
-from conftest import _detail_text, _static_content, _tree_labels, sample_trajectory
+from conftest import (
+    _detail_text,
+    _static_content,
+    _tree_labels,
+    sample_bundle,
+    sample_hermes_transcript,
+    sample_submission,
+    sample_trajectory,
+)
 from rich.syntax import Syntax
 from textual.widgets import Collapsible, Markdown, Static, Tree
 
 from skim import JsonInspector, PreviewPane, SkimApp, render_file
 from skim.preview import CsvPreview
-
-DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 
 
 def test_generic_json_uses_json_inspector(tmp_path):
@@ -34,7 +40,7 @@ def test_generic_json_uses_json_inspector(tmp_path):
 def test_csv_uses_specialized_preview(tmp_path):
     """CSV files should use the specialized CSV preview widget."""
     test_file = tmp_path / "example.csv"
-    test_file.write_text((DATA_DIR / "example.csv").read_text())
+    test_file.write_text("name,value\napple,4\norange,7\n")
 
     widgets = render_file(test_file)
 
@@ -42,9 +48,12 @@ def test_csv_uses_specialized_preview(tmp_path):
     assert isinstance(widgets[0], CsvPreview)
 
 
-def test_csv_preview_shows_table_and_raw_section():
+def test_csv_preview_shows_table_and_raw_section(tmp_path):
     """CSV preview should show a table summary plus a raw CSV section."""
-    widgets = render_file(DATA_DIR / "example.csv")
+    test_file = tmp_path / "example.csv"
+    test_file.write_text("name,value\napple,4\norange,7\n")
+
+    widgets = render_file(test_file)
 
     assert len(widgets) == 1
     preview = widgets[0]
@@ -163,9 +172,11 @@ def test_submission_json_uses_json_inspector(tmp_path):
     assert "Trajectory URL https://example.invalid/trajectory.json" in labels
 
 
-async def test_submission_summary_node_renders_summary_detail():
+async def test_submission_summary_node_renders_summary_detail(tmp_path):
     """Selecting the submission summary node should keep the summary in the inspector."""
-    widgets = render_file(DATA_DIR / "Factors affecting WHPs - v2.json")
+    test_file = tmp_path / "submission.json"
+    test_file.write_text(json.dumps(sample_submission()))
+    widgets = render_file(test_file)
     inspector = widgets[0]
     assert isinstance(inspector, JsonInspector)
 
@@ -183,9 +194,11 @@ async def test_submission_summary_node_renders_summary_detail():
         assert "Grader Guidance" in detail
 
 
-def test_bundle_json_uses_json_inspector_with_human_run_labels():
+def test_bundle_json_uses_json_inspector_with_human_run_labels(tmp_path):
     """Trajectory bundles should use the inspector with human-labeled array items."""
-    widgets = render_file(DATA_DIR / "trajectories.json")
+    test_file = tmp_path / "trajectories.json"
+    test_file.write_text(json.dumps(sample_bundle()))
+    widgets = render_file(test_file)
 
     assert len(widgets) == 1
     inspector = widgets[0]
@@ -195,9 +208,11 @@ def test_bundle_json_uses_json_inspector_with_human_run_labels():
     assert labels[1].startswith("[0] claude-opus-4-6 #")
 
 
-async def test_bundle_item_detail_decodes_embedded_task_and_trajectory():
+async def test_bundle_item_detail_decodes_embedded_task_and_trajectory(tmp_path):
     """Selecting a bundle item should decode embedded JSON strings in the detail pane."""
-    widgets = render_file(DATA_DIR / "trajectories.json")
+    test_file = tmp_path / "trajectories.json"
+    test_file.write_text(json.dumps(sample_bundle()))
+    widgets = render_file(test_file)
     inspector = widgets[0]
     assert isinstance(inspector, JsonInspector)
 
@@ -216,9 +231,11 @@ async def test_bundle_item_detail_decodes_embedded_task_and_trajectory():
         assert "Final Output" in detail
 
 
-def test_hermes_json_uses_json_inspector_with_transcript_labels():
+def test_hermes_json_uses_json_inspector_with_transcript_labels(tmp_path):
     """Hermes transcripts should use the inspector with smart conversation labels."""
-    widgets = render_file(DATA_DIR / "hermes_trajectory.json")
+    test_file = tmp_path / "hermes_trajectory.json"
+    test_file.write_text(json.dumps(sample_hermes_transcript()))
+    widgets = render_file(test_file)
 
     assert len(widgets) == 1
     inspector = widgets[0]
@@ -226,37 +243,51 @@ def test_hermes_json_uses_json_inspector_with_transcript_labels():
     labels = _tree_labels(inspector._tree)
     assert labels[0] == "Transcript Summary"
     assert "Conversations [5]" in labels
-    conversation_labels = [child.label.plain for child in inspector._tree.root.children[1].children]
+    conversations_node = next(
+        child
+        for child in inspector._tree.root.children
+        if child.label.plain.startswith("Conversations ")
+    )
+    conversation_labels = [child.label.plain for child in conversations_node.children]
     assert conversation_labels[0].startswith("[0] System")
     assert conversation_labels[1].startswith("[1] Human")
 
 
-async def test_output_json_exposes_raw_path_on_selectable_nodes():
+async def test_output_json_exposes_raw_path_on_selectable_nodes(tmp_path):
     """Each selectable JSON-inspector node should carry a stable raw path."""
-    widgets = render_file(DATA_DIR / "output.json")
+    test_file = tmp_path / "output.json"
+    test_file.write_text(json.dumps({"trajectory": sample_trajectory()}))
+    widgets = render_file(test_file)
     inspector = widgets[0]
     assert isinstance(inspector, JsonInspector)
 
     metadata_node = inspector._tree.root.children[0]
-    trajectory_node = inspector._tree.root.children[6]
+    trajectory_node = next(
+        child
+        for child in inspector._tree.root.children
+        if child.label.plain.startswith("Trajectory ")
+    )
     assert metadata_node.data.raw_path == ("trajectory", "metadata")
     assert trajectory_node.data.raw_path == ("trajectory",)
 
 
 @pytest.mark.parametrize(
-    ("sample_name", "lexer"),
+    ("filename", "lexer", "content"),
     [
-        ("example.xml", "xml"),
-        ("example.toml", "toml"),
-        ("example.css", "css"),
-        ("example.html", "html"),
-        ("example.sql", "sql"),
-        ("example.yaml", "yaml"),
+        ("example.xml", "xml", "<root><item>value</item></root>\n"),
+        ("example.toml", "toml", 'title = "skim"\n[tool]\nname = "preview"\n'),
+        ("example.css", "css", "body { color: #333; }\n"),
+        ("example.html", "html", "<!doctype html><html><body>skim</body></html>\n"),
+        ("example.sql", "sql", "select * from trajectories;\n"),
+        ("example.yaml", "yaml", "name: skim\nmode: preview\n"),
     ],
 )
-def test_sample_backed_text_formats_use_expected_syntax_preview(sample_name, lexer):
-    """Sample-backed README formats should route to the expected syntax preview."""
-    widgets = render_file(DATA_DIR / sample_name)
+def test_text_formats_use_expected_syntax_preview(tmp_path, filename, lexer, content):
+    """Tracked synthetic text fixtures should route to the expected syntax preview."""
+    test_file = tmp_path / filename
+    test_file.write_text(content)
+
+    widgets = render_file(test_file)
 
     assert len(widgets) == 1
     assert isinstance(widgets[0], Static)
@@ -266,7 +297,7 @@ def test_sample_backed_text_formats_use_expected_syntax_preview(sample_name, lex
 
 
 @pytest.mark.parametrize(
-    "sample_name",
+    "filename",
     [
         "review_note.md",
         "review_decision.md",
@@ -274,9 +305,12 @@ def test_sample_backed_text_formats_use_expected_syntax_preview(sample_name, lex
         "score_submission.md",
     ],
 )
-def test_sample_backed_markdown_formats_render_markdown(sample_name):
-    """Markdown samples should render through the Markdown widget."""
-    widgets = render_file(DATA_DIR / sample_name)
+def test_markdown_formats_render_markdown(tmp_path, filename):
+    """Tracked synthetic markdown fixtures should render through Markdown."""
+    test_file = tmp_path / filename
+    test_file.write_text("# Heading\n\n- item one\n- item two\n")
+
+    widgets = render_file(test_file)
 
     assert len(widgets) == 1
     assert isinstance(widgets[0], Markdown)
