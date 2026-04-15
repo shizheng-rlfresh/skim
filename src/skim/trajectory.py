@@ -1968,9 +1968,7 @@ def _annotation_panel_widgets(
 
     if annotation is None:
         widgets.extend(_metadata_fields([("Status", "No annotation"), ("Tags", "(none)")]))
-        widgets.append(
-            Static(Text("No annotation yet"), classes="annotation-status-body")
-        )
+        widgets.append(Static(Text("No annotation yet"), classes="annotation-status-body"))
         widgets.append(
             Static(Text("Press a to annotate", style="dim"), classes="annotation-status-hint")
         )
