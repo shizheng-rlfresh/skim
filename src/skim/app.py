@@ -15,6 +15,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.events import Key
+from textual.screen import ModalScreen
 from textual.widgets import Header, Static
 
 from .preview import PreviewPane
@@ -68,8 +69,20 @@ class SkimApp(App):
         min-width: 28;
         height: 1fr;
     }
-    .trajectory-detail-wrap {
+    .trajectory-detail-column {
         width: 2fr;
+        height: 1fr;
+    }
+    .annotation-status-panel {
+        height: 8;
+        min-height: 8;
+        border: round $panel-lighten-1;
+        background: $surface-lighten-1;
+        padding: 0 1;
+        margin: 0 0 1 0;
+    }
+    .trajectory-detail-wrap {
+        width: 1fr;
         height: 1fr;
         padding: 0 1;
     }
@@ -243,8 +256,20 @@ class SkimApp(App):
         """Refresh the global status bar text."""
         self.query_one("#status-bar", Static).update(self._status_text())
 
+    def _modal_is_active(self) -> bool:
+        """Return whether a modal screen currently owns keyboard interaction."""
+        return isinstance(self.screen, ModalScreen)
+
+    def action_quit(self) -> None:
+        """Quit the app unless a modal screen is active."""
+        if self._modal_is_active():
+            return
+        self.exit()
+
     def action_focus_file_tree(self) -> None:
         """Toggle focus between the file tree and the active preview pane."""
+        if self._modal_is_active():
+            return
         if self.file_tree_mode:
             self.exit_file_tree_mode()
             return
@@ -264,6 +289,8 @@ class SkimApp(App):
 
     def action_scroll_down(self) -> None:
         """Scroll down in the active pane or confirm a downward split."""
+        if self._modal_is_active():
+            return
         if self.split_mode:
             self.split_mode = False
             self._split("down")
@@ -279,6 +306,8 @@ class SkimApp(App):
 
     def action_scroll_up(self) -> None:
         """Scroll up in the active pane or confirm an upward split."""
+        if self._modal_is_active():
+            return
         if self.split_mode:
             self.split_mode = False
             self._split("up")
@@ -294,18 +323,27 @@ class SkimApp(App):
 
     def action_tree_up(self) -> None:
         """Move the directory tree cursor up."""
+        if self._modal_is_active():
+            return
         self.query_one(DirectoryTree).action_cursor_up()
 
     def action_tree_down(self) -> None:
         """Move the directory tree cursor down."""
+        if self._modal_is_active():
+            return
         self.query_one(DirectoryTree).action_cursor_down()
 
     def action_tree_select(self) -> None:
         """Open the currently selected tree item."""
+        if self._modal_is_active():
+            return
         self.query_one(DirectoryTree).action_select_cursor()
 
     def on_key(self, event: Key) -> None:
         """Handle split-mode keys and tree navigation shortcuts."""
+        if self._modal_is_active():
+            return
+
         if self.split_mode:
             direction_map = {
                 "left": "left",
@@ -402,6 +440,8 @@ class SkimApp(App):
 
     def action_enter_split(self) -> None:
         """Enter split mode for the next direction key."""
+        if self._modal_is_active():
+            return
         if self._total_panes() >= MAX_ROWS * MAX_COLS:
             self.notify("Maximum 6 panes reached", severity="warning")
             return
@@ -450,6 +490,8 @@ class SkimApp(App):
 
     def action_close_pane(self) -> None:
         """Close the active pane unless it is the last one."""
+        if self._modal_is_active():
+            return
         if self._total_panes() <= 1:
             self.notify("Cannot close last pane", severity="warning")
             return
@@ -474,6 +516,8 @@ class SkimApp(App):
 
     def action_cycle_pane(self) -> None:
         """Cycle the active pane through the current grid order."""
+        if self._modal_is_active():
+            return
         panes = [pane_id for row in self.grid for pane_id in row]
         if len(panes) <= 1:
             return

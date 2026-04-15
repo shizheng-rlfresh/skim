@@ -238,6 +238,17 @@ class AnnotationEditor(ModalScreen[AnnotationEditorResult | None]):
             id="annotation-modal",
         )
 
+    def on_mount(self) -> None:
+        """Focus the tags field when the modal opens."""
+        self.query_one("#annotation-tags", Input).focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Advance from tags input to note instead of submitting the modal."""
+        if event.input.id != "annotation-tags":
+            return
+        self.query_one("#annotation-note", TextArea).focus()
+        event.stop()
+
     def action_cancel(self) -> None:
         """Dismiss the modal without changes."""
         self.dismiss(None)
@@ -1328,18 +1339,32 @@ class JsonInspector(Vertical):
         self._tree: DragTree = DragTree("JSON", classes="trajectory-tree")
         self._build_tree()
         first_item = self._tree.root.children[0].data if self._tree.root.children else None
-        initial_widgets: list[Widget] = []
+        initial_detail_widgets: list[Widget] = []
+        initial_annotation_widgets: list[Widget] = _annotation_panel_widgets(None, False)
         if isinstance(first_item, JsonInspectorItem):
             self._current_item = first_item
-            initial_widgets = self._detail_widgets_for_item(first_item)
-        self._detail_wrap = FocusableDetailWrap(*initial_widgets, classes="trajectory-detail-wrap")
+            initial_detail_widgets = self._detail_widgets_for_item(first_item)
+            initial_annotation_widgets = self._annotation_widgets_for_item(first_item)
+        self._annotation_wrap = Vertical(
+            *initial_annotation_widgets,
+            classes="annotation-status-panel",
+        )
+        self._detail_wrap = FocusableDetailWrap(
+            *initial_detail_widgets,
+            classes="trajectory-detail-wrap",
+        )
+        self._detail_column = Vertical(
+            self._annotation_wrap,
+            self._detail_wrap,
+            classes="trajectory-detail-column",
+        )
         self._footer = Static(self._footer_text(), classes="trajectory-footer")
 
     def compose(self) -> ComposeResult:
         """Compose the JSON tree, detail panel, and local footer."""
         with Horizontal(classes="trajectory-body"):
             yield self._tree
-            yield self._detail_wrap
+            yield self._detail_column
         yield self._footer
 
     def on_tree_node_selected(self, event: TextualTree.NodeSelected[JsonInspectorItem]) -> None:
@@ -1352,6 +1377,8 @@ class JsonInspector(Vertical):
     def _show_detail(self, item: JsonInspectorItem) -> None:
         """Replace the detail pane with widgets for the selected tree item."""
         self._current_item = item
+        self._annotation_wrap.remove_children()
+        self._annotation_wrap.mount(*self._annotation_widgets_for_item(item))
         self._detail_wrap.remove_children()
         self._detail_wrap.mount(*self._detail_widgets_for_item(item))
         self._detail_wrap.scroll_home(animate=False)
@@ -1737,10 +1764,13 @@ class JsonInspector(Vertical):
 
     def _detail_widgets_for_item(self, item: JsonInspectorItem) -> list[Widget]:
         """Return detail widgets for one selected JSON node."""
-        return _json_detail_widgets(
-            item,
-            annotation=self._annotation_for_item(item),
-            annotatable=self._is_annotatable(item),
+        return _json_detail_widgets(item)
+
+    def _annotation_widgets_for_item(self, item: JsonInspectorItem) -> list[Widget]:
+        """Return annotation-panel widgets for one selected JSON node."""
+        return _annotation_panel_widgets(
+            self._annotation_for_item(item),
+            self._is_annotatable(item),
         )
 
     def _annotation_item(self) -> JsonInspectorItem | None:
@@ -1814,12 +1844,7 @@ class JsonInspector(Vertical):
             node.set_label(self._tree_label_for_item(item))
 
 
-def _json_detail_widgets(
-    item: JsonInspectorItem,
-    *,
-    annotation: AnnotationRecord | None,
-    annotatable: bool,
-) -> list[Widget]:
+def _json_detail_widgets(item: JsonInspectorItem) -> list[Widget]:
     """Return detail widgets for a selected JSON-inspector node."""
     path = _format_raw_path(item.annotation_path or item.raw_path)
     title = Text(item.title or "JSON", style="bold")
@@ -1828,7 +1853,6 @@ def _json_detail_widgets(
     if item.trajectory_item is None:
         metadata.append(("Type", _json_type_name(item.raw_value)))
     widgets.extend(_metadata_fields(metadata))
-    widgets.extend(_annotation_detail_widgets(annotation, annotatable))
 
     if item.trajectory_item is not None:
         widgets.extend(_detail_widgets_for_item(item.trajectory_item))
@@ -1845,27 +1869,53 @@ def _json_detail_widgets(
     return widgets
 
 
-def _annotation_detail_widgets(
+def _annotation_panel_widgets(
     annotation: AnnotationRecord | None,
     annotatable: bool,
 ) -> list[Widget]:
-    """Return the annotation block for one selected JSON node."""
+    """Return the separate annotation-status panel for one selected JSON node."""
+    widgets: list[Widget] = [
+        Static(Text("Annotation", style="bold"), classes="annotation-status-title")
+    ]
     if not annotatable:
-        return []
-
-    widgets: list[Widget] = [Static(Text("Annotation", style="bold"), classes="trajectory-detail")]
-    if annotation is None:
-        widgets.append(Static(Text("No annotation yet"), classes="trajectory-detail"))
-        widgets.append(
-            Static(Text("Press a to annotate", style="dim"), classes="trajectory-detail")
+        widgets.extend(
+            _metadata_fields([("Status", "Unavailable")])
+            + [
+                Static(
+                    Text("Summary nodes do not map to raw JSON targets."),
+                    classes="annotation-status-body",
+                ),
+                Static(
+                    Text("Select a raw or mapped overlay node to annotate.", style="dim"),
+                    classes="annotation-status-hint",
+                ),
+            ]
         )
         return widgets
 
-    widgets.extend(_metadata_fields([("Tags", ", ".join(annotation.tags))]))
+    if annotation is None:
+        widgets.extend(_metadata_fields([("Status", "No annotation"), ("Tags", "(none)")]))
+        widgets.append(
+            Static(Text("No annotation yet"), classes="annotation-status-body")
+        )
+        widgets.append(
+            Static(Text("Press a to annotate", style="dim"), classes="annotation-status-hint")
+        )
+        return widgets
+
+    widgets.extend(
+        _metadata_fields(
+            [
+                ("Status", "Annotated"),
+                ("Tags", ", ".join(annotation.tags) if annotation.tags else "(none)"),
+            ]
+        )
+    )
     note = Text()
     note.append("Note: ", style="bold cyan")
     note.append(annotation.note or "(empty)")
-    widgets.append(Static(note, classes="trajectory-detail"))
+    widgets.append(Static(note, classes="annotation-status-body"))
+    widgets.append(Static(Text("Press a to edit", style="dim"), classes="annotation-status-hint"))
     return widgets
 
 
