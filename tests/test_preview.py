@@ -574,6 +574,37 @@ async def test_annotation_modal_pagedown_scrolls_preview_panel_from_editor_focus
         assert preview.scroll_y > before
 
 
+async def test_annotation_modal_footer_shows_modal_commands(tmp_path):
+    """The annotation modal should show a local footer with its own key hints."""
+    test_file = tmp_path / "plain.json"
+    test_file.write_text(json.dumps({"alpha": 1}))
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        pane.show_file(test_file)
+        await pilot.pause()
+
+        await pilot.press("a")
+        await pilot.pause()
+
+        footer = app.screen.query_one("#annotation-modal-footer", Static)
+        content = _static_content(footer)
+
+        assert isinstance(content, Text)
+        assert "Annotation" in content.plain
+        assert "Esc" in content.plain
+        assert "Close" in content.plain
+        assert "Tab" in content.plain
+        assert "Next field" in content.plain
+        assert "Enter" in content.plain
+        assert "Tags→Note" in content.plain
+        assert "PgUp/Dn" in content.plain
+        assert "Scroll preview" in content.plain
+        assert "Move" not in content.plain
+        assert "Branch" not in content.plain
+
+
 async def test_annotation_modal_blocks_tree_and_pane_shortcuts(tmp_path):
     """While the annotation modal is open, app-level shortcuts should not fire."""
     first_file = tmp_path / "plain.json"

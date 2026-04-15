@@ -226,39 +226,46 @@ class AnnotationEditor(ModalScreen[AnnotationEditorResult | None]):
         """Compose the modal editor widgets."""
         tags = ", ".join(self.annotation.tags) if self.annotation is not None else ""
         note = self.annotation.note if self.annotation is not None else ""
-        yield Horizontal(
-            Vertical(
-                Static(Text("Edit Annotation", style="bold"), classes="annotation-modal-title"),
-                Static(Text(f"Path: {self.path}", style="dim"), classes="annotation-modal-path"),
-                Input(value=tags, placeholder="tags, comma, separated", id="annotation-tags"),
-                TextArea(note, id="annotation-note"),
-                Horizontal(
-                    Button("Save", id="annotation-save", variant="primary"),
-                    Button(
-                        "Delete",
-                        id="annotation-delete",
-                        variant="error",
-                        disabled=self.annotation is None,
+        yield Vertical(
+            Horizontal(
+                Vertical(
+                    Static(Text("Edit Annotation", style="bold"), classes="annotation-modal-title"),
+                    Static(
+                        Text(f"Path: {self.path}", style="dim"),
+                        classes="annotation-modal-path",
                     ),
-                    Button("Cancel", id="annotation-cancel"),
-                    classes="annotation-modal-actions",
+                    Input(value=tags, placeholder="tags, comma, separated", id="annotation-tags"),
+                    TextArea(note, id="annotation-note"),
+                    Horizontal(
+                        Button("Save", id="annotation-save", variant="primary"),
+                        Button(
+                            "Delete",
+                            id="annotation-delete",
+                            variant="error",
+                            disabled=self.annotation is None,
+                        ),
+                        Button("Cancel", id="annotation-cancel"),
+                        classes="annotation-modal-actions",
+                    ),
+                    id="annotation-editor-panel",
+                    classes="annotation-modal-panel",
                 ),
-                id="annotation-editor-panel",
-                classes="annotation-modal-panel",
+                Vertical(
+                    Static(
+                        Text("Node Preview", style="bold"),
+                        classes="annotation-modal-preview-title",
+                    ),
+                    FocusableDetailWrap(
+                        *_json_detail_widgets(self.item),
+                        id="annotation-preview",
+                        classes="annotation-modal-preview",
+                    ),
+                    id="annotation-preview-panel",
+                    classes="annotation-modal-panel",
+                ),
+                classes="annotation-modal-body",
             ),
-            Vertical(
-                Static(
-                    Text("Node Preview", style="bold"),
-                    classes="annotation-modal-preview-title",
-                ),
-                FocusableDetailWrap(
-                    *_json_detail_widgets(self.item),
-                    id="annotation-preview",
-                    classes="annotation-modal-preview",
-                ),
-                id="annotation-preview-panel",
-                classes="annotation-modal-panel",
-            ),
+            Static(self._footer_text(), id="annotation-modal-footer", classes="trajectory-footer"),
             id="annotation-modal",
         )
 
@@ -321,6 +328,21 @@ class AnnotationEditor(ModalScreen[AnnotationEditorResult | None]):
         if self._on_submit is not None:
             self._on_submit(result)
         self.dismiss(result)
+
+    def _footer_text(self) -> Text:
+        """Build the modal-local footer text."""
+        text = Text()
+        text.append(" Annotation ", style="reverse")
+        text.append(" ")
+        text.append("Esc", style="bold")
+        text.append(" Close  ")
+        text.append("Tab", style="bold")
+        text.append(" Next field  ")
+        text.append("Enter", style="bold")
+        text.append(" Tags→Note  ")
+        text.append("PgUp/Dn", style="bold")
+        text.append(" Scroll preview")
+        return text
 
 
 def extract_trajectory(data: Any) -> dict[str, Any] | None:

@@ -106,6 +106,9 @@ class SkimApp(App):
         border: round $accent;
         background: $surface;
     }
+    .annotation-modal-body {
+        height: 1fr;
+    }
     .annotation-modal-panel {
         height: 1fr;
         padding: 0 1;
