@@ -11,6 +11,7 @@ from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.css.query import NoMatches
 from textual.events import Key
 from textual.widget import Widget
 from textual.widgets import Collapsible, DirectoryTree, Header, Markdown, Static, Tree
@@ -1133,11 +1134,14 @@ class PreviewPane(VerticalScroll, can_focus=True):
 
     def scroll_content(self, delta: int) -> None:
         """Scroll specialized inner content when present, else scroll the pane."""
-        viewer = self.query(TrajectoryViewer).first()
+        try:
+            viewer = self.query(TrajectoryViewer).first()
+        except NoMatches:
+            viewer = None
         if isinstance(viewer, TrajectoryViewer):
             viewer.scroll_detail(delta)
-            return
-        self.scroll_relative(y=delta, animate=False)
+        else:
+            self.scroll_relative(y=delta, animate=False)
 
 
 class SkimApp(App):

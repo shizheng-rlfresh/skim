@@ -517,6 +517,24 @@ async def test_split_panes_keep_specialized_preview(tmp_path):
         assert isinstance(pane.query_one(TrajectoryViewer), TrajectoryViewer)
 
 
+async def test_scroll_keys_scroll_generic_preview_pane(tmp_path):
+    """App scroll actions should still scroll a normal preview pane."""
+    test_file = tmp_path / "long.txt"
+    test_file.write_text("\n".join(f"line {index}" for index in range(400)))
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        pane.show_file(test_file)
+        await pilot.pause()
+
+        before = pane.scroll_y
+        await pilot.press("down")
+        await pilot.pause()
+
+        assert pane.scroll_y > before
+
+
 async def test_scroll_keys_scroll_trajectory_detail_panel():
     """App scroll actions should scroll the trajectory detail panel, not only the outer pane."""
     stdout = "\n".join(f"line {index}" for index in range(200))
