@@ -43,6 +43,52 @@ def test_generic_json_uses_json_inspector(tmp_path):
     assert _tree_labels(widgets[0]._tree) == ["Hello world"]
 
 
+def test_ipynb_uses_json_inspector(tmp_path):
+    """Notebook files should use the unified JSON inspector."""
+    test_file = tmp_path / "notebook.ipynb"
+    test_file.write_text(
+        json.dumps(
+            {
+                "cells": [
+                    {
+                        "cell_type": "markdown",
+                        "metadata": {},
+                        "source": ["# Title\n"],
+                    }
+                ],
+                "metadata": {"kernelspec": {"display_name": "Python 3"}},
+                "nbformat": 4,
+                "nbformat_minor": 5,
+            }
+        )
+    )
+
+    widgets = render_file(test_file)
+
+    assert len(widgets) == 1
+    assert isinstance(widgets[0], JsonInspector)
+
+
+def test_ipynd_uses_json_inspector(tmp_path):
+    """The typo-tolerant notebook extension should route through the JSON inspector too."""
+    test_file = tmp_path / "notebook.ipynd"
+    test_file.write_text(
+        json.dumps(
+            {
+                "cells": [],
+                "metadata": {},
+                "nbformat": 4,
+                "nbformat_minor": 5,
+            }
+        )
+    )
+
+    widgets = render_file(test_file)
+
+    assert len(widgets) == 1
+    assert isinstance(widgets[0], JsonInspector)
+
+
 def test_render_file_passes_source_context_to_json_inspector(tmp_path):
     """JSON inspectors should know the source file and review root."""
     test_file = tmp_path / "plain.json"
@@ -127,6 +173,18 @@ def test_csv_preview_caps_wide_and_long_content(tmp_path):
 def test_invalid_json_falls_back_to_syntax_preview(tmp_path):
     """Invalid JSON still renders through the generic JSON path."""
     test_file = tmp_path / "broken.json"
+    test_file.write_text("{not json")
+
+    widgets = render_file(test_file)
+
+    assert len(widgets) == 1
+    assert isinstance(widgets[0], Static)
+    assert isinstance(_static_content(widgets[0]), Syntax)
+
+
+def test_invalid_ipynb_falls_back_to_syntax_preview(tmp_path):
+    """Invalid notebook JSON should still render as syntax-highlighted text."""
+    test_file = tmp_path / "broken.ipynb"
     test_file.write_text("{not json")
 
     widgets = render_file(test_file)

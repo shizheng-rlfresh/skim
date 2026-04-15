@@ -28,6 +28,8 @@ from .trajectory import JsonInspector, TrajectoryViewer
 SYNTAX_MAP = {
     ".py": "python",
     ".json": "json",
+    ".ipynb": "json",
+    ".ipynd": "json",
     ".js": "javascript",
     ".ts": "typescript",
     ".html": "html",
@@ -44,6 +46,7 @@ SYNTAX_MAP = {
     ".csv": "csv",
 }
 MARKDOWN_EXTENSIONS = {".md", ".markdown", ".mdown"}
+JSON_EXTENSIONS = {".json", ".ipynb", ".ipynd"}
 MAX_FILE_SIZE = 1_000_000
 MAX_JSON_FILE_SIZE = 10_000_000
 MAX_CSV_ROWS = 20
@@ -132,7 +135,7 @@ def render_file(path: Path, *, browse_root: Path | None = None) -> list[Widget]:
 
     suffix = path.suffix.lower()
     size = path.stat().st_size
-    max_size = MAX_JSON_FILE_SIZE if suffix == ".json" else MAX_FILE_SIZE
+    max_size = MAX_JSON_FILE_SIZE if suffix in JSON_EXTENSIONS else MAX_FILE_SIZE
     if size > max_size:
         return [Static(Text(f"{path.name} is too large ({size:,} bytes)", style="red"))]
 
@@ -144,7 +147,7 @@ def render_file(path: Path, *, browse_root: Path | None = None) -> list[Widget]:
     if suffix in MARKDOWN_EXTENSIONS:
         return [Markdown(content)]
 
-    if suffix == ".json":
+    if suffix in JSON_EXTENSIONS:
         try:
             parsed = json.loads(content)
             return [
