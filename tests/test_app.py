@@ -611,6 +611,98 @@ async def test_escape_returns_from_trajectory_detail_to_tree_mode():
         assert viewer._detail_wrap.scroll_y == scrolled
 
 
+async def test_trajectory_viewer_mounts_local_footer():
+    """Trajectory viewer should render its own local command footer."""
+    viewer = TrajectoryViewer(sample_trajectory())
+    app = SkimApp(path=".")
+
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        await pane.mount(viewer)
+        await pilot.pause()
+
+        footer = viewer.query_one(".trajectory-footer", Static)
+        content = _static_content(footer)
+
+        assert isinstance(content, Text)
+        assert "Move" in content.plain
+        assert "Branch" in content.plain
+        assert "Detail" in content.plain
+
+
+async def test_trajectory_footer_switches_between_tree_and_detail_modes():
+    """Trajectory footer should track tree/detail keyboard mode."""
+    viewer = TrajectoryViewer(sample_trajectory())
+    app = SkimApp(path=".")
+
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        await pane.mount(viewer)
+        await pilot.pause()
+        viewer.focus_tree_mode()
+
+        footer = viewer.query_one(".trajectory-footer", Static)
+        tree_content = _static_content(footer)
+        assert isinstance(tree_content, Text)
+        assert "Move" in tree_content.plain
+        assert "Branch" in tree_content.plain
+
+        await pilot.press("enter")
+        await pilot.pause()
+
+        detail_content = _static_content(footer)
+        assert isinstance(detail_content, Text)
+        assert "Scroll" in detail_content.plain
+        assert "Back to JSON" in detail_content.plain
+
+        await pilot.press("escape")
+        await pilot.pause()
+
+        reset_content = _static_content(footer)
+        assert isinstance(reset_content, Text)
+        assert "Move" in reset_content.plain
+        assert "Branch" in reset_content.plain
+
+
+async def test_global_footer_only_shows_app_wide_commands():
+    """Global footer should not include trajectory-specific commands."""
+    app = SkimApp(path=".")
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        footer = app.query_one("#status-bar", Static)
+        content = _static_content(footer)
+
+        assert isinstance(content, str)
+        assert "Scroll" in content
+        assert "Open" in content
+        assert "JSON" not in content
+        assert "Branch" not in content
+        assert "Detail" not in content
+        assert "Esc" not in content
+
+
+async def test_non_trajectory_previews_do_not_mount_local_footer(tmp_path):
+    """Only trajectory previews should render a local footer."""
+    generic = tmp_path / "data.json"
+    generic.write_text('{"alpha": 1}')
+    submission = tmp_path / "submission.json"
+    submission.write_text('{"task_name": "Task", "submission_type": "worker", "prompt": "Prompt"}')
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+
+        pane.show_file(generic)
+        await pilot.pause()
+        assert not pane.query(".trajectory-footer")
+
+        pane.show_file(submission)
+        await pilot.pause()
+        assert not pane.query(".trajectory-footer")
+
+
 def sample_trajectory(
     stdout: str = "plain terminal output",
     arguments: dict | None = None,

@@ -1006,6 +1006,7 @@ class TrajectoryViewer(Vertical):
         if isinstance(first_item, TrajectoryTreeItem):
             initial_widgets = _detail_widgets_for_item(first_item)
         self._detail_wrap = FocusableDetailWrap(*initial_widgets, classes="trajectory-detail-wrap")
+        self._footer = Static(self._footer_text(), classes="trajectory-footer")
 
     def compose(self) -> ComposeResult:
         """Compose the trajectory summary, event tree, and detail panel."""
@@ -1013,6 +1014,7 @@ class TrajectoryViewer(Vertical):
         with Horizontal(classes="trajectory-body"):
             yield self._tree
             yield self._detail_wrap
+        yield self._footer
 
     def on_tree_node_selected(self, event: Tree.NodeSelected[TrajectoryTreeItem]) -> None:
         """Update detail when a trajectory tree node is selected."""
@@ -1038,6 +1040,7 @@ class TrajectoryViewer(Vertical):
     def focus_tree_mode(self) -> None:
         """Route navigation input to the tree."""
         self._input_mode = "tree"
+        self._update_footer()
         self._ensure_tree_cursor()
         if self.is_attached:
             self._tree.focus(scroll_visible=False)
@@ -1045,6 +1048,7 @@ class TrajectoryViewer(Vertical):
     def focus_detail_mode(self) -> None:
         """Route navigation input to the rendered detail pane."""
         self._input_mode = "detail"
+        self._update_footer()
         if self.is_attached:
             self._detail_wrap.focus(scroll_visible=False)
 
@@ -1101,6 +1105,31 @@ class TrajectoryViewer(Vertical):
         cursor = self._tree.cursor_node
         if (cursor is None or cursor.is_root) and self._tree.root.children:
             self._tree.move_cursor(self._tree.root.children[0], animate=False)
+
+    def _footer_text(self) -> Text:
+        """Build the mode-aware local footer text."""
+        text = Text()
+        if self.is_tree_mode():
+            text.append(" JSON ", style="reverse")
+            text.append(" ")
+            text.append("↑↓", style="bold")
+            text.append(" Move  ")
+            text.append("←→", style="bold")
+            text.append(" Branch  ")
+            text.append("Enter", style="bold")
+            text.append(" Detail")
+        else:
+            text.append(" Detail ", style="reverse")
+            text.append(" ")
+            text.append("↑↓", style="bold")
+            text.append(" Scroll  ")
+            text.append("Esc", style="bold")
+            text.append(" Back to JSON")
+        return text
+
+    def _update_footer(self) -> None:
+        """Refresh the local footer after mode changes."""
+        self._footer.update(self._footer_text())
 
     def _build_tree(self) -> None:
         """Populate the trajectory tree."""
@@ -1283,6 +1312,13 @@ class SkimApp(App):
     .trajectory-detail-field {
         padding: 0 1;
     }
+    .trajectory-footer {
+        height: 1;
+        color: $text-muted;
+        background: $surface-lighten-1;
+        padding: 0 1;
+        margin: 1 0 0 0;
+    }
     Collapsible.trajectory-section {
         margin: 0 0 1 0;
     }
@@ -1319,11 +1355,9 @@ class SkimApp(App):
 
     STATUS_TEXT = (
         " [bold]q[/] Quit  "
-        "[bold]↑↓[/] Scroll / JSON tree  "
-        "[bold]←→[/] JSON branches  "
-        "[bold]Esc[/] JSON tree  "
+        "[bold]↑↓[/] Scroll  "
         "[bold]⇧↑↓[/] Tree  "
-        "[bold]Enter[/] Open / Detail  "
+        "[bold]Enter[/] Open  "
         "[bold]s[/]+arrow Split  "
         "[bold]d[/] Close  "
         "[bold]w[/] Next pane"
