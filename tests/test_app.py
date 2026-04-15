@@ -703,6 +703,65 @@ async def test_non_trajectory_previews_do_not_mount_local_footer(tmp_path):
         assert not pane.query(".trajectory-footer")
 
 
+async def test_preview_pane_uses_stable_scrollbar_styles(tmp_path):
+    """Preview panes should reserve draggable scrollbar gutter space."""
+    test_file = tmp_path / "long.txt"
+    test_file.write_text("\n".join(f"line {index}" for index in range(200)))
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        pane.show_file(test_file)
+        await pilot.pause()
+
+        assert pane.styles.scrollbar_gutter == "stable"
+        assert pane.styles.scrollbar_size_vertical == 3
+
+
+async def test_directory_tree_uses_stable_scrollbar_styles(tmp_path):
+    """The file tree should expose the same draggable scrollbar affordance."""
+    for index in range(40):
+        (tmp_path / f"file_{index}.txt").write_text("x")
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        tree = app.query_one("DirectoryTree")
+
+        assert tree.styles.scrollbar_gutter == "stable"
+        assert tree.styles.scrollbar_size_vertical == 3
+
+
+async def test_trajectory_tree_uses_stable_scrollbar_styles():
+    """Trajectory tree should reserve gutter space for a draggable scrollbar."""
+    viewer = TrajectoryViewer(sample_trajectory())
+    app = SkimApp(path=".")
+
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        await pane.mount(viewer)
+        await pilot.pause()
+        tree = viewer.query_one(".trajectory-tree", Tree)
+
+        assert tree.styles.scrollbar_gutter == "stable"
+        assert tree.styles.scrollbar_size_vertical == 3
+
+
+async def test_trajectory_detail_uses_stable_scrollbar_styles():
+    """Trajectory detail pane should reserve gutter space for a draggable scrollbar."""
+    viewer = TrajectoryViewer(sample_trajectory())
+    app = SkimApp(path=".")
+
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        await pane.mount(viewer)
+        await pilot.pause()
+        detail = viewer.query_one(".trajectory-detail-wrap")
+
+        assert detail.styles.scrollbar_gutter == "stable"
+        assert detail.styles.scrollbar_size_vertical == 3
+
+
 def sample_trajectory(
     stdout: str = "plain terminal output",
     arguments: dict | None = None,

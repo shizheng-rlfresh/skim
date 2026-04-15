@@ -1278,6 +1278,19 @@ class SkimApp(App):
         max-width: 40;
         border-right: solid $primary-background;
     }
+    DirectoryTree,
+    PreviewPane,
+    .trajectory-tree,
+    .trajectory-detail-wrap {
+        scrollbar-gutter: stable;
+        scrollbar-size-vertical: 3;
+        scrollbar-background: $surface-lighten-1;
+        scrollbar-background-hover: $surface-lighten-1;
+        scrollbar-background-active: $surface-lighten-1;
+        scrollbar-color: $accent;
+        scrollbar-color-hover: $accent;
+        scrollbar-color-active: $accent;
+    }
     #preview-area {
         width: 3fr;
     }
