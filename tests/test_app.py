@@ -1,6 +1,7 @@
 """Tests for skim."""
 
 import json
+from typing import Any
 
 from rich.syntax import Syntax
 from rich.text import Text
@@ -703,38 +704,48 @@ async def test_non_trajectory_previews_do_not_mount_local_footer(tmp_path):
         assert not pane.query(".trajectory-footer")
 
 
-async def test_preview_pane_uses_stable_scrollbar_styles(tmp_path):
-    """Preview panes should reserve draggable scrollbar gutter space."""
+async def test_mouse_drag_scrolls_preview_pane(tmp_path):
+    """Dragging inside a preview pane should scroll long generic content."""
     test_file = tmp_path / "long.txt"
-    test_file.write_text("\n".join(f"line {index}" for index in range(200)))
+    test_file.write_text("\n".join(f"line {index}" for index in range(400)))
     app = SkimApp(path=str(tmp_path))
 
     async with app.run_test() as pilot:
         pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
         pane.show_file(test_file)
         await pilot.pause()
+        before = pane.scroll_y
 
-        assert pane.styles.scrollbar_gutter == "stable"
-        assert pane.styles.scrollbar_size_vertical == 3
+        await pilot.mouse_down(pane, offset=(5, 10))
+        await pilot.hover(pane, offset=(5, 1))
+        await pilot.mouse_up(pane, offset=(5, 1))
+        await pilot.pause()
+
+        assert pane.scroll_y > before
 
 
-async def test_directory_tree_uses_stable_scrollbar_styles(tmp_path):
-    """The file tree should expose the same draggable scrollbar affordance."""
-    for index in range(40):
+async def test_mouse_drag_scrolls_directory_tree(tmp_path):
+    """Dragging inside the file tree should scroll the tree."""
+    for index in range(80):
         (tmp_path / f"file_{index}.txt").write_text("x")
     app = SkimApp(path=str(tmp_path))
 
     async with app.run_test() as pilot:
         await pilot.pause()
         tree = app.query_one("DirectoryTree")
+        before = tree.scroll_y
 
-        assert tree.styles.scrollbar_gutter == "stable"
-        assert tree.styles.scrollbar_size_vertical == 3
+        await pilot.mouse_down(tree, offset=(5, 10))
+        await pilot.hover(tree, offset=(5, 1))
+        await pilot.mouse_up(tree, offset=(5, 1))
+        await pilot.pause()
+
+        assert tree.scroll_y > before
 
 
-async def test_trajectory_tree_uses_stable_scrollbar_styles():
-    """Trajectory tree should reserve gutter space for a draggable scrollbar."""
-    viewer = TrajectoryViewer(sample_trajectory())
+async def test_mouse_drag_scrolls_trajectory_tree():
+    """Dragging inside the trajectory tree should scroll long step lists."""
+    viewer = TrajectoryViewer(multi_step_trajectory(20))
     app = SkimApp(path=".")
 
     async with app.run_test() as pilot:
@@ -742,24 +753,37 @@ async def test_trajectory_tree_uses_stable_scrollbar_styles():
         await pane.mount(viewer)
         await pilot.pause()
         tree = viewer.query_one(".trajectory-tree", Tree)
+        before = tree.scroll_y
 
-        assert tree.styles.scrollbar_gutter == "stable"
-        assert tree.styles.scrollbar_size_vertical == 3
+        await pilot.mouse_down(tree, offset=(5, 10))
+        await pilot.hover(tree, offset=(5, 1))
+        await pilot.mouse_up(tree, offset=(5, 1))
+        await pilot.pause()
+
+        assert tree.scroll_y > before
 
 
-async def test_trajectory_detail_uses_stable_scrollbar_styles():
-    """Trajectory detail pane should reserve gutter space for a draggable scrollbar."""
+async def test_mouse_drag_scrolls_trajectory_detail():
+    """Dragging on the detail pane background should scroll long detail output."""
     viewer = TrajectoryViewer(sample_trajectory())
     app = SkimApp(path=".")
 
     async with app.run_test() as pilot:
         pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
         await pane.mount(viewer)
+        output_node = viewer._tree.root.children[2].children[2].children[1]
+        viewer._tree.move_cursor(output_node, animate=False)
+        await pilot.press("enter")
         await pilot.pause()
         detail = viewer.query_one(".trajectory-detail-wrap")
+        before = detail.scroll_y
 
-        assert detail.styles.scrollbar_gutter == "stable"
-        assert detail.styles.scrollbar_size_vertical == 3
+        await pilot.mouse_down(detail, offset=(0, 10))
+        await pilot.hover(detail, offset=(0, 1))
+        await pilot.mouse_up(detail, offset=(0, 1))
+        await pilot.pause()
+
+        assert detail.scroll_y > before
 
 
 def sample_trajectory(
@@ -828,6 +852,14 @@ def sample_trajectory(
         "final_output": "## Final\n\nDone.",
         "steps": [{"output": step_output}],
     }
+
+
+def multi_step_trajectory(step_count: int) -> dict[str, Any]:
+    """Return a trajectory with repeated steps to force tree overflow."""
+    trajectory = sample_trajectory()
+    step = trajectory["steps"][0]
+    trajectory["steps"] = [step for _ in range(step_count)]
+    return trajectory
 
 
 def _static_content(widget: Static):
