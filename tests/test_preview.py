@@ -26,7 +26,7 @@ from textual.widgets import Collapsible, Input, Markdown, Static, TextArea, Tree
 
 import skim.trajectory as trajectory_module
 from skim import JsonInspector, PreviewPane, SkimApp, render_file
-from skim.preview import CsvPreview
+from skim.preview import CsvPreview, NotebookPreview
 from skim.scrolling import FocusableDetailWrap
 from skim.trajectory import AnnotationStore
 
@@ -43,8 +43,8 @@ def test_generic_json_uses_json_inspector(tmp_path):
     assert _tree_labels(widgets[0]._tree) == ["Hello world"]
 
 
-def test_ipynb_uses_json_inspector(tmp_path):
-    """Notebook files should use the unified JSON inspector."""
+def test_ipynb_uses_notebook_preview(tmp_path):
+    """Notebook files should use the specialized notebook preview."""
     test_file = tmp_path / "notebook.ipynb"
     test_file.write_text(
         json.dumps(
@@ -66,17 +66,37 @@ def test_ipynb_uses_json_inspector(tmp_path):
     widgets = render_file(test_file)
 
     assert len(widgets) == 1
-    assert isinstance(widgets[0], JsonInspector)
+    preview = widgets[0]
+    assert isinstance(preview, NotebookPreview)
+    assert isinstance(preview._widgets[0], Static)
+    assert "Notebook Preview" in _static_content(preview._widgets[0]).plain
+    first_cell = preview._widgets[1]
+    assert isinstance(first_cell, Collapsible)
+    assert first_cell.title == "Markdown Cell 1"
 
 
-def test_ipynd_uses_json_inspector(tmp_path):
-    """The typo-tolerant notebook extension should route through the JSON inspector too."""
-    test_file = tmp_path / "notebook.ipynd"
+def test_ipynb_renders_code_cells_and_outputs(tmp_path):
+    """Notebook previews should render code cells with visible outputs."""
+    test_file = tmp_path / "notebook.ipynb"
     test_file.write_text(
         json.dumps(
             {
-                "cells": [],
-                "metadata": {},
+                "cells": [
+                    {
+                        "cell_type": "code",
+                        "execution_count": 1,
+                        "metadata": {},
+                        "source": ["print('hi')\n"],
+                        "outputs": [
+                            {
+                                "output_type": "stream",
+                                "name": "stdout",
+                                "text": ["hi\n"],
+                            }
+                        ],
+                    }
+                ],
+                "metadata": {"language_info": {"name": "python"}},
                 "nbformat": 4,
                 "nbformat_minor": 5,
             }
@@ -86,7 +106,14 @@ def test_ipynd_uses_json_inspector(tmp_path):
     widgets = render_file(test_file)
 
     assert len(widgets) == 1
-    assert isinstance(widgets[0], JsonInspector)
+    preview = widgets[0]
+    assert isinstance(preview, NotebookPreview)
+    code_cell = preview._widgets[1]
+    assert isinstance(code_cell, Collapsible)
+    assert code_cell.title == "Code Cell 1"
+    output_cell = preview._widgets[2]
+    assert isinstance(output_cell, Collapsible)
+    assert output_cell.title == "Output 1.1"
 
 
 def test_render_file_passes_source_context_to_json_inspector(tmp_path):
@@ -192,6 +219,18 @@ def test_invalid_ipynb_falls_back_to_syntax_preview(tmp_path):
     assert len(widgets) == 1
     assert isinstance(widgets[0], Static)
     assert isinstance(_static_content(widgets[0]), Syntax)
+
+
+def test_ipynd_falls_back_to_plain_text_preview(tmp_path):
+    """The misspelled extension should no longer get notebook handling."""
+    test_file = tmp_path / "broken.ipynd"
+    test_file.write_text('{"cells": []}')
+
+    widgets = render_file(test_file)
+
+    assert len(widgets) == 1
+    assert isinstance(widgets[0], Static)
+    assert not isinstance(_static_content(widgets[0]), Syntax)
 
 
 def test_wrapped_trajectory_json_uses_json_inspector(tmp_path):
