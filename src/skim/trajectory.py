@@ -8,15 +8,19 @@ shell; those stay in the preview router and app modules.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from rich.syntax import Syntax
 from rich.text import Text
 from textual.app import ComposeResult
+from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
+from textual.screen import ModalScreen
 from textual.widget import Widget
-from textual.widgets import Collapsible, Markdown, Static
+from textual.widgets import Button, Collapsible, Input, Markdown, Static, TextArea
 from textual.widgets import Tree as TextualTree
 
 from .scrolling import DragTree, FocusableDetailWrap
@@ -92,6 +96,269 @@ class TrajectoryTreeItem:
     focus: str = "full"
 
 
+@dataclass(frozen=True)
+class AnnotationRecord:
+    """Persisted annotation for one JSON node."""
+
+    tags: tuple[str, ...]
+    note: str
+
+
+@dataclass(frozen=True)
+class AnnotationEditorResult:
+    """Dismiss payload from the annotation editor modal."""
+
+    action: str
+    tags: tuple[str, ...] = ()
+    note: str = ""
+
+
+class AnnotationStore:
+    """Local JSON-backed annotation storage rooted at the current browse path."""
+
+    def __init__(self, review_root: Path) -> None:
+        """Initialize the annotation store for one browse root."""
+        self.review_root = review_root.resolve()
+        self.path = self.review_root / ".skim" / "review.json"
+        self._payload = self._load()
+        self._file_annotations: dict[str, dict[str, AnnotationRecord]] = {}
+
+    def annotations_for_file(self, source_path: Path) -> dict[str, AnnotationRecord]:
+        """Return stored annotations for one source file."""
+        relative_path = self.relative_file_path(source_path)
+        cached = self._file_annotations.get(relative_path)
+        if cached is None:
+            cached = self._build_annotations_for_relative_path(relative_path)
+            self._file_annotations[relative_path] = cached
+        return cached
+
+    def get_annotation(self, source_path: Path, path: str) -> AnnotationRecord | None:
+        """Return one annotation by file-relative JSON path."""
+        return self.annotations_for_file(source_path).get(path)
+
+    def set_annotation(
+        self,
+        source_path: Path,
+        path: str,
+        *,
+        tags: tuple[str, ...],
+        note: str,
+    ) -> None:
+        """Store or replace one annotation."""
+        relative_path = self.relative_file_path(source_path)
+        files = self._payload.setdefault("files", {})
+        file_entry = files.setdefault(relative_path, {"annotations": {}})
+        annotations = file_entry.setdefault("annotations", {})
+        annotations[path] = {"tags": list(tags), "note": note}
+        self.annotations_for_file(source_path)[path] = AnnotationRecord(tags=tags, note=note)
+        self._save()
+
+    def delete_annotation(self, source_path: Path, path: str) -> None:
+        """Delete one annotation if present."""
+        relative_path = self.relative_file_path(source_path)
+        files = self._payload.setdefault("files", {})
+        file_entry = files.setdefault(relative_path, {"annotations": {}})
+        annotations = file_entry.setdefault("annotations", {})
+        annotations.pop(path, None)
+        self.annotations_for_file(source_path).pop(path, None)
+        self._save()
+
+    def relative_file_path(self, source_path: Path) -> str:
+        """Return the normalized file key used in persisted review data."""
+        resolved = source_path.resolve()
+        try:
+            return resolved.relative_to(self.review_root).as_posix()
+        except ValueError:
+            return resolved.name
+
+    def _load(self) -> dict[str, Any]:
+        """Load the persisted annotation payload with safe fallbacks."""
+        if not self.path.is_file():
+            return {"version": 1, "files": {}}
+        try:
+            payload = json.loads(self.path.read_text())
+        except (OSError, json.JSONDecodeError):
+            return {"version": 1, "files": {}}
+        if not isinstance(payload, dict):
+            return {"version": 1, "files": {}}
+        payload.setdefault("version", 1)
+        payload.setdefault("files", {})
+        return payload
+
+    def _build_annotations_for_relative_path(
+        self,
+        relative_path: str,
+    ) -> dict[str, AnnotationRecord]:
+        """Normalize stored annotations for one file path."""
+        files = self._payload.get("files", {})
+        file_entry = files.get(relative_path, {})
+        annotations = file_entry.get("annotations", {})
+        result: dict[str, AnnotationRecord] = {}
+        for path, payload in annotations.items():
+            if not isinstance(path, str) or not isinstance(payload, dict):
+                continue
+            tags = payload.get("tags", [])
+            note = payload.get("note", "")
+            if isinstance(tags, list) and isinstance(note, str):
+                result[path] = AnnotationRecord(
+                    tags=tuple(str(tag) for tag in tags if str(tag).strip()),
+                    note=note,
+                )
+        return result
+
+    def _save(self) -> None:
+        """Write the annotation payload to disk."""
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(json.dumps(self._payload, indent=2, sort_keys=True))
+
+
+class AnnotationEditor(ModalScreen[AnnotationEditorResult | None]):
+    """Small modal form for editing one annotation."""
+
+    PREVIEW_SCROLL_STEP = 20
+    BINDINGS = [
+        Binding("escape", "cancel", show=False),
+        Binding("pageup", "scroll_preview_up", show=False),
+        Binding("pagedown", "scroll_preview_down", show=False),
+    ]
+
+    def __init__(
+        self,
+        path: str,
+        annotation: AnnotationRecord | None,
+        item: JsonInspectorItem,
+        on_submit: Callable[[AnnotationEditorResult], None] | None = None,
+    ) -> None:
+        """Initialize the modal for one selected annotation target."""
+        super().__init__()
+        self.path = path
+        self.annotation = annotation
+        self.item = item
+        self._on_submit = on_submit
+
+    def compose(self) -> ComposeResult:
+        """Compose the modal editor widgets."""
+        tags = ", ".join(self.annotation.tags) if self.annotation is not None else ""
+        note = self.annotation.note if self.annotation is not None else ""
+        yield Vertical(
+            Horizontal(
+                Vertical(
+                    Static(Text("Edit Annotation", style="bold"), classes="annotation-modal-title"),
+                    Static(
+                        Text(f"Path: {self.path}", style="dim"),
+                        classes="annotation-modal-path",
+                    ),
+                    Input(value=tags, placeholder="tags, comma, separated", id="annotation-tags"),
+                    TextArea(note, id="annotation-note"),
+                    Horizontal(
+                        Button("Save", id="annotation-save", variant="primary"),
+                        Button(
+                            "Delete",
+                            id="annotation-delete",
+                            variant="error",
+                            disabled=self.annotation is None,
+                        ),
+                        Button("Cancel", id="annotation-cancel"),
+                        classes="annotation-modal-actions",
+                    ),
+                    id="annotation-editor-panel",
+                    classes="annotation-modal-panel",
+                ),
+                Vertical(
+                    Static(
+                        Text("Node Preview", style="bold"),
+                        classes="annotation-modal-preview-title",
+                    ),
+                    FocusableDetailWrap(
+                        *_json_detail_widgets(self.item),
+                        id="annotation-preview",
+                        classes="annotation-modal-preview",
+                    ),
+                    id="annotation-preview-panel",
+                    classes="annotation-modal-panel",
+                ),
+                classes="annotation-modal-body",
+            ),
+            Static(self._footer_text(), id="annotation-modal-footer", classes="trajectory-footer"),
+            id="annotation-modal",
+        )
+
+    def on_mount(self) -> None:
+        """Focus the tags field when the modal opens."""
+        self.query_one("#annotation-tags", Input).focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Advance from tags input to note instead of submitting the modal."""
+        if event.input.id != "annotation-tags":
+            return
+        self.query_one("#annotation-note", TextArea).focus()
+        event.stop()
+
+    def action_scroll_preview_up(self) -> None:
+        """Scroll the right preview up."""
+        self.query_one("#annotation-preview", FocusableDetailWrap).scroll_relative(
+            y=-self.PREVIEW_SCROLL_STEP,
+            animate=False,
+        )
+
+    def action_scroll_preview_down(self) -> None:
+        """Scroll the right preview down."""
+        self.query_one("#annotation-preview", FocusableDetailWrap).scroll_relative(
+            y=self.PREVIEW_SCROLL_STEP,
+            animate=False,
+        )
+
+    def action_cancel(self) -> None:
+        """Dismiss the modal without changes."""
+        self.dismiss(None)
+
+    def action_save(self) -> None:
+        """Dismiss with a save payload."""
+        self._submit(
+            AnnotationEditorResult(
+                action="save",
+                tags=_parse_annotation_tags(self.query_one("#annotation-tags", Input).value),
+                note=self.query_one("#annotation-note", TextArea).text.rstrip(),
+            )
+        )
+
+    def action_delete(self) -> None:
+        """Dismiss with a delete payload."""
+        self._submit(AnnotationEditorResult(action="delete"))
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Handle modal button clicks."""
+        button_id = event.button.id
+        if button_id == "annotation-save":
+            self.action_save()
+        elif button_id == "annotation-delete":
+            self.action_delete()
+        else:
+            self.action_cancel()
+        event.stop()
+
+    def _submit(self, result: AnnotationEditorResult) -> None:
+        """Invoke the save/delete callback before dismissing the modal."""
+        if self._on_submit is not None:
+            self._on_submit(result)
+        self.dismiss(result)
+
+    def _footer_text(self) -> Text:
+        """Build the modal-local footer text."""
+        text = Text()
+        text.append(" Annotation ", style="reverse")
+        text.append(" ")
+        text.append("Esc", style="bold")
+        text.append(" Close  ")
+        text.append("Tab", style="bold")
+        text.append(" Next field  ")
+        text.append("Enter", style="bold")
+        text.append(" Tags→Note  ")
+        text.append("PgUp/Dn", style="bold")
+        text.append(" Scroll preview")
+        return text
+
+
 def extract_trajectory(data: Any) -> dict[str, Any] | None:
     """Return a supported trajectory object from wrapped or bare JSON."""
     if not isinstance(data, dict):
@@ -165,11 +432,26 @@ def normalize_step_events(trajectory: dict[str, Any]) -> list[list[TrajectoryEve
 
 def normalize_step_timeline(trajectory: dict[str, Any]) -> list[list[StepTimelineItem]]:
     """Return per-step display rows, pairing tool calls with matching results."""
+    return _normalize_step_timeline_from_events(normalize_step_events(trajectory))
+
+
+def normalize_step_overlay(
+    trajectory: dict[str, Any],
+) -> tuple[list[list[TrajectoryEvent]], list[list[StepTimelineItem]]]:
+    """Return grouped trajectory events plus their paired timeline rows."""
+    step_events = normalize_step_events(trajectory)
+    return step_events, _normalize_step_timeline_from_events(step_events)
+
+
+def _normalize_step_timeline_from_events(
+    step_events: list[list[TrajectoryEvent]],
+) -> list[list[StepTimelineItem]]:
+    """Return per-step display rows from pre-normalized events."""
     timeline_groups: list[list[StepTimelineItem]] = []
-    for step_events in normalize_step_events(trajectory):
+    for events in step_events:
         group: list[StepTimelineItem] = []
         pending_calls: dict[str, int] = {}
-        for event in step_events:
+        for event in events:
             if event.kind == "function_call":
                 interaction = ToolInteraction(
                     index=event.index,
@@ -907,8 +1189,7 @@ class TrajectoryViewer(Vertical):
         """Initialize the trajectory viewer."""
         super().__init__(classes="trajectory-viewer")
         self.trajectory = trajectory
-        self.step_events = normalize_step_events(trajectory)
-        self.step_items = normalize_step_timeline(trajectory)
+        self.step_events, self.step_items = normalize_step_overlay(trajectory)
         self.events = normalize_events(trajectory)
         self._input_mode = "tree"
         self._summary = Static(Text(_metadata_header(trajectory)), classes="trajectory-summary")
@@ -1126,25 +1407,56 @@ class JsonInspectorItem:
 class JsonInspector(Vertical):
     """Unified structural inspector for JSON files with semantic overlays."""
 
-    def __init__(self, data: Any) -> None:
+    def __init__(
+        self,
+        data: Any,
+        *,
+        source_path: Path | None = None,
+        review_root: Path | None = None,
+        annotation_store: AnnotationStore | None = None,
+    ) -> None:
         """Initialize the JSON inspector for parsed JSON content."""
         super().__init__(classes="trajectory-viewer")
         self.data = data
-        self._input_mode = "tree"
+        self.source_path = source_path.resolve() if source_path is not None else None
+        resolved_root = review_root or (self.source_path.parent if self.source_path else Path.cwd())
+        self.review_root = resolved_root.resolve()
+        self._annotation_store = annotation_store or AnnotationStore(self.review_root)
+        self._file_annotations = (
+            self._annotation_store.annotations_for_file(self.source_path)
+            if self.source_path is not None
+            else {}
+        )
+        self._current_item: JsonInspectorItem | None = None
         self._tree: DragTree = DragTree("JSON", classes="trajectory-tree")
         self._build_tree()
         first_item = self._tree.root.children[0].data if self._tree.root.children else None
-        initial_widgets: list[Widget] = []
+        initial_detail_widgets: list[Widget] = []
+        initial_annotation_widgets: list[Widget] = _annotation_panel_widgets(None, False)
         if isinstance(first_item, JsonInspectorItem):
-            initial_widgets = _json_detail_widgets(first_item)
-        self._detail_wrap = FocusableDetailWrap(*initial_widgets, classes="trajectory-detail-wrap")
+            self._current_item = first_item
+            initial_detail_widgets = self._detail_widgets_for_item(first_item)
+            initial_annotation_widgets = self._annotation_widgets_for_item(first_item)
+        self._annotation_wrap = Vertical(
+            *initial_annotation_widgets,
+            classes="annotation-status-panel",
+        )
+        self._detail_wrap = FocusableDetailWrap(
+            *initial_detail_widgets,
+            classes="trajectory-detail-wrap",
+        )
+        self._detail_column = Vertical(
+            self._annotation_wrap,
+            self._detail_wrap,
+            classes="trajectory-detail-column",
+        )
         self._footer = Static(self._footer_text(), classes="trajectory-footer")
 
     def compose(self) -> ComposeResult:
         """Compose the JSON tree, detail panel, and local footer."""
         with Horizontal(classes="trajectory-body"):
             yield self._tree
-            yield self._detail_wrap
+            yield self._detail_column
         yield self._footer
 
     def on_tree_node_selected(self, event: TextualTree.NodeSelected[JsonInspectorItem]) -> None:
@@ -1154,10 +1466,23 @@ class JsonInspector(Vertical):
             self._show_detail(item)
         event.stop()
 
+    def on_tree_node_highlighted(
+        self,
+        event: TextualTree.NodeHighlighted[JsonInspectorItem],
+    ) -> None:
+        """Update detail when the highlighted JSON tree node changes."""
+        item = event.node.data
+        if isinstance(item, JsonInspectorItem):
+            self._show_detail(item)
+        event.stop()
+
     def _show_detail(self, item: JsonInspectorItem) -> None:
         """Replace the detail pane with widgets for the selected tree item."""
+        self._current_item = item
+        self._annotation_wrap.remove_children()
+        self._annotation_wrap.mount(*self._annotation_widgets_for_item(item))
         self._detail_wrap.remove_children()
-        self._detail_wrap.mount(*_json_detail_widgets(item))
+        self._detail_wrap.mount(*self._detail_widgets_for_item(item))
         self._detail_wrap.scroll_home(animate=False)
 
     def scroll_detail(self, delta: int) -> None:
@@ -1166,38 +1491,29 @@ class JsonInspector(Vertical):
 
     def is_tree_mode(self) -> bool:
         """Return whether keyboard navigation is driving the left tree."""
-        return self._input_mode == "tree"
+        return True
 
     def focus_tree_mode(self) -> None:
-        """Route navigation input to the tree."""
-        self._input_mode = "tree"
-        self._update_footer()
+        """Route keyboard focus to the JSON tree."""
         self._ensure_tree_cursor()
         if self.is_attached:
             self._tree.focus(scroll_visible=False)
 
     def focus_detail_mode(self) -> None:
-        """Route navigation input to the rendered detail pane."""
-        self._input_mode = "detail"
-        self._update_footer()
-        if self.is_attached:
-            self._detail_wrap.focus(scroll_visible=False)
+        """Keep compatibility with callers that expect a detail-focus method."""
+        self.focus_tree_mode()
 
     def handle_vertical_key(self, delta: int) -> bool:
-        """Handle up/down keys for the active JSON sub-view."""
-        if self.is_tree_mode():
-            if delta < 0:
-                self._tree.action_cursor_up()
-            else:
-                self._tree.action_cursor_down()
-            return True
-        self.scroll_detail(delta)
+        """Handle up/down keys by moving the JSON tree cursor."""
+        self._ensure_tree_cursor()
+        if delta < 0:
+            self._tree.action_cursor_up()
+        else:
+            self._tree.action_cursor_down()
         return True
 
     def handle_horizontal_key(self, key: str) -> bool:
         """Handle left/right tree navigation."""
-        if not self.is_tree_mode():
-            return False
         node = self._tree.cursor_node
         if node is None:
             return False
@@ -1216,19 +1532,31 @@ class JsonInspector(Vertical):
         return False
 
     def handle_enter_key(self) -> bool:
-        """Select the current tree item and move focus to the detail pane."""
-        if not self.is_tree_mode():
-            return False
+        """Consume Enter without switching JSON focus modes."""
         self._ensure_tree_cursor()
-        self._tree.action_select_cursor()
-        self.focus_detail_mode()
         return True
 
     def handle_escape_key(self) -> bool:
-        """Return keyboard control from detail back to the tree."""
-        if self.is_tree_mode():
+        """Consume Escape without switching JSON focus modes."""
+        return True
+
+    def handle_annotation_key(self) -> bool:
+        """Open the annotation editor for the active JSON node."""
+        item = self._annotation_item()
+        if item is None:
             return False
-        self.focus_tree_mode()
+        path = self._annotation_key(item)
+        if path is None:
+            self.app.notify("Annotations unavailable for this node", severity="warning")
+            return True
+        self.app.push_screen(
+            AnnotationEditor(
+                path,
+                self._annotation_for_item(item),
+                item,
+                on_submit=self._handle_annotation_result,
+            )
+        )
         return True
 
     def _ensure_tree_cursor(self) -> None:
@@ -1238,28 +1566,22 @@ class JsonInspector(Vertical):
             self._tree.move_cursor(self._tree.root.children[0], animate=False)
 
     def _footer_text(self) -> Text:
-        """Build the mode-aware local footer text."""
+        """Build the JSON-inspector footer text."""
         text = Text()
-        if self.is_tree_mode():
-            text.append(" JSON ", style="reverse")
-            text.append(" ")
-            text.append("↑↓", style="bold")
-            text.append(" Move  ")
-            text.append("←→", style="bold")
-            text.append(" Branch  ")
-            text.append("Enter", style="bold")
-            text.append(" Detail")
-        else:
-            text.append(" Detail ", style="reverse")
-            text.append(" ")
-            text.append("↑↓", style="bold")
-            text.append(" Scroll  ")
-            text.append("Esc", style="bold")
-            text.append(" Back to JSON")
+        text.append(" JSON ", style="reverse")
+        text.append(" ")
+        text.append("↑↓", style="bold")
+        text.append(" Move  ")
+        text.append("←→", style="bold")
+        text.append(" Branch  ")
+        text.append("PgUp/Dn", style="bold")
+        text.append(" Scroll  ")
+        text.append("a", style="bold")
+        text.append(" Annotate")
         return text
 
     def _update_footer(self) -> None:
-        """Refresh the local footer after mode changes."""
+        """Refresh the local footer."""
         self._footer.update(self._footer_text())
 
     def _build_tree(self) -> None:
@@ -1276,44 +1598,47 @@ class JsonInspector(Vertical):
     ) -> None:
         """Add synthetic schema-aware nodes before the raw children."""
         if raw_path == () and _looks_like_bundle(value):
+            item = JsonInspectorItem(
+                kind="bundle_summary",
+                title="Bundle Summary",
+                raw_path=raw_path,
+                raw_value=value,
+                detail=_bundle_summary(value),
+                synthetic=True,
+            )
             parent.add_leaf(
-                Text("Bundle Summary", style="bold cyan"),
-                data=JsonInspectorItem(
-                    kind="bundle_summary",
-                    title="Bundle Summary",
-                    raw_path=raw_path,
-                    raw_value=value,
-                    detail=_bundle_summary(value),
-                    synthetic=True,
-                ),
+                self._tree_label_for_item(item),
+                data=item,
             )
             return
 
         if raw_path == () and _looks_like_submission(value):
+            item = JsonInspectorItem(
+                kind="submission_summary",
+                title="Submission Summary",
+                raw_path=raw_path,
+                raw_value=value,
+                detail=_submission_summary_payload(value),
+                synthetic=True,
+            )
             parent.add_leaf(
-                Text("Submission Summary", style="bold cyan"),
-                data=JsonInspectorItem(
-                    kind="submission_summary",
-                    title="Submission Summary",
-                    raw_path=raw_path,
-                    raw_value=value,
-                    detail=_submission_summary_payload(value),
-                    synthetic=True,
-                ),
+                self._tree_label_for_item(item),
+                data=item,
             )
             return
 
         if raw_path == () and _looks_like_hermes(value):
+            item = JsonInspectorItem(
+                kind="transcript_summary",
+                title="Transcript Summary",
+                raw_path=raw_path,
+                raw_value=value,
+                detail=_hermes_summary(value),
+                synthetic=True,
+            )
             parent.add_leaf(
-                Text("Transcript Summary", style="bold cyan"),
-                data=JsonInspectorItem(
-                    kind="transcript_summary",
-                    title="Transcript Summary",
-                    raw_path=raw_path,
-                    raw_value=value,
-                    detail=_hermes_summary(value),
-                    synthetic=True,
-                ),
+                self._tree_label_for_item(item),
+                data=item,
             )
             return
 
@@ -1328,139 +1653,144 @@ class JsonInspector(Vertical):
         base_path: tuple[str | int, ...],
     ) -> None:
         """Add summary and step nodes for a trajectory object."""
-        parent.add_leaf(
-            Text("Metadata", style="bold cyan"),
-            data=JsonInspectorItem(
-                kind="trajectory_metadata",
-                title="Metadata",
-                raw_path=base_path + ("metadata",),
-                raw_value=trajectory.get("metadata"),
-                trajectory_item=TrajectoryTreeItem(
-                    "metadata",
-                    "Metadata",
-                    _metadata_detail(trajectory),
-                ),
-                synthetic=True,
+        metadata_item = JsonInspectorItem(
+            kind="trajectory_metadata",
+            title="Metadata",
+            raw_path=base_path + ("metadata",),
+            raw_value=trajectory.get("metadata"),
+            trajectory_item=TrajectoryTreeItem(
+                "metadata",
+                "Metadata",
+                _metadata_detail(trajectory),
             ),
+            synthetic=True,
         )
         parent.add_leaf(
-            Text("Final Output", style="bold cyan"),
-            data=JsonInspectorItem(
-                kind="trajectory_final_output",
-                title="Final Output",
-                raw_path=base_path + ("final_output",),
-                raw_value=trajectory.get("final_output"),
-                trajectory_item=TrajectoryTreeItem(
-                    "final_output",
-                    "Final Output",
-                    _final_output_detail(trajectory),
-                ),
-                synthetic=True,
+            self._tree_label_for_item(metadata_item),
+            data=metadata_item,
+        )
+        final_output_item = JsonInspectorItem(
+            kind="trajectory_final_output",
+            title="Final Output",
+            raw_path=base_path + ("final_output",),
+            raw_value=trajectory.get("final_output"),
+            trajectory_item=TrajectoryTreeItem(
+                "final_output",
+                "Final Output",
+                _final_output_detail(trajectory),
             ),
+            synthetic=True,
+        )
+        parent.add_leaf(
+            self._tree_label_for_item(final_output_item),
+            data=final_output_item,
         )
 
-        step_items = normalize_step_timeline(trajectory)
-        step_events = normalize_step_events(trajectory)
+        step_events, step_items = normalize_step_overlay(trajectory)
         steps = trajectory.get("steps", []) if isinstance(trajectory.get("steps"), list) else []
         for step_index, (items, events) in enumerate(zip(step_items, step_events, strict=False)):
             step_path = base_path + ("steps", step_index)
             step_raw_value = steps[step_index] if step_index < len(steps) else None
-            step = parent.add(
-                Text(f"Step {step_index + 1}", style="bold yellow"),
-                data=JsonInspectorItem(
-                    kind="trajectory_step",
-                    title=f"Step {step_index + 1}",
-                    raw_path=step_path,
-                    raw_value=step_raw_value,
-                    trajectory_item=TrajectoryTreeItem(
-                        "step",
-                        f"Step {step_index + 1}",
-                        Text(f"Step {step_index + 1}\n\n{len(items)} items"),
-                    ),
-                    synthetic=True,
+            event_paths = _trajectory_event_paths(base_path, step_index, events)
+            step_item = JsonInspectorItem(
+                kind="trajectory_step",
+                title=f"Step {step_index + 1}",
+                raw_path=step_path,
+                raw_value=step_raw_value,
+                trajectory_item=TrajectoryTreeItem(
+                    "step",
+                    f"Step {step_index + 1}",
+                    Text(f"Step {step_index + 1}\n\n{len(items)} items"),
                 ),
+                synthetic=True,
+            )
+            step = parent.add(
+                self._tree_label_for_item(step_item),
+                data=step_item,
                 expand=True,
             )
             for item in items:
                 if item.interaction is not None:
                     call_event = item.interaction.call_event
                     result_event = item.interaction.result_event
-                    call_path = _trajectory_event_path(base_path, step_index, events, call_event)
-                    result_path = _trajectory_event_path(
-                        base_path, step_index, events, result_event
-                    )
+                    call_path = event_paths.get(id(call_event.raw)) if call_event else None
+                    result_path = event_paths.get(id(result_event.raw)) if result_event else None
                     parent_path = call_path or result_path or step_path
-                    tool = step.add(
-                        item.title,
-                        data=JsonInspectorItem(
-                            kind="trajectory_tool",
-                            title=item.title.plain,
-                            raw_path=parent_path,
-                            raw_value=_interaction_payload(item.interaction),
-                            trajectory_item=TrajectoryTreeItem(
-                                "tool",
-                                item.title.plain,
-                                interaction=item.interaction,
-                                focus="full",
-                            ),
-                            synthetic=True,
-                            annotation_path=parent_path,
+                    tool_item = JsonInspectorItem(
+                        kind="trajectory_tool",
+                        title=item.title.plain,
+                        raw_path=parent_path,
+                        raw_value=_interaction_payload(item.interaction),
+                        trajectory_item=TrajectoryTreeItem(
+                            "tool",
+                            item.title.plain,
+                            interaction=item.interaction,
+                            focus="full",
                         ),
+                        synthetic=True,
+                        annotation_path=parent_path,
+                    )
+                    tool = step.add(
+                        self._tree_label_for_item(tool_item),
+                        data=tool_item,
                         expand=True,
                     )
-                    tool.add_leaf(
-                        Text("Input", style="bold yellow"),
-                        data=JsonInspectorItem(
-                            kind="trajectory_tool_input",
-                            title="Input",
-                            raw_path=call_path or parent_path,
-                            raw_value=call_event.raw if call_event else None,
-                            trajectory_item=TrajectoryTreeItem(
-                                "tool_input",
-                                "Input",
-                                interaction=item.interaction,
-                                focus="input",
-                            ),
-                            synthetic=True,
-                            annotation_path=call_path or parent_path,
+                    input_item = JsonInspectorItem(
+                        kind="trajectory_tool_input",
+                        title="Input",
+                        raw_path=call_path or parent_path,
+                        raw_value=call_event.raw if call_event else None,
+                        trajectory_item=TrajectoryTreeItem(
+                            "tool_input",
+                            "Input",
+                            interaction=item.interaction,
+                            focus="input",
                         ),
+                        synthetic=True,
+                        annotation_path=call_path or parent_path,
                     )
                     tool.add_leaf(
-                        Text("Output", style="bold yellow"),
-                        data=JsonInspectorItem(
-                            kind="trajectory_tool_output",
-                            title="Output",
-                            raw_path=result_path or parent_path,
-                            raw_value=result_event.raw if result_event else None,
-                            trajectory_item=TrajectoryTreeItem(
-                                "tool_output",
-                                "Output",
-                                interaction=item.interaction,
-                                focus="output",
-                            ),
-                            synthetic=True,
-                            annotation_path=result_path or parent_path,
+                        self._tree_label_for_item(input_item),
+                        data=input_item,
+                    )
+                    output_item = JsonInspectorItem(
+                        kind="trajectory_tool_output",
+                        title="Output",
+                        raw_path=result_path or parent_path,
+                        raw_value=result_event.raw if result_event else None,
+                        trajectory_item=TrajectoryTreeItem(
+                            "tool_output",
+                            "Output",
+                            interaction=item.interaction,
+                            focus="output",
                         ),
+                        synthetic=True,
+                        annotation_path=result_path or parent_path,
+                    )
+                    tool.add_leaf(
+                        self._tree_label_for_item(output_item),
+                        data=output_item,
                     )
                     continue
 
                 if item.event is not None:
-                    event_path = _trajectory_event_path(base_path, step_index, events, item.event)
-                    step.add_leaf(
-                        item.title,
-                        data=JsonInspectorItem(
-                            kind="trajectory_event",
-                            title=item.title.plain,
-                            raw_path=event_path or step_path,
-                            raw_value=item.event.raw,
-                            trajectory_item=TrajectoryTreeItem(
-                                "event",
-                                item.title.plain,
-                                event=item.event,
-                            ),
-                            synthetic=True,
-                            annotation_path=event_path or step_path,
+                    event_path = event_paths.get(id(item.event.raw))
+                    event_item = JsonInspectorItem(
+                        kind="trajectory_event",
+                        title=item.title.plain,
+                        raw_path=event_path or step_path,
+                        raw_value=item.event.raw,
+                        trajectory_item=TrajectoryTreeItem(
+                            "event",
+                            item.title.plain,
+                            event=item.event,
                         ),
+                        synthetic=True,
+                        annotation_path=event_path or step_path,
+                    )
+                    step.add_leaf(
+                        self._tree_label_for_item(event_item),
+                        data=event_item,
                     )
 
     def _add_raw_children(
@@ -1480,7 +1810,7 @@ class JsonInspector(Vertical):
                     raw_value=child,
                     key=key,
                 )
-                label = _dict_tree_label(key, child)
+                label = self._tree_label_for_item(item)
                 if isinstance(child, dict | list):
                     node = parent.add(label, data=item)
                     self._add_overlay_children(node, child, child_path)
@@ -1499,7 +1829,7 @@ class JsonInspector(Vertical):
                     raw_value=child,
                     key=str(index),
                 )
-                label = _list_tree_label(self.data, raw_path, index, child)
+                label = self._tree_label_for_item(item)
                 if isinstance(child, dict | list):
                     node = parent.add(label, data=item)
                     self._add_overlay_children(node, child, child_path)
@@ -1507,23 +1837,99 @@ class JsonInspector(Vertical):
                 else:
                     parent.add_leaf(label, data=item)
 
+    def _detail_widgets_for_item(self, item: JsonInspectorItem) -> list[Widget]:
+        """Return detail widgets for one selected JSON node."""
+        return _json_detail_widgets(item)
+
+    def _annotation_widgets_for_item(self, item: JsonInspectorItem) -> list[Widget]:
+        """Return annotation-panel widgets for one selected JSON node."""
+        return _annotation_panel_widgets(
+            self._annotation_for_item(item),
+            self._is_annotatable(item),
+        )
+
+    def _annotation_item(self) -> JsonInspectorItem | None:
+        """Return the active item for the annotation action."""
+        if self.is_tree_mode():
+            self._ensure_tree_cursor()
+            node = self._tree.cursor_node
+            if node is not None and isinstance(node.data, JsonInspectorItem):
+                return node.data
+        return self._current_item
+
+    def _is_annotatable(self, item: JsonInspectorItem) -> bool:
+        """Return whether the item can be annotated in the MVP."""
+        return item.annotation_path is not None or not item.synthetic
+
+    def _annotation_key(self, item: JsonInspectorItem) -> str | None:
+        """Return the persisted annotation key for one item."""
+        if not self._is_annotatable(item):
+            return None
+        return _format_raw_path(item.annotation_path or item.raw_path)
+
+    def _annotation_for_item(self, item: JsonInspectorItem) -> AnnotationRecord | None:
+        """Return the stored annotation for one item, if any."""
+        path = self._annotation_key(item)
+        if path is None:
+            return None
+        return self._file_annotations.get(path)
+
+    def _tree_label_for_item(self, item: JsonInspectorItem) -> Text:
+        """Return the rendered tree label for one item, including annotation state."""
+        label = _json_tree_label(self.data, item)
+        if self._annotation_for_item(item) is None:
+            return label
+        marked = Text("* ", style="bold green")
+        marked.append_text(label)
+        return marked
+
+    def _handle_annotation_result(self, result: AnnotationEditorResult | None) -> None:
+        """Apply a modal annotation result to the current selection."""
+        item = self._annotation_item()
+        if item is None or result is None or self.source_path is None:
+            return
+        path = self._annotation_key(item)
+        if path is None:
+            return
+        if result.action == "delete":
+            self._annotation_store.delete_annotation(self.source_path, path)
+        elif result.action == "save":
+            self._annotation_store.set_annotation(
+                self.source_path,
+                path,
+                tags=result.tags,
+                note=result.note,
+            )
+        else:
+            return
+        self._refresh_annotation_labels(path)
+        self._show_detail(item)
+
+    def _refresh_annotation_labels(self, path: str | None = None) -> None:
+        """Refresh annotation markers for all tree nodes or one target path."""
+        for node in _walk_tree_nodes(self._tree.root):
+            item = node.data
+            if not isinstance(item, JsonInspectorItem):
+                continue
+            item_path = self._annotation_key(item)
+            if path is not None and item_path != path:
+                continue
+            node.set_label(self._tree_label_for_item(item))
+
 
 def _json_detail_widgets(item: JsonInspectorItem) -> list[Widget]:
     """Return detail widgets for a selected JSON-inspector node."""
     path = _format_raw_path(item.annotation_path or item.raw_path)
-    if item.trajectory_item is not None:
-        return _metadata_fields([("Path", path)]) + _detail_widgets_for_item(item.trajectory_item)
-
     title = Text(item.title or "JSON", style="bold")
     widgets: list[Widget] = [Static(title, classes="trajectory-detail-heading")]
-    widgets.extend(
-        _metadata_fields(
-            [
-                ("Path", path),
-                ("Type", _json_type_name(item.raw_value)),
-            ]
-        )
-    )
+    metadata = [("Path", path)]
+    if item.trajectory_item is None:
+        metadata.append(("Type", _json_type_name(item.raw_value)))
+    widgets.extend(_metadata_fields(metadata))
+
+    if item.trajectory_item is not None:
+        widgets.extend(_detail_widgets_for_item(item.trajectory_item))
+        return widgets
 
     value = item.detail if item.synthetic and item.detail is not None else item.raw_value
     if item.synthetic and isinstance(value, dict | list):
@@ -1534,6 +1940,90 @@ def _json_detail_widgets(item: JsonInspectorItem) -> list[Widget]:
     else:
         widgets.extend(_render_payload_detail(value))
     return widgets
+
+
+def _annotation_panel_widgets(
+    annotation: AnnotationRecord | None,
+    annotatable: bool,
+) -> list[Widget]:
+    """Return the separate annotation-status panel for one selected JSON node."""
+    widgets: list[Widget] = [
+        Static(Text("Annotation", style="bold"), classes="annotation-status-title")
+    ]
+    if not annotatable:
+        widgets.extend(
+            _metadata_fields([("Status", "Unavailable")])
+            + [
+                Static(
+                    Text("Summary nodes do not map to raw JSON targets."),
+                    classes="annotation-status-body",
+                ),
+                Static(
+                    Text("Select a raw or mapped overlay node to annotate.", style="dim"),
+                    classes="annotation-status-hint",
+                ),
+            ]
+        )
+        return widgets
+
+    if annotation is None:
+        widgets.extend(_metadata_fields([("Status", "No annotation"), ("Tags", "(none)")]))
+        widgets.append(Static(Text("No annotation yet"), classes="annotation-status-body"))
+        widgets.append(
+            Static(Text("Press a to annotate", style="dim"), classes="annotation-status-hint")
+        )
+        return widgets
+
+    widgets.extend(
+        _metadata_fields(
+            [
+                ("Status", "Annotated"),
+                ("Tags", ", ".join(annotation.tags) if annotation.tags else "(none)"),
+            ]
+        )
+    )
+    note = Text()
+    note.append("Note: ", style="bold cyan")
+    note.append(annotation.note or "(empty)")
+    widgets.append(Static(note, classes="annotation-status-body"))
+    widgets.append(Static(Text("Press a to edit", style="dim"), classes="annotation-status-hint"))
+    return widgets
+
+
+def _json_tree_label(root_data: Any, item: JsonInspectorItem) -> Text:
+    """Return the base tree label for one JSON-inspector node."""
+    if item.kind == "raw_dict_key":
+        return _dict_tree_label(item.key, item.raw_value)
+    if item.kind == "raw_list_item":
+        index = item.raw_path[-1] if item.raw_path else 0
+        if isinstance(index, int):
+            return _list_tree_label(root_data, item.raw_path[:-1], index, item.raw_value)
+    if item.kind in {
+        "bundle_summary",
+        "submission_summary",
+        "transcript_summary",
+        "trajectory_metadata",
+        "trajectory_final_output",
+    }:
+        return Text(item.title, style="bold cyan")
+    if item.kind in {"trajectory_step", "trajectory_tool_input", "trajectory_tool_output"}:
+        return Text(item.title, style="bold yellow")
+    return Text(item.title)
+
+
+def _walk_tree_nodes(
+    node: TextualTree.Node[JsonInspectorItem],
+) -> list[TextualTree.Node[JsonInspectorItem]]:
+    """Return the supplied node and all descendants."""
+    nodes = [node]
+    for child in node.children:
+        nodes.extend(_walk_tree_nodes(child))
+    return nodes
+
+
+def _parse_annotation_tags(raw_tags: str) -> tuple[str, ...]:
+    """Parse the comma-separated tag field used by the modal editor."""
+    return tuple(tag.strip() for tag in raw_tags.split(",") if tag.strip())
 
 
 def _json_type_name(value: Any) -> str:
@@ -1785,19 +2275,16 @@ def _hermes_summary(value: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _trajectory_event_path(
+def _trajectory_event_paths(
     base_path: tuple[str | int, ...],
     step_index: int,
     events: list[TrajectoryEvent],
-    event: TrajectoryEvent | None,
-) -> tuple[str | int, ...] | None:
-    """Return the raw path for one normalized trajectory event."""
-    if event is None:
-        return None
-    for output_index, candidate in enumerate(events):
-        if candidate.raw is event.raw:
-            return base_path + ("steps", step_index, "output", output_index)
-    return None
+) -> dict[int, tuple[str | int, ...]]:
+    """Return the raw-path lookup for one step's normalized events."""
+    return {
+        id(event.raw): base_path + ("steps", step_index, "output", output_index)
+        for output_index, event in enumerate(events)
+    }
 
 
 def _interaction_payload(interaction: ToolInteraction) -> dict[str, Any]:

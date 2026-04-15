@@ -15,6 +15,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.events import Key
+from textual.screen import ModalScreen
 from textual.widgets import Header, Static
 
 from .preview import PreviewPane
@@ -24,6 +25,7 @@ from .trajectory import JsonInspector, TrajectoryViewer
 MAX_ROWS = 2
 MAX_COLS = 3
 SCROLL_STEP = 3
+PAGE_SCROLL_STEP = 20
 
 
 class SkimApp(App):
@@ -68,8 +70,20 @@ class SkimApp(App):
         min-width: 28;
         height: 1fr;
     }
-    .trajectory-detail-wrap {
+    .trajectory-detail-column {
         width: 2fr;
+        height: 1fr;
+    }
+    .annotation-status-panel {
+        height: 8;
+        min-height: 8;
+        border: round $panel-lighten-1;
+        background: $surface-lighten-1;
+        padding: 0 1;
+        margin: 0 0 1 0;
+    }
+    .trajectory-detail-wrap {
+        width: 1fr;
         height: 1fr;
         padding: 0 1;
     }
@@ -81,6 +95,46 @@ class SkimApp(App):
         color: $text-muted;
         background: $surface-lighten-1;
         padding: 0 1;
+        margin: 1 0 0 0;
+    }
+    #annotation-modal {
+        width: 140;
+        max-width: 96%;
+        height: 80%;
+        max-height: 90%;
+        padding: 1;
+        border: round $accent;
+        background: $surface;
+    }
+    .annotation-modal-body {
+        height: 1fr;
+    }
+    .annotation-modal-panel {
+        height: 1fr;
+        padding: 0 1;
+        border: round $panel-lighten-1;
+    }
+    #annotation-editor-panel {
+        width: 2fr;
+        margin: 0 1 0 0;
+    }
+    #annotation-preview-panel {
+        width: 3fr;
+    }
+    .annotation-modal-preview {
+        height: 1fr;
+        margin: 1 0 0 0;
+    }
+    .annotation-modal-actions {
+        height: auto;
+        margin: 1 0 0 0;
+    }
+    #annotation-tags {
+        margin: 1 0 0 0;
+    }
+    #annotation-note {
+        height: 1fr;
+        min-height: 8;
         margin: 1 0 0 0;
     }
     Collapsible.trajectory-section {
@@ -112,6 +166,8 @@ class SkimApp(App):
         Binding("down", "scroll_down", show=False, priority=True),
         Binding("j", "scroll_down", show=False, priority=True),
         Binding("k", "scroll_up", show=False, priority=True),
+        Binding("pageup", "page_up", show=False, priority=True),
+        Binding("pagedown", "page_down", show=False, priority=True),
         Binding("f", "focus_file_tree", show=False),
         Binding("s", "enter_split", show=False),
         Binding("d", "close_pane", show=False),
@@ -223,8 +279,26 @@ class SkimApp(App):
         """Refresh the global status bar text."""
         self.query_one("#status-bar", Static).update(self._status_text())
 
+    def _modal_is_active(self) -> bool:
+        """Return whether a modal screen currently owns keyboard interaction."""
+        return isinstance(self.screen, ModalScreen)
+
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        """Disable app-level arrow scrolling while a modal owns focus."""
+        if self._modal_is_active() and action in {"scroll_up", "scroll_down"}:
+            return False
+        return super().check_action(action, parameters)
+
+    def action_quit(self) -> None:
+        """Quit the app unless a modal screen is active."""
+        if self._modal_is_active():
+            return
+        self.exit()
+
     def action_focus_file_tree(self) -> None:
         """Toggle focus between the file tree and the active preview pane."""
+        if self._modal_is_active():
+            return
         if self.file_tree_mode:
             self.exit_file_tree_mode()
             return
@@ -244,6 +318,8 @@ class SkimApp(App):
 
     def action_scroll_down(self) -> None:
         """Scroll down in the active pane or confirm a downward split."""
+        if self._modal_is_active():
+            return
         if self.split_mode:
             self.split_mode = False
             self._split("down")
@@ -259,6 +335,8 @@ class SkimApp(App):
 
     def action_scroll_up(self) -> None:
         """Scroll up in the active pane or confirm an upward split."""
+        if self._modal_is_active():
+            return
         if self.split_mode:
             self.split_mode = False
             self._split("up")
@@ -274,18 +352,63 @@ class SkimApp(App):
 
     def action_tree_up(self) -> None:
         """Move the directory tree cursor up."""
+        if self._modal_is_active():
+            return
         self.query_one(DirectoryTree).action_cursor_up()
 
     def action_tree_down(self) -> None:
         """Move the directory tree cursor down."""
+        if self._modal_is_active():
+            return
         self.query_one(DirectoryTree).action_cursor_down()
 
     def action_tree_select(self) -> None:
         """Open the currently selected tree item."""
+        if self._modal_is_active():
+            return
         self.query_one(DirectoryTree).action_select_cursor()
+
+    def action_page_down(self) -> None:
+        """Scroll the active content by a page-sized amount."""
+        if self._modal_is_active():
+            screen = self.screen
+            action = getattr(screen, "action_scroll_preview_down", None)
+            if callable(action):
+                action()
+            return
+        try:
+            pane = self.query_one(f"#{self.active_pane_id}", PreviewPane)
+            viewer = pane.active_json_navigator()
+            if isinstance(viewer, JsonInspector):
+                viewer.scroll_detail(PAGE_SCROLL_STEP)
+                return
+            pane.scroll_relative(y=PAGE_SCROLL_STEP, animate=False)
+        except Exception:
+            pass
+
+    def action_page_up(self) -> None:
+        """Scroll the active content up by a page-sized amount."""
+        if self._modal_is_active():
+            screen = self.screen
+            action = getattr(screen, "action_scroll_preview_up", None)
+            if callable(action):
+                action()
+            return
+        try:
+            pane = self.query_one(f"#{self.active_pane_id}", PreviewPane)
+            viewer = pane.active_json_navigator()
+            if isinstance(viewer, JsonInspector):
+                viewer.scroll_detail(-PAGE_SCROLL_STEP)
+                return
+            pane.scroll_relative(y=-PAGE_SCROLL_STEP, animate=False)
+        except Exception:
+            pass
 
     def on_key(self, event: Key) -> None:
         """Handle split-mode keys and tree navigation shortcuts."""
+        if self._modal_is_active():
+            return
+
         if self.split_mode:
             direction_map = {
                 "left": "left",
@@ -352,6 +475,12 @@ class SkimApp(App):
                 event.stop()
                 return
 
+        if isinstance(viewer, JsonInspector) and event.key == "a":
+            if viewer.handle_annotation_key():
+                event.prevent_default()
+                event.stop()
+                return
+
         if event.key == "shift+down":
             self.action_tree_down()
             event.prevent_default()
@@ -376,6 +505,8 @@ class SkimApp(App):
 
     def action_enter_split(self) -> None:
         """Enter split mode for the next direction key."""
+        if self._modal_is_active():
+            return
         if self._total_panes() >= MAX_ROWS * MAX_COLS:
             self.notify("Maximum 6 panes reached", severity="warning")
             return
@@ -424,6 +555,8 @@ class SkimApp(App):
 
     def action_close_pane(self) -> None:
         """Close the active pane unless it is the last one."""
+        if self._modal_is_active():
+            return
         if self._total_panes() <= 1:
             self.notify("Cannot close last pane", severity="warning")
             return
@@ -448,6 +581,8 @@ class SkimApp(App):
 
     def action_cycle_pane(self) -> None:
         """Cycle the active pane through the current grid order."""
+        if self._modal_is_active():
+            return
         panes = [pane_id for row in self.grid for pane_id in row]
         if len(panes) <= 1:
             return

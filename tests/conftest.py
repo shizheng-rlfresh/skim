@@ -172,6 +172,35 @@ def _detail_text(viewer: TrajectoryViewer | JsonInspector) -> str:
     return "\n".join(parts)
 
 
+def _annotation_text(viewer: JsonInspector) -> str:
+    """Collect textual content from the JSON inspector annotation panel."""
+    parts = []
+    for widget in viewer._annotation_wrap.query(Static):
+        content = _static_content(widget)
+        if isinstance(content, Text):
+            parts.append(content.plain)
+        elif isinstance(content, Syntax):
+            parts.append(content.code)
+        else:
+            parts.append(str(content))
+    return "\n".join(parts)
+
+
+def _modal_preview_text(screen) -> str:
+    """Collect textual content from the annotation modal preview panel."""
+    parts = []
+    preview = screen.query_one("#annotation-preview")
+    for widget in preview.query(Static):
+        content = _static_content(widget)
+        if isinstance(content, Text):
+            parts.append(content.plain)
+        elif isinstance(content, Syntax):
+            parts.append(content.code)
+        else:
+            parts.append(str(content))
+    return "\n".join(parts)
+
+
 def _detail_syntax_blocks(viewer: TrajectoryViewer | JsonInspector) -> list[Syntax]:
     """Return all Syntax renderables mounted inside the detail pane."""
     return [

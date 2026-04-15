@@ -10,7 +10,9 @@ import json
 
 import pytest
 from conftest import (
+    _annotation_text,
     _detail_text,
+    _modal_preview_text,
     _static_content,
     _tree_labels,
     sample_bundle,
@@ -19,10 +21,14 @@ from conftest import (
     sample_trajectory,
 )
 from rich.syntax import Syntax
-from textual.widgets import Collapsible, Markdown, Static, Tree
+from rich.text import Text
+from textual.widgets import Collapsible, Input, Markdown, Static, TextArea, Tree
 
+import skim.trajectory as trajectory_module
 from skim import JsonInspector, PreviewPane, SkimApp, render_file
 from skim.preview import CsvPreview
+from skim.scrolling import FocusableDetailWrap
+from skim.trajectory import AnnotationStore
 
 
 def test_generic_json_uses_json_inspector(tmp_path):
@@ -35,6 +41,19 @@ def test_generic_json_uses_json_inspector(tmp_path):
     assert len(widgets) == 1
     assert isinstance(widgets[0], JsonInspector)
     assert _tree_labels(widgets[0]._tree) == ["Hello world"]
+
+
+def test_render_file_passes_source_context_to_json_inspector(tmp_path):
+    """JSON inspectors should know the source file and review root."""
+    test_file = tmp_path / "plain.json"
+    test_file.write_text(json.dumps({"hello": "world"}))
+
+    widgets = render_file(test_file, browse_root=tmp_path)
+
+    inspector = widgets[0]
+    assert isinstance(inspector, JsonInspector)
+    assert inspector.source_path == test_file.resolve()
+    assert inspector.review_root == tmp_path.resolve()
 
 
 def test_csv_uses_specialized_preview(tmp_path):
@@ -192,6 +211,538 @@ async def test_submission_summary_node_renders_summary_detail(tmp_path):
         assert "Task Name:" in detail
         assert "Submission Type:" in detail
         assert "Grader Guidance" in detail
+
+
+async def test_json_inspector_shows_empty_annotation_section_for_annotatable_nodes(tmp_path):
+    """Annotatable JSON nodes should show a separate annotation panel."""
+    test_file = tmp_path / "plain.json"
+    test_file.write_text(json.dumps({"hello": "world"}))
+    widgets = render_file(test_file, browse_root=tmp_path)
+    inspector = widgets[0]
+    assert isinstance(inspector, JsonInspector)
+
+    app = SkimApp(path=str(tmp_path))
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        await pane.mount(inspector)
+        await pilot.pause()
+
+        annotation = _annotation_text(inspector)
+        detail = _detail_text(inspector)
+        assert "Annotation" in annotation
+        assert "No annotation yet" in annotation
+        assert "Press a to annotate" in annotation
+        assert "No annotation yet" not in detail
+
+
+async def test_json_inspector_detail_follows_tree_cursor_without_enter(tmp_path):
+    """Moving the JSON tree cursor should update the right panel immediately."""
+    test_file = tmp_path / "plain.json"
+    test_file.write_text(json.dumps({"alpha": 1, "beta": 2}))
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        pane.show_file(test_file)
+        await pilot.pause()
+
+        inspector = pane.query_one(JsonInspector)
+        inspector.focus_tree_mode()
+        await pilot.pause()
+
+        assert inspector._tree.cursor_node is inspector._tree.root.children[0]
+        assert "Path: $.alpha" in _detail_text(inspector)
+
+        await pilot.press("down")
+        await pilot.pause()
+
+        assert inspector._tree.cursor_node is inspector._tree.root.children[1]
+        assert "Path: $.beta" in _detail_text(inspector)
+
+
+async def test_json_inspector_pagedown_scrolls_detail_without_leaving_tree(tmp_path):
+    """PageDown should scroll long JSON detail while arrows remain tree-only."""
+    test_file = tmp_path / "plain.json"
+    long_text = "\n".join(f"line {index}" for index in range(200))
+    test_file.write_text(json.dumps({"log": long_text, "other": "x"}))
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        pane.show_file(test_file)
+        await pilot.pause()
+
+        inspector = pane.query_one(JsonInspector)
+        inspector.focus_tree_mode()
+        await pilot.pause()
+
+        first_node = inspector._tree.root.children[0]
+        before_scroll = inspector._detail_wrap.scroll_y
+        await pilot.press("pagedown")
+        await pilot.pause()
+
+        assert inspector._detail_wrap.scroll_y > before_scroll
+        assert inspector._tree.cursor_node is first_node
+
+
+async def test_json_inspector_shows_unavailable_state_for_summary_nodes(tmp_path):
+    """Synthetic summary nodes should show an unavailable annotation state."""
+    test_file = tmp_path / "submission.json"
+    test_file.write_text(json.dumps(sample_submission()))
+    widgets = render_file(test_file, browse_root=tmp_path)
+    inspector = widgets[0]
+    assert isinstance(inspector, JsonInspector)
+
+    app = SkimApp(path=str(tmp_path))
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        await pane.mount(inspector)
+        summary_node = inspector._tree.root.children[0]
+        inspector.on_tree_node_selected(Tree.NodeSelected(summary_node))
+        await pilot.pause()
+
+        annotation = _annotation_text(inspector)
+        assert "Annotation" in annotation
+        assert "Unavailable" in annotation
+        assert "summary nodes" in annotation.lower()
+
+
+async def test_persisted_annotations_mark_tree_and_detail_on_reload(tmp_path):
+    """Stored annotations should reload into the tree marker and annotation panel."""
+    test_file = tmp_path / "plain.json"
+    test_file.write_text(json.dumps({"hello": "world"}))
+    review_file = tmp_path / ".skim" / "review.json"
+    review_file.parent.mkdir()
+    review_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "files": {
+                    "plain.json": {
+                        "annotations": {
+                            "$.hello": {
+                                "tags": ["evidence", "bug"],
+                                "note": "First concrete failure appears here.",
+                            }
+                        }
+                    }
+                },
+            }
+        )
+    )
+
+    widgets = render_file(test_file, browse_root=tmp_path)
+    inspector = widgets[0]
+    assert isinstance(inspector, JsonInspector)
+    assert inspector._tree.root.children[0].label.plain.startswith("* ")
+
+    app = SkimApp(path=str(tmp_path))
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        await pane.mount(inspector)
+        await pilot.pause()
+
+        annotation = _annotation_text(inspector)
+        detail = _detail_text(inspector)
+        assert "Annotation" in annotation
+        assert "evidence, bug" in annotation
+        assert "First concrete failure appears here." in annotation
+        assert "First concrete failure appears here." not in detail
+
+
+def test_annotation_store_caches_one_file_lookup(tmp_path, monkeypatch):
+    """Repeated annotation reads for one file should reuse the normalized cache."""
+    source = tmp_path / "plain.json"
+    source.write_text(json.dumps({"hello": "world"}))
+    review_file = tmp_path / ".skim" / "review.json"
+    review_file.parent.mkdir()
+    review_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "files": {
+                    "plain.json": {
+                        "annotations": {
+                            "$.hello": {
+                                "tags": ["evidence"],
+                                "note": "cached",
+                            }
+                        }
+                    }
+                },
+            }
+        )
+    )
+
+    store = AnnotationStore(tmp_path)
+    calls = 0
+    original = store._build_annotations_for_relative_path
+
+    def wrapped(relative_path: str):
+        nonlocal calls
+        calls += 1
+        return original(relative_path)
+
+    monkeypatch.setattr(store, "_build_annotations_for_relative_path", wrapped)
+
+    first = store.get_annotation(source, "$.hello")
+    second = store.get_annotation(source, "$.hello")
+    records = store.annotations_for_file(source)
+
+    assert first is not None
+    assert second is not None
+    assert first.note == "cached"
+    assert second.note == "cached"
+    assert records["$.hello"].note == "cached"
+    assert calls == 1
+
+    store.set_annotation(source, "$.hello", tags=("updated",), note="changed")
+
+    updated = store.get_annotation(source, "$.hello")
+    assert updated is not None
+    assert updated.note == "changed"
+    assert calls == 1
+
+
+def test_trajectory_json_inspector_uses_one_overlay_normalization_pass(tmp_path, monkeypatch):
+    """Opening trajectory JSON should normalize overlay data through one shared pass."""
+    test_file = tmp_path / "trajectory.json"
+    test_file.write_text(json.dumps(sample_trajectory()))
+
+    calls = 0
+    original = trajectory_module.normalize_step_overlay
+
+    def wrapped(trajectory):
+        nonlocal calls
+        calls += 1
+        return original(trajectory)
+
+    monkeypatch.setattr(trajectory_module, "normalize_step_overlay", wrapped)
+
+    widgets = render_file(test_file, browse_root=tmp_path)
+
+    assert len(widgets) == 1
+    assert isinstance(widgets[0], JsonInspector)
+    assert calls == 1
+
+
+async def test_annotation_modal_saves_selected_node_annotation(tmp_path):
+    """Pressing a should open the modal and persist the selected annotation."""
+    test_file = tmp_path / "plain.json"
+    test_file.write_text(json.dumps({"hello": "world"}))
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        pane.show_file(test_file)
+        await pilot.pause()
+
+        inspector = pane.query_one(JsonInspector)
+        await pilot.press("a")
+        await pilot.pause()
+
+        tags = app.screen.query_one("#annotation-tags", Input)
+        note = app.screen.query_one("#annotation-note", TextArea)
+        tags.value = "evidence, bug"
+        note.load_text("First concrete failure appears here.")
+        app.screen.action_save()
+        await pilot.pause()
+
+        review_file = tmp_path / ".skim" / "review.json"
+        payload = json.loads(review_file.read_text())
+        assert payload["files"]["plain.json"]["annotations"]["$.hello"] == {
+            "tags": ["evidence", "bug"],
+            "note": "First concrete failure appears here.",
+        }
+        assert inspector._tree.root.children[0].label.plain.startswith("* ")
+        annotation = _annotation_text(inspector)
+        detail = _detail_text(inspector)
+        assert "evidence, bug" in annotation
+        assert "First concrete failure appears here." in annotation
+        assert "First concrete failure appears here." not in detail
+
+
+async def test_annotation_modal_delete_removes_selected_node_annotation(tmp_path):
+    """Deleting from the annotation modal should clear persistence and UI state."""
+    test_file = tmp_path / "plain.json"
+    test_file.write_text(json.dumps({"hello": "world"}))
+    review_file = tmp_path / ".skim" / "review.json"
+    review_file.parent.mkdir()
+    review_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "files": {
+                    "plain.json": {
+                        "annotations": {
+                            "$.hello": {
+                                "tags": ["evidence"],
+                                "note": "First concrete failure appears here.",
+                            }
+                        }
+                    }
+                },
+            }
+        )
+    )
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        pane.show_file(test_file)
+        await pilot.pause()
+
+        inspector = pane.query_one(JsonInspector)
+        await pilot.press("a")
+        await pilot.pause()
+        app.screen.action_delete()
+        await pilot.pause()
+
+        payload = json.loads(review_file.read_text())
+        assert payload["files"]["plain.json"]["annotations"] == {}
+        assert not inspector._tree.root.children[0].label.plain.startswith("* ")
+        annotation = _annotation_text(inspector)
+        detail = _detail_text(inspector)
+        assert "No annotation yet" in annotation
+        assert "Press a to annotate" in annotation
+        assert "No annotation yet" not in detail
+
+
+async def test_annotation_modal_enter_moves_focus_to_note_without_saving(tmp_path):
+    """Enter in the tags field should stay inside the modal and move to the note."""
+    test_file = tmp_path / "plain.json"
+    test_file.write_text(json.dumps({"alpha": 1, "beta": 2}))
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        pane.show_file(test_file)
+        await pilot.pause()
+
+        inspector = pane.query_one(JsonInspector)
+        first_node = inspector._tree.root.children[0]
+        assert inspector._tree.cursor_node is first_node
+
+        await pilot.press("a")
+        await pilot.pause()
+
+        note = app.screen.query_one("#annotation-note", TextArea)
+        assert not note.has_focus
+
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert note.has_focus
+        assert inspector._tree.cursor_node is first_node
+        assert not (tmp_path / ".skim" / "review.json").exists()
+
+
+async def test_annotation_modal_shows_split_editor_and_node_preview(tmp_path):
+    """The annotation modal should show editor controls and selected-node preview."""
+    test_file = tmp_path / "plain.json"
+    test_file.write_text(json.dumps({"alpha": 1, "beta": 2}))
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        pane.show_file(test_file)
+        await pilot.pause()
+
+        await pilot.press("a")
+        await pilot.pause()
+
+        assert app.screen.query_one("#annotation-tags", Input).has_focus
+        preview_text = _modal_preview_text(app.screen)
+        assert "Path: $.alpha" in preview_text
+        assert "Type: int" in preview_text
+        assert "1" in preview_text
+
+
+async def test_annotation_modal_left_right_do_not_switch_focus(tmp_path):
+    """Left/right should stay local to the focused editor control."""
+    test_file = tmp_path / "plain.json"
+    test_file.write_text(json.dumps({"alpha": 1}))
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        pane.show_file(test_file)
+        await pilot.pause()
+
+        await pilot.press("a")
+        await pilot.pause()
+        tags = app.screen.query_one("#annotation-tags", Input)
+        preview = app.screen.query_one("#annotation-preview", FocusableDetailWrap)
+        assert tags.has_focus
+
+        await pilot.press("right")
+        await pilot.pause()
+        assert tags.has_focus
+        assert not preview.has_focus
+
+        await pilot.press("left")
+        await pilot.pause()
+        assert tags.has_focus
+        assert not preview.has_focus
+
+
+async def test_annotation_modal_up_down_stay_local_to_note_editor(tmp_path):
+    """Up/down should not move focus out of the note editor."""
+    test_file = tmp_path / "plain.json"
+    test_file.write_text(json.dumps({"alpha": 1}))
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        pane.show_file(test_file)
+        await pilot.pause()
+
+        await pilot.press("a")
+        await pilot.pause()
+
+        note = app.screen.query_one("#annotation-note", TextArea)
+        save = app.screen.query_one("#annotation-save")
+
+        await pilot.press("enter")
+        await pilot.pause()
+        assert note.has_focus
+
+        await pilot.press("down")
+        await pilot.pause()
+        assert note.has_focus
+        assert not save.has_focus
+
+        await pilot.press("up")
+        await pilot.pause()
+        assert note.has_focus
+
+
+async def test_annotation_modal_pagedown_scrolls_preview_panel_from_editor_focus(tmp_path):
+    """PageDown should scroll the right preview even while editing on the left."""
+    test_file = tmp_path / "plain.json"
+    long_text = "\n".join(f"line {index}" for index in range(200))
+    test_file.write_text(json.dumps({"log": long_text}))
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        pane.show_file(test_file)
+        await pilot.pause()
+
+        await pilot.press("a")
+        await pilot.pause()
+
+        preview = app.screen.query_one("#annotation-preview", FocusableDetailWrap)
+        note = app.screen.query_one("#annotation-note", TextArea)
+        before = preview.scroll_y
+
+        await pilot.press("pagedown")
+        await pilot.pause()
+
+        assert preview.scroll_y > before
+
+        await pilot.press("enter")
+        await pilot.pause()
+        assert note.has_focus
+
+        before = preview.scroll_y
+        await pilot.press("pagedown")
+        await pilot.pause()
+
+        assert preview.scroll_y > before
+
+
+async def test_annotation_modal_footer_shows_modal_commands(tmp_path):
+    """The annotation modal should show a local footer with its own key hints."""
+    test_file = tmp_path / "plain.json"
+    test_file.write_text(json.dumps({"alpha": 1}))
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        pane.show_file(test_file)
+        await pilot.pause()
+
+        await pilot.press("a")
+        await pilot.pause()
+
+        footer = app.screen.query_one("#annotation-modal-footer", Static)
+        content = _static_content(footer)
+
+        assert isinstance(content, Text)
+        assert "Annotation" in content.plain
+        assert "Esc" in content.plain
+        assert "Close" in content.plain
+        assert "Tab" in content.plain
+        assert "Next field" in content.plain
+        assert "Enter" in content.plain
+        assert "Tags→Note" in content.plain
+        assert "PgUp/Dn" in content.plain
+        assert "Scroll preview" in content.plain
+        assert "Move" not in content.plain
+        assert "Branch" not in content.plain
+
+
+async def test_annotation_modal_blocks_tree_and_pane_shortcuts(tmp_path):
+    """While the annotation modal is open, app-level shortcuts should not fire."""
+    first_file = tmp_path / "plain.json"
+    first_file.write_text(json.dumps({"alpha": 1, "beta": 2}))
+    second_file = tmp_path / "other.json"
+    second_file.write_text(json.dumps({"hello": "world"}))
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await pilot.press("right")
+        await pilot.pause()
+
+        first_pane = app.query_one("#pane-0", PreviewPane)
+        first_pane.show_file(first_file)
+        app.set_active_pane("pane-0")
+        await pilot.pause()
+
+        inspector = first_pane.query_one(JsonInspector)
+        inspector.focus_tree_mode()
+        await pilot.pause()
+        first_node = inspector._tree.root.children[0]
+        second_node = inspector._tree.root.children[1]
+        assert inspector._tree.cursor_node is first_node
+
+        await pilot.press("a")
+        await pilot.pause()
+
+        active_before = app.active_pane_id
+        await pilot.press("down")
+        await pilot.pause()
+        await pilot.press("w")
+        await pilot.pause()
+
+        assert inspector._tree.cursor_node is first_node
+        assert inspector._tree.cursor_node is not second_node
+        assert app.active_pane_id == active_before
+
+
+async def test_json_inspector_footer_shows_live_preview_controls(tmp_path):
+    """The JSON footer should describe the always-visible detail model."""
+    test_file = tmp_path / "plain.json"
+    test_file.write_text(json.dumps({"hello": "world"}))
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        pane.show_file(test_file)
+        await pilot.pause()
+
+        inspector = pane.query_one(JsonInspector)
+        footer = inspector.query_one(".trajectory-footer", Static)
+        content = _static_content(footer)
+
+        assert isinstance(content, Text)
+        assert "Move" in content.plain
+        assert "Branch" in content.plain
+        assert "PgUp/Dn" in content.plain
+        assert "Detail" not in content.plain
+        assert "Back to JSON" not in content.plain
 
 
 def test_bundle_json_uses_json_inspector_with_human_run_labels(tmp_path):
