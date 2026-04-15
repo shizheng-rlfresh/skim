@@ -1459,20 +1459,11 @@ class SkimApp(App):
         Binding("down", "scroll_down", show=False, priority=True),
         Binding("j", "scroll_down", show=False, priority=True),
         Binding("k", "scroll_up", show=False, priority=True),
+        Binding("f", "focus_file_tree", show=False),
         Binding("s", "enter_split", show=False),
         Binding("d", "close_pane", show=False),
         Binding("w", "cycle_pane", show=False),
     ]
-
-    STATUS_TEXT = (
-        " [bold]q[/] Quit  "
-        "[bold]↑↓[/] Scroll  "
-        "[bold]⇧↑↓[/] Tree  "
-        "[bold]Enter[/] Open  "
-        "[bold]s[/]+arrow Split  "
-        "[bold]d[/] Close  "
-        "[bold]w[/] Next pane"
-    )
 
     def __init__(self, path: str | Path = "."):
         """Initialize the app for a directory path."""
@@ -1483,6 +1474,7 @@ class SkimApp(App):
         self.grid: list[list[str]] = []
         self.pane_files: dict[str, Path | None] = {}
         self.split_mode = False
+        self.file_tree_mode = False
 
     def _new_pane_id(self) -> str:
         pid = f"pane-{self.pane_counter}"
@@ -1505,16 +1497,16 @@ class SkimApp(App):
         with Horizontal(id="outer"):
             yield DirectoryTree(str(self.browse_path))
             yield Vertical(id="preview-area")
-        yield Static(self.STATUS_TEXT, id="status-bar")
+        yield Static("", id="status-bar")
 
     def on_mount(self) -> None:
-        """Create the first preview pane and focus the tree."""
+        """Create the first preview pane and start in preview focus mode."""
         pid = self._new_pane_id()
         self.grid = [[pid]]
         self.pane_files[pid] = None
         self.active_pane_id = pid
         self._rebuild_layout()
-        self.query_one(DirectoryTree).focus()
+        self.exit_file_tree_mode()
 
     def _rebuild_layout(self) -> None:
         """Rebuild the preview pane grid from current state."""
@@ -1546,6 +1538,49 @@ class SkimApp(App):
         except Exception:
             pass
 
+    def _status_text(self) -> str:
+        """Return status-bar text for the current app mode."""
+        if self.file_tree_mode:
+            return (
+                " [bold]q[/] Quit  "
+                "[bold]↑↓[/] Move tree  "
+                "[bold]Enter[/] Open  "
+                "[bold]Esc[/] Back  "
+                "[bold]⇧↑↓[/] Tree shortcut  "
+                "[bold]s[/]+arrow Split  "
+                "[bold]d[/] Close  "
+                "[bold]w[/] Next pane"
+            )
+        return (
+            " [bold]q[/] Quit  "
+            "[bold]↑↓[/] Scroll  "
+            "[bold]f[/] File tree  "
+            "[bold]⇧↑↓[/] Tree shortcut  "
+            "[bold]Enter[/] Open  "
+            "[bold]s[/]+arrow Split  "
+            "[bold]d[/] Close  "
+            "[bold]w[/] Next pane"
+        )
+
+    def _update_status_bar(self) -> None:
+        """Refresh the global status bar text."""
+        self.query_one("#status-bar", Static).update(self._status_text())
+
+    def action_focus_file_tree(self) -> None:
+        """Enter file-tree focus mode."""
+        self.file_tree_mode = True
+        self.query_one(DirectoryTree).focus(scroll_visible=False)
+        self._update_status_bar()
+
+    def exit_file_tree_mode(self) -> None:
+        """Leave file-tree focus mode and return to the active preview pane."""
+        self.file_tree_mode = False
+        try:
+            self.query_one(f"#{self.active_pane_id}", PreviewPane).focus(scroll_visible=False)
+        except Exception:
+            pass
+        self._update_status_bar()
+
     # --- scrolling the active pane ---
 
     def action_scroll_down(self) -> None:
@@ -1553,6 +1588,9 @@ class SkimApp(App):
         if self.split_mode:
             self.split_mode = False
             self._split("down")
+            return
+        if self.file_tree_mode:
+            self.action_tree_down()
             return
         try:
             pane = self.query_one(f"#{self.active_pane_id}", PreviewPane)
@@ -1565,6 +1603,9 @@ class SkimApp(App):
         if self.split_mode:
             self.split_mode = False
             self._split("up")
+            return
+        if self.file_tree_mode:
+            self.action_tree_up()
             return
         try:
             pane = self.query_one(f"#{self.active_pane_id}", PreviewPane)
@@ -1608,6 +1649,28 @@ class SkimApp(App):
             event.prevent_default()
             event.stop()
             return
+
+        if self.file_tree_mode:
+            if event.key in {"up", "k"}:
+                self.action_tree_up()
+                event.prevent_default()
+                event.stop()
+                return
+            if event.key in {"down", "j"}:
+                self.action_tree_down()
+                event.prevent_default()
+                event.stop()
+                return
+            if event.key == "enter":
+                self.action_tree_select()
+                event.prevent_default()
+                event.stop()
+                return
+            if event.key == "escape":
+                self.exit_file_tree_mode()
+                event.prevent_default()
+                event.stop()
+                return
 
         viewer: TrajectoryViewer | None = None
         try:
@@ -1656,6 +1719,8 @@ class SkimApp(App):
         pane = self.query_one(f"#{self.active_pane_id}", PreviewPane)
         pane.show_file(path)
         self.pane_files[self.active_pane_id] = path
+        if self.file_tree_mode:
+            self.exit_file_tree_mode()
 
     # --- split ---
 

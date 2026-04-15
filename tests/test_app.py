@@ -111,6 +111,130 @@ async def test_file_preview(tmp_path):
         assert pane.current_path == test_file
 
 
+async def test_f_enters_file_tree_mode(tmp_path):
+    """Pressing f should focus the file tree and enter tree mode."""
+    (tmp_path / "one.txt").write_text("x")
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        tree = app.query_one("DirectoryTree")
+
+        assert app.focused is pane
+        assert not app.file_tree_mode
+
+        await pilot.press("f")
+        await pilot.pause()
+
+        assert app.file_tree_mode
+        assert app.focused is tree
+
+
+async def test_file_tree_mode_up_down_moves_tree_cursor(tmp_path):
+    """While file-tree mode is active, up/down should move the tree cursor."""
+    for index in range(4):
+        (tmp_path / f"file_{index}.txt").write_text("x")
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        tree = app.query_one("DirectoryTree")
+
+        await pilot.press("f")
+        await pilot.pause()
+        before = tree.cursor_line
+        await pilot.press("down")
+        await pilot.pause()
+
+        assert tree.cursor_line > before
+
+
+async def test_file_tree_mode_enter_opens_file_and_returns_to_pane(tmp_path):
+    """Entering a file from tree mode should open it and restore pane focus."""
+    test_file = tmp_path / "open-me.txt"
+    test_file.write_text("hello")
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+
+        await pilot.press("f")
+        await pilot.pause()
+        await pilot.press("down")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert pane.current_path == test_file
+        assert not app.file_tree_mode
+        assert app.focused is pane
+
+
+async def test_file_tree_mode_escape_returns_to_active_pane(tmp_path):
+    """Escape should leave file-tree mode and return focus to the preview pane."""
+    (tmp_path / "one.txt").write_text("x")
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        footer = app.query_one("#status-bar", Static)
+
+        await pilot.press("f")
+        await pilot.pause()
+        assert app.file_tree_mode
+        assert "Back" in _static_content(footer)
+
+        await pilot.press("escape")
+        await pilot.pause()
+
+        assert not app.file_tree_mode
+        assert app.focused is pane
+        assert "File tree" in _static_content(footer)
+
+
+async def test_down_outside_file_tree_mode_still_scrolls_preview_pane(tmp_path):
+    """Outside file-tree mode, down should keep scrolling the active pane."""
+    test_file = tmp_path / "long.txt"
+    test_file.write_text("\n".join(f"line {index}" for index in range(400)))
+    (tmp_path / "other.txt").write_text("x")
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        tree = app.query_one("DirectoryTree")
+        pane.show_file(test_file)
+        await pilot.pause()
+
+        before_scroll = pane.scroll_y
+        before_cursor = tree.cursor_line
+        await pilot.press("down")
+        await pilot.pause()
+
+        assert pane.scroll_y > before_scroll
+        assert tree.cursor_line == before_cursor
+
+
+async def test_shift_down_still_moves_file_tree_cursor(tmp_path):
+    """Shift+down should remain a convenience shortcut for tree navigation."""
+    for index in range(4):
+        (tmp_path / f"file_{index}.txt").write_text("x")
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        tree = app.query_one("DirectoryTree")
+        before = tree.cursor_line
+
+        await pilot.press("shift+down")
+        await pilot.pause()
+
+        assert tree.cursor_line > before
+
+
 def test_generic_json_uses_syntax_preview(tmp_path):
     """Generic JSON keeps the syntax-highlighted preview."""
     test_file = tmp_path / "plain.json"
@@ -677,6 +801,7 @@ async def test_global_footer_only_shows_app_wide_commands():
 
         assert isinstance(content, str)
         assert "Scroll" in content
+        assert "File tree" in content
         assert "Open" in content
         assert "JSON" not in content
         assert "Branch" not in content
