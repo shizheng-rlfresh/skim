@@ -6,12 +6,17 @@ interaction tests or trajectory-detail rendering behavior.
 """
 
 import json
+from pathlib import Path
 
+import pytest
 from conftest import _static_content, _tree_labels, sample_trajectory
 from rich.syntax import Syntax
-from textual.widgets import Static
+from textual.widgets import Collapsible, Markdown, Static
 
 from skim import PreviewPane, SkimApp, SubmissionSummary, TrajectoryViewer, render_file
+from skim.preview import CsvPreview
+
+DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 
 
 def test_generic_json_uses_syntax_preview(tmp_path):
@@ -24,6 +29,71 @@ def test_generic_json_uses_syntax_preview(tmp_path):
     assert len(widgets) == 1
     assert isinstance(widgets[0], Static)
     assert isinstance(_static_content(widgets[0]), Syntax)
+
+
+def test_csv_uses_specialized_preview(tmp_path):
+    """CSV files should use the specialized CSV preview widget."""
+    test_file = tmp_path / "example.csv"
+    test_file.write_text((DATA_DIR / "example.csv").read_text())
+
+    widgets = render_file(test_file)
+
+    assert len(widgets) == 1
+    assert isinstance(widgets[0], CsvPreview)
+
+
+def test_csv_preview_shows_table_and_raw_section():
+    """CSV preview should show a table summary plus a raw CSV section."""
+    widgets = render_file(DATA_DIR / "example.csv")
+
+    assert len(widgets) == 1
+    preview = widgets[0]
+    assert isinstance(preview, CsvPreview)
+    assert isinstance(preview._widgets[1], Static)
+    assert isinstance(_static_content(preview._widgets[1]), object)
+    raw = preview._widgets[2]
+    assert isinstance(raw, Collapsible)
+    assert raw.title == "Raw CSV"
+    assert raw.collapsed
+
+
+def test_csv_parse_error_shows_error_and_raw_content(tmp_path):
+    """Malformed CSV should stay visible with an explicit parse-error note."""
+    test_file = tmp_path / "broken.csv"
+    test_file.write_text('name,value\n"broken,1\n')
+
+    widgets = render_file(test_file)
+
+    assert len(widgets) == 1
+    preview = widgets[0]
+    assert isinstance(preview, CsvPreview)
+    error = preview._widgets[0]
+    assert isinstance(error, Static)
+    assert "CSV parse error:" in _static_content(error).plain
+    raw = preview._widgets[1]
+    assert isinstance(raw, Collapsible)
+    assert raw.title == "Raw CSV"
+    assert not raw.collapsed
+
+
+def test_csv_preview_caps_wide_and_long_content(tmp_path):
+    """CSV preview should cap rows, columns, and oversized cell values."""
+    test_file = tmp_path / "wide.csv"
+    header = ",".join(f"col_{index}" for index in range(10))
+    long_cell = "x" * 80
+    rows = [",".join([long_cell, *[f"value_{index}" for index in range(1, 10)]]) for _ in range(25)]
+    test_file.write_text("\n".join([header, *rows]))
+
+    widgets = render_file(test_file)
+
+    preview = widgets[0]
+    assert isinstance(preview, CsvPreview)
+    table = _static_content(preview._widgets[1])
+    assert len(table.columns) == 9
+    assert table.row_count == 20
+    first_cell = table.columns[0]._cells[0]
+    assert first_cell.endswith("…")
+    assert len(first_cell) == 24
 
 
 def test_invalid_json_falls_back_to_syntax_preview(tmp_path):
@@ -86,6 +156,72 @@ def test_submission_json_uses_submission_summary(tmp_path):
     text = widgets[0].summary_text.plain
     assert "Factors affecting WHPs" in text
     assert "https://example.invalid/trajectory.json" in text
+
+
+@pytest.mark.parametrize(
+    ("sample_name", "lexer"),
+    [
+        ("example.xml", "xml"),
+        ("example.toml", "toml"),
+        ("example.css", "css"),
+        ("example.html", "html"),
+        ("example.sql", "sql"),
+        ("example.yaml", "yaml"),
+    ],
+)
+def test_sample_backed_text_formats_use_expected_syntax_preview(sample_name, lexer):
+    """Sample-backed README formats should route to the expected syntax preview."""
+    widgets = render_file(DATA_DIR / sample_name)
+
+    assert len(widgets) == 1
+    assert isinstance(widgets[0], Static)
+    content = _static_content(widgets[0])
+    assert isinstance(content, Syntax)
+    assert content.lexer.name.lower() == lexer
+
+
+@pytest.mark.parametrize(
+    "sample_name",
+    [
+        "review_note.md",
+        "review_decision.md",
+        "review_instruction.md",
+        "score_submission.md",
+    ],
+)
+def test_sample_backed_markdown_formats_render_markdown(sample_name):
+    """Markdown samples should render through the Markdown widget."""
+    widgets = render_file(DATA_DIR / sample_name)
+
+    assert len(widgets) == 1
+    assert isinstance(widgets[0], Markdown)
+
+
+@pytest.mark.parametrize(
+    ("suffix", "lexer", "content"),
+    [
+        (".py", "python", "print('hello')\n"),
+        (".js", "javascript", "const x = 1;\n"),
+        (".ts", "typescript", "const x: number = 1;\n"),
+        (".sh", "bash", "echo hello\n"),
+        (".rs", "rust", "fn main() {}\n"),
+        (".go", "go", "package main\nfunc main() {}\n"),
+    ],
+)
+def test_synthetic_readme_formats_route_to_expected_syntax_preview(
+    tmp_path, suffix, lexer, content
+):
+    """README-listed formats without sample files should still use the expected lexer."""
+    test_file = tmp_path / f"example{suffix}"
+    test_file.write_text(content)
+
+    widgets = render_file(test_file)
+
+    assert len(widgets) == 1
+    assert isinstance(widgets[0], Static)
+    renderable = _static_content(widgets[0])
+    assert isinstance(renderable, Syntax)
+    assert renderable.lexer.name.lower() == lexer
 
 
 async def test_split_panes_keep_specialized_preview(tmp_path):
