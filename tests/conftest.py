@@ -13,7 +13,7 @@ from rich.syntax import Syntax
 from rich.text import Text
 from textual.widgets import Collapsible, Static, Tree
 
-from skim import TrajectoryViewer
+from skim import JsonInspector, TrajectoryViewer
 
 
 def sample_trajectory(
@@ -92,6 +92,62 @@ def multi_step_trajectory(step_count: int) -> dict[str, Any]:
     return trajectory
 
 
+def sample_submission() -> dict[str, Any]:
+    """Return a small worker-submission fixture for the JSON inspector."""
+    return {
+        "task_name": "Factors affecting WHPs",
+        "submission_type": "Complete task",
+        "prompt": "Compare spray diary information.",
+        "quick_scores": "Model A: 32%",
+        "quick_stats": "2 strong signals",
+        "agentic_grader_guidance": "Identify Chlorpyrifos.",
+        "task_solution": "Chlorpyrifos appears slower to decay than expected.",
+        "load_trajectories_s3": "https://example.invalid/trajectory.json",
+        "export_task_data_json": json.dumps(
+            {
+                "task_name": "Factors affecting WHPs",
+                "notes": ["Look for repeated residue issues."],
+            }
+        ),
+    }
+
+
+def sample_bundle() -> list[dict[str, str]]:
+    """Return a small bundle fixture with embedded task and trajectory JSON strings."""
+    trajectory = sample_trajectory()
+    trajectory["metadata"]["trajectory_id"] = "bundle-traj-c98cf3"
+    trajectory["metadata"]["llm_model"] = "claude-opus-4-6"
+    return [
+        {
+            "version": "1.0.0",
+            "task": json.dumps(
+                {
+                    "task_id": "bundle-task-1",
+                    "prompt": "Compare industry spray diary information.",
+                }
+            ),
+            "trajectory": json.dumps(trajectory),
+            "setup_files_url": "https://example.invalid/setup.zip",
+        }
+    ]
+
+
+def sample_hermes_transcript() -> dict[str, Any]:
+    """Return a small Hermes-style transcript fixture."""
+    return {
+        "model": "anthropic/claude-sonnet-4.6",
+        "timestamp": "2026-04-14T22:00:00Z",
+        "completed": True,
+        "conversations": [
+            {"from": "system", "value": "You are a structured reviewer."},
+            {"from": "human", "value": "Please inspect the trajectories."},
+            {"from": "assistant", "value": "I will start with the summary."},
+            {"from": "tool", "value": '{"stdout": "Report line 1\\nReport line 2"}'},
+            {"from": "assistant", "value": "The key issue is Chlorpyrifos."},
+        ],
+    }
+
+
 def _static_content(widget: Static) -> object:
     """Return the private Static content object for focused test inspection."""
     return widget._Static__content
@@ -102,8 +158,8 @@ def _tree_labels(tree: Tree) -> list[str]:
     return [child.label.plain for child in tree.root.children]
 
 
-def _detail_text(viewer: TrajectoryViewer) -> str:
-    """Collect textual content from the rendered trajectory detail pane."""
+def _detail_text(viewer: TrajectoryViewer | JsonInspector) -> str:
+    """Collect textual content from the rendered detail pane."""
     parts = []
     for widget in viewer._detail_wrap.query(Static):
         content = _static_content(widget)
@@ -116,7 +172,7 @@ def _detail_text(viewer: TrajectoryViewer) -> str:
     return "\n".join(parts)
 
 
-def _detail_syntax_blocks(viewer: TrajectoryViewer) -> list[Syntax]:
+def _detail_syntax_blocks(viewer: TrajectoryViewer | JsonInspector) -> list[Syntax]:
     """Return all Syntax renderables mounted inside the detail pane."""
     return [
         _static_content(widget)
@@ -125,17 +181,17 @@ def _detail_syntax_blocks(viewer: TrajectoryViewer) -> list[Syntax]:
     ]
 
 
-def _top_level_collapsible_titles(viewer: TrajectoryViewer) -> list[str]:
+def _top_level_collapsible_titles(viewer: TrajectoryViewer | JsonInspector) -> list[str]:
     """Return titles for top-level collapsible sections in the detail pane."""
     return [child.title for child in viewer._detail_wrap.children if isinstance(child, Collapsible)]
 
 
-def _all_collapsible_titles(viewer: TrajectoryViewer) -> list[str]:
+def _all_collapsible_titles(viewer: TrajectoryViewer | JsonInspector) -> list[str]:
     """Return titles for all collapsible sections in the detail pane."""
     return [widget.title for widget in viewer._detail_wrap.query(Collapsible)]
 
 
-def _collapsible_by_title(viewer: TrajectoryViewer, title: str) -> Collapsible:
+def _collapsible_by_title(viewer: TrajectoryViewer | JsonInspector, title: str) -> Collapsible:
     """Return the first collapsible section with the requested title."""
     for widget in viewer._detail_wrap.query(Collapsible):
         if widget.title == title:

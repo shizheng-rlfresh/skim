@@ -6,13 +6,13 @@ widgets, and trajectory viewer types so callers can continue using simple
 """
 
 from .app import SkimApp, dev, main
-from .preview import PreviewPane, SubmissionSummary, render_file
-from .trajectory import TrajectoryViewer, normalize_events
+from .preview import PreviewPane, render_file
+from .trajectory import JsonInspector, TrajectoryViewer, normalize_events
 
 __all__ = [
+    "JsonInspector",
     "PreviewPane",
     "SkimApp",
-    "SubmissionSummary",
     "TrajectoryViewer",
     "dev",
     "main",
