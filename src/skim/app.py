@@ -83,6 +83,26 @@ class SkimApp(App):
         padding: 0 1;
         margin: 1 0 0 0;
     }
+    #annotation-modal {
+        width: 80;
+        max-width: 90%;
+        height: auto;
+        max-height: 85%;
+        padding: 1 2;
+        border: round $accent;
+        background: $surface;
+    }
+    .annotation-modal-actions {
+        height: auto;
+        margin: 1 0 0 0;
+    }
+    #annotation-tags {
+        margin: 1 0 0 0;
+    }
+    #annotation-note {
+        height: 8;
+        margin: 1 0 0 0;
+    }
     Collapsible.trajectory-section {
         margin: 0 0 1 0;
     }
@@ -348,6 +368,12 @@ class SkimApp(App):
 
         if viewer is not None and event.key == "enter":
             if viewer.handle_enter_key():
+                event.prevent_default()
+                event.stop()
+                return
+
+        if isinstance(viewer, JsonInspector) and event.key == "a":
+            if viewer.handle_annotation_key():
                 event.prevent_default()
                 event.stop()
                 return

@@ -87,7 +87,8 @@ class PreviewPane(DragScrollMixin, VerticalScroll, can_focus=True):
         """Render a file into the pane."""
         self.current_path = path
         self.remove_children()
-        widgets = render_file(path)
+        browse_root = getattr(self.app, "browse_path", path.parent)
+        widgets = render_file(path, browse_root=browse_root)
         for widget in widgets:
             self.mount(widget)
         self.scroll_home(animate=False)
@@ -124,7 +125,7 @@ class PreviewPane(DragScrollMixin, VerticalScroll, can_focus=True):
         return viewer if isinstance(viewer, JsonInspector) else None
 
 
-def render_file(path: Path) -> list[Widget]:
+def render_file(path: Path, *, browse_root: Path | None = None) -> list[Widget]:
     """Return a list of widgets for the given file."""
     if not path.is_file():
         return [Static(Text(f"Not a file: {path.name}", style="red"))]
@@ -146,7 +147,13 @@ def render_file(path: Path) -> list[Widget]:
     if suffix == ".json":
         try:
             parsed = json.loads(content)
-            return [JsonInspector(parsed)]
+            return [
+                JsonInspector(
+                    parsed,
+                    source_path=path,
+                    review_root=browse_root or path.parent,
+                )
+            ]
         except json.JSONDecodeError:
             pass
 

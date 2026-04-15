@@ -19,7 +19,7 @@ from conftest import (
     sample_trajectory,
 )
 from rich.syntax import Syntax
-from textual.widgets import Collapsible, Markdown, Static, Tree
+from textual.widgets import Collapsible, Input, Markdown, Static, TextArea, Tree
 
 from skim import JsonInspector, PreviewPane, SkimApp, render_file
 from skim.preview import CsvPreview
@@ -35,6 +35,19 @@ def test_generic_json_uses_json_inspector(tmp_path):
     assert len(widgets) == 1
     assert isinstance(widgets[0], JsonInspector)
     assert _tree_labels(widgets[0]._tree) == ["Hello world"]
+
+
+def test_render_file_passes_source_context_to_json_inspector(tmp_path):
+    """JSON inspectors should know the source file and review root."""
+    test_file = tmp_path / "plain.json"
+    test_file.write_text(json.dumps({"hello": "world"}))
+
+    widgets = render_file(test_file, browse_root=tmp_path)
+
+    inspector = widgets[0]
+    assert isinstance(inspector, JsonInspector)
+    assert inspector.source_path == test_file.resolve()
+    assert inspector.review_root == tmp_path.resolve()
 
 
 def test_csv_uses_specialized_preview(tmp_path):
@@ -192,6 +205,166 @@ async def test_submission_summary_node_renders_summary_detail(tmp_path):
         assert "Task Name:" in detail
         assert "Submission Type:" in detail
         assert "Grader Guidance" in detail
+
+
+async def test_json_inspector_shows_empty_annotation_section_for_annotatable_nodes(tmp_path):
+    """Annotatable JSON nodes should always show the annotation section."""
+    test_file = tmp_path / "plain.json"
+    test_file.write_text(json.dumps({"hello": "world"}))
+    widgets = render_file(test_file, browse_root=tmp_path)
+    inspector = widgets[0]
+    assert isinstance(inspector, JsonInspector)
+
+    app = SkimApp(path=str(tmp_path))
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        await pane.mount(inspector)
+        await pilot.pause()
+
+        detail = _detail_text(inspector)
+        assert "Annotation" in detail
+        assert "No annotation yet" in detail
+        assert "Press a to annotate" in detail
+
+
+async def test_json_inspector_omits_annotation_section_for_summary_nodes(tmp_path):
+    """Synthetic summary nodes should stay read-only in the MVP."""
+    test_file = tmp_path / "submission.json"
+    test_file.write_text(json.dumps(sample_submission()))
+    widgets = render_file(test_file, browse_root=tmp_path)
+    inspector = widgets[0]
+    assert isinstance(inspector, JsonInspector)
+
+    app = SkimApp(path=str(tmp_path))
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        await pane.mount(inspector)
+        summary_node = inspector._tree.root.children[0]
+        inspector.on_tree_node_selected(Tree.NodeSelected(summary_node))
+        await pilot.pause()
+
+        detail = _detail_text(inspector)
+        assert "Annotation" not in detail
+        assert "Press a to annotate" not in detail
+
+
+async def test_persisted_annotations_mark_tree_and_detail_on_reload(tmp_path):
+    """Stored annotations should reload into the tree marker and detail pane."""
+    test_file = tmp_path / "plain.json"
+    test_file.write_text(json.dumps({"hello": "world"}))
+    review_file = tmp_path / ".skim" / "review.json"
+    review_file.parent.mkdir()
+    review_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "files": {
+                    "plain.json": {
+                        "annotations": {
+                            "$.hello": {
+                                "tags": ["evidence", "bug"],
+                                "note": "First concrete failure appears here.",
+                            }
+                        }
+                    }
+                },
+            }
+        )
+    )
+
+    widgets = render_file(test_file, browse_root=tmp_path)
+    inspector = widgets[0]
+    assert isinstance(inspector, JsonInspector)
+    assert inspector._tree.root.children[0].label.plain.startswith("* ")
+
+    app = SkimApp(path=str(tmp_path))
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        await pane.mount(inspector)
+        await pilot.pause()
+
+        detail = _detail_text(inspector)
+        assert "Annotation" in detail
+        assert "evidence, bug" in detail
+        assert "First concrete failure appears here." in detail
+
+
+async def test_annotation_modal_saves_selected_node_annotation(tmp_path):
+    """Pressing a should open the modal and persist the selected annotation."""
+    test_file = tmp_path / "plain.json"
+    test_file.write_text(json.dumps({"hello": "world"}))
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        pane.show_file(test_file)
+        await pilot.pause()
+
+        inspector = pane.query_one(JsonInspector)
+        await pilot.press("a")
+        await pilot.pause()
+
+        tags = app.screen.query_one("#annotation-tags", Input)
+        note = app.screen.query_one("#annotation-note", TextArea)
+        tags.value = "evidence, bug"
+        note.load_text("First concrete failure appears here.")
+        app.screen.action_save()
+        await pilot.pause()
+
+        review_file = tmp_path / ".skim" / "review.json"
+        payload = json.loads(review_file.read_text())
+        assert payload["files"]["plain.json"]["annotations"]["$.hello"] == {
+            "tags": ["evidence", "bug"],
+            "note": "First concrete failure appears here.",
+        }
+        assert inspector._tree.root.children[0].label.plain.startswith("* ")
+        detail = _detail_text(inspector)
+        assert "evidence, bug" in detail
+        assert "First concrete failure appears here." in detail
+
+
+async def test_annotation_modal_delete_removes_selected_node_annotation(tmp_path):
+    """Deleting from the annotation modal should clear persistence and UI state."""
+    test_file = tmp_path / "plain.json"
+    test_file.write_text(json.dumps({"hello": "world"}))
+    review_file = tmp_path / ".skim" / "review.json"
+    review_file.parent.mkdir()
+    review_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "files": {
+                    "plain.json": {
+                        "annotations": {
+                            "$.hello": {
+                                "tags": ["evidence"],
+                                "note": "First concrete failure appears here.",
+                            }
+                        }
+                    }
+                },
+            }
+        )
+    )
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        pane.show_file(test_file)
+        await pilot.pause()
+
+        inspector = pane.query_one(JsonInspector)
+        await pilot.press("a")
+        await pilot.pause()
+        app.screen.action_delete()
+        await pilot.pause()
+
+        payload = json.loads(review_file.read_text())
+        assert payload["files"]["plain.json"]["annotations"] == {}
+        assert not inspector._tree.root.children[0].label.plain.startswith("* ")
+        detail = _detail_text(inspector)
+        assert "No annotation yet" in detail
+        assert "Press a to annotate" in detail
 
 
 def test_bundle_json_uses_json_inspector_with_human_run_labels(tmp_path):
