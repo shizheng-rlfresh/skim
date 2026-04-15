@@ -19,7 +19,7 @@ from textual.widgets import Header, Static
 
 from .preview import PreviewPane
 from .scrolling import DirectoryTree
-from .trajectory import TrajectoryViewer
+from .trajectory import JsonInspector, TrajectoryViewer
 
 MAX_ROWS = 2
 MAX_COLS = 3
@@ -57,7 +57,7 @@ class SkimApp(App):
     PreviewPane.active-pane {
         border: round $accent;
     }
-    TrajectoryViewer {
+    TrajectoryViewer, JsonInspector {
         width: 1fr;
     }
     .trajectory-body {
@@ -327,10 +327,10 @@ class SkimApp(App):
                 event.stop()
                 return
 
-        viewer: TrajectoryViewer | None = None
+        viewer: JsonInspector | TrajectoryViewer | None = None
         try:
             active_pane = self.query_one(f"#{self.active_pane_id}", PreviewPane)
-            viewer = active_pane.active_trajectory_viewer()
+            viewer = active_pane.active_json_navigator()
         except Exception:
             viewer = None
 

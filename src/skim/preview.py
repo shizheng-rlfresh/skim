@@ -23,7 +23,7 @@ from textual.widget import Widget
 from textual.widgets import Collapsible, Markdown, Static
 
 from .scrolling import DragScrollMixin
-from .trajectory import TrajectoryViewer, extract_trajectory
+from .trajectory import JsonInspector, TrajectoryViewer
 
 SYNTAX_MAP = {
     ".py": "python",
@@ -45,68 +45,10 @@ SYNTAX_MAP = {
 }
 MARKDOWN_EXTENSIONS = {".md", ".markdown", ".mdown"}
 MAX_FILE_SIZE = 1_000_000
+MAX_JSON_FILE_SIZE = 10_000_000
 MAX_CSV_ROWS = 20
 MAX_CSV_COLS = 8
 MAX_CSV_CELL_WIDTH = 24
-SUBMISSION_KEYS = {
-    "agentic_grader_guidance",
-    "prompt",
-    "quick_scores",
-    "submission_type",
-    "task_name",
-}
-SUBMISSION_SECTIONS = [
-    ("task_name", "Task"),
-    ("submission_type", "Submission"),
-    ("quick_scores", "Quick Scores"),
-    ("quick_stats", "Quick Stats"),
-    ("task_data_review", "Task Data Review"),
-    ("prompt", "Prompt"),
-    ("agentic_grader_guidance", "Grader Guidance"),
-    ("task_solution", "Task Solution"),
-    ("task_performance", "Task Performance"),
-    ("grader_reliability", "Grader Reliability"),
-    ("grader_reliability_explanation", "Grader Reliability Explanation"),
-    ("load_trajectories_s3", "Trajectory URL"),
-    ("setup_files_url", "Setup Files URL"),
-    ("load_trajectories_s3_agentic_grader_results", "Grader Results URL"),
-    ("evaluation_files_url", "Evaluation Files URL"),
-    ("context_files_draft", "Context Files URL"),
-]
-
-
-def _decode_nested_json(value: Any) -> Any:
-    """Best-effort decode nested JSON strings inside lists and dictionaries."""
-    if isinstance(value, str):
-        try:
-            return _decode_nested_json(json.loads(value))
-        except json.JSONDecodeError:
-            return value
-    if isinstance(value, list):
-        return [_decode_nested_json(item) for item in value]
-    if isinstance(value, dict):
-        return {key: _decode_nested_json(item) for key, item in value.items()}
-    return value
-
-
-def _format_payload(value: Any) -> str:
-    """Format a decoded payload for readable fallback text output."""
-    decoded = _decode_nested_json(value)
-    if isinstance(decoded, dict | list):
-        return json.dumps(decoded, indent=2)
-    if decoded is None:
-        return ""
-    return str(decoded)
-
-
-class SubmissionSummary(Static):
-    """Structured preview for a worker submission JSON artifact."""
-
-    def __init__(self, data: dict[str, Any]) -> None:
-        """Initialize the submission summary."""
-        self.data = data
-        self.summary_text = _format_submission(data)
-        super().__init__(self.summary_text, classes="submission-summary")
 
 
 class CsvPreview(Vertical):
@@ -151,7 +93,7 @@ class PreviewPane(DragScrollMixin, VerticalScroll, can_focus=True):
         self.scroll_home(animate=False)
         if (
             widgets
-            and isinstance(widgets[0], TrajectoryViewer)
+            and isinstance(widgets[0], (JsonInspector, TrajectoryViewer))
             and self.id == getattr(self.app, "active_pane_id", None)
         ):
             self.call_after_refresh(widgets[0].focus_tree_mode)
@@ -163,19 +105,23 @@ class PreviewPane(DragScrollMixin, VerticalScroll, can_focus=True):
 
     def scroll_content(self, delta: int) -> None:
         """Scroll specialized inner content when present, else scroll the pane."""
-        viewer = self.active_trajectory_viewer()
+        viewer = self.active_json_navigator()
         if viewer is not None:
             viewer.handle_vertical_key(delta)
         else:
             self.scroll_relative(y=delta, animate=False)
 
-    def active_trajectory_viewer(self) -> TrajectoryViewer | None:
-        """Return the mounted trajectory viewer, if this pane has one."""
+    def active_json_navigator(self) -> JsonInspector | TrajectoryViewer | None:
+        """Return the mounted JSON tree/detail navigator, if present."""
         try:
-            viewer = self.query(TrajectoryViewer).first()
+            viewer = self.query(JsonInspector).first()
         except NoMatches:
-            return None
-        return viewer if isinstance(viewer, TrajectoryViewer) else None
+            try:
+                viewer = self.query(TrajectoryViewer).first()
+            except NoMatches:
+                return None
+            return viewer if isinstance(viewer, TrajectoryViewer) else None
+        return viewer if isinstance(viewer, JsonInspector) else None
 
 
 def render_file(path: Path) -> list[Widget]:
@@ -183,8 +129,10 @@ def render_file(path: Path) -> list[Widget]:
     if not path.is_file():
         return [Static(Text(f"Not a file: {path.name}", style="red"))]
 
+    suffix = path.suffix.lower()
     size = path.stat().st_size
-    if size > MAX_FILE_SIZE:
+    max_size = MAX_JSON_FILE_SIZE if suffix == ".json" else MAX_FILE_SIZE
+    if size > max_size:
         return [Static(Text(f"{path.name} is too large ({size:,} bytes)", style="red"))]
 
     try:
@@ -192,18 +140,13 @@ def render_file(path: Path) -> list[Widget]:
     except Exception as error:
         return [Static(Text(f"Could not read {path.name}: {error}", style="red"))]
 
-    suffix = path.suffix.lower()
-
     if suffix in MARKDOWN_EXTENSIONS:
         return [Markdown(content)]
 
     if suffix == ".json":
         try:
             parsed = json.loads(content)
-            widget = _specialized_json_widget(parsed)
-            if widget is not None:
-                return [widget]
-            content = json.dumps(parsed, indent=2)
+            return [JsonInspector(parsed)]
         except json.JSONDecodeError:
             pass
 
@@ -311,29 +254,3 @@ def _raw_csv_section(content: str, *, collapsed: bool = True) -> Collapsible:
         collapsed=collapsed,
         classes="csv-raw-section",
     )
-
-
-def _specialized_json_widget(data: Any) -> Widget | None:
-    """Return a specialized preview widget for supported JSON shapes."""
-    trajectory = extract_trajectory(data)
-    if trajectory is not None:
-        return TrajectoryViewer(trajectory)
-    if _is_submission(data):
-        return SubmissionSummary(data)
-    return None
-
-
-def _is_submission(data: Any) -> bool:
-    """Return whether a JSON object looks like a worker submission artifact."""
-    return isinstance(data, dict) and any(key in data for key in SUBMISSION_KEYS)
-
-
-def _format_submission(data: dict[str, Any]) -> Text:
-    """Render the submission summary as plain text sections."""
-    lines = ["Submission Summary"]
-    for key, title in SUBMISSION_SECTIONS:
-        value = data.get(key)
-        if value in (None, ""):
-            continue
-        lines.extend(["", title, _format_payload(value)])
-    return Text("\n".join(lines))

@@ -13,7 +13,7 @@ from rich.syntax import Syntax
 from rich.text import Text
 from textual.widgets import Collapsible, Static, Tree
 
-from skim import TrajectoryViewer
+from skim import JsonInspector, TrajectoryViewer
 
 
 def sample_trajectory(
@@ -102,8 +102,8 @@ def _tree_labels(tree: Tree) -> list[str]:
     return [child.label.plain for child in tree.root.children]
 
 
-def _detail_text(viewer: TrajectoryViewer) -> str:
-    """Collect textual content from the rendered trajectory detail pane."""
+def _detail_text(viewer: TrajectoryViewer | JsonInspector) -> str:
+    """Collect textual content from the rendered detail pane."""
     parts = []
     for widget in viewer._detail_wrap.query(Static):
         content = _static_content(widget)
@@ -116,7 +116,7 @@ def _detail_text(viewer: TrajectoryViewer) -> str:
     return "\n".join(parts)
 
 
-def _detail_syntax_blocks(viewer: TrajectoryViewer) -> list[Syntax]:
+def _detail_syntax_blocks(viewer: TrajectoryViewer | JsonInspector) -> list[Syntax]:
     """Return all Syntax renderables mounted inside the detail pane."""
     return [
         _static_content(widget)
@@ -125,17 +125,17 @@ def _detail_syntax_blocks(viewer: TrajectoryViewer) -> list[Syntax]:
     ]
 
 
-def _top_level_collapsible_titles(viewer: TrajectoryViewer) -> list[str]:
+def _top_level_collapsible_titles(viewer: TrajectoryViewer | JsonInspector) -> list[str]:
     """Return titles for top-level collapsible sections in the detail pane."""
     return [child.title for child in viewer._detail_wrap.children if isinstance(child, Collapsible)]
 
 
-def _all_collapsible_titles(viewer: TrajectoryViewer) -> list[str]:
+def _all_collapsible_titles(viewer: TrajectoryViewer | JsonInspector) -> list[str]:
     """Return titles for all collapsible sections in the detail pane."""
     return [widget.title for widget in viewer._detail_wrap.query(Collapsible)]
 
 
-def _collapsible_by_title(viewer: TrajectoryViewer, title: str) -> Collapsible:
+def _collapsible_by_title(viewer: TrajectoryViewer | JsonInspector, title: str) -> Collapsible:
     """Return the first collapsible section with the requested title."""
     for widget in viewer._detail_wrap.query(Collapsible):
         if widget.title == title:
