@@ -4,8 +4,8 @@ A terminal UI for browsing folders and reviewing local artifacts. Built with
 [Textual](https://textual.textualize.io/).
 
 Point it at any directory to get a file tree on the left and a content preview on the
-right, with syntax highlighting, markdown rendering, split panes, and a JSON inspector
-that now supports local node annotations.
+right, with syntax highlighting, markdown rendering, split panes, and a **JSON inspector**
+that now supports `local node annotations`.
 
 ## Install
 
