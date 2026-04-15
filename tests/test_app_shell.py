@@ -202,7 +202,9 @@ async def test_file_tree_mode_escape_returns_to_active_pane(tmp_path):
 
         assert not app.file_tree_mode
         assert app.focused is pane
-        assert "Toggle tree" in _static_content(footer)
+        content = _static_content(footer)
+        assert "Tree" in content
+        assert "Toggle tree" not in content
 
 
 async def test_right_outside_file_tree_mode_still_routes_to_json_viewer(tmp_path):
@@ -415,8 +417,11 @@ async def test_global_footer_only_shows_app_wide_commands():
 
         assert isinstance(content, str)
         assert "Scroll" in content
-        assert "Toggle tree" in content
-        assert "Open" in content
+        assert "PgUp/Dn" in content
+        assert "Tree" in content
+        assert "Open" not in content
+        assert "Toggle tree" not in content
+        assert "shortcut" not in content
         assert "JSON" not in content
         assert "Branch" not in content
         assert "Detail" not in content
@@ -439,6 +444,8 @@ async def test_file_tree_footer_shows_branch_controls(tmp_path):
         assert isinstance(content, str)
         assert "←→" in content
         assert "Branch" in content
+        assert "Open" not in content
+        assert "shortcut" not in content
 
 
 async def test_mouse_drag_scrolls_preview_pane(tmp_path):

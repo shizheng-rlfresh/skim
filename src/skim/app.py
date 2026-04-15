@@ -256,11 +256,9 @@ class SkimApp(App):
         if self.file_tree_mode:
             return (
                 " [bold]q[/] Quit  "
-                "[bold]↑↓[/] Move tree  "
+                "[bold]↑↓[/] Move  "
                 "[bold]←→[/] Branch  "
-                "[bold]Enter[/] Open  "
                 "[bold]Esc[/] Back  "
-                "[bold]⇧↑↓[/] Tree shortcut  "
                 "[bold]s[/]+arrow Split  "
                 "[bold]d[/] Close  "
                 "[bold]w[/] Next pane"
@@ -268,9 +266,8 @@ class SkimApp(App):
         return (
             " [bold]q[/] Quit  "
             "[bold]↑↓[/] Scroll  "
-            "[bold]f[/] Toggle tree  "
-            "[bold]⇧↑↓[/] Tree shortcut  "
-            "[bold]Enter[/] Open  "
+            "[bold]PgUp/Dn[/] Page  "
+            "[bold]f[/] Tree  "
             "[bold]s[/]+arrow Split  "
             "[bold]d[/] Close  "
             "[bold]w[/] Next pane"

@@ -675,10 +675,10 @@ async def test_annotation_modal_footer_shows_modal_commands(tmp_path):
         assert "Close" in content.plain
         assert "Tab" in content.plain
         assert "Next field" in content.plain
-        assert "Enter" in content.plain
-        assert "Tags→Note" in content.plain
         assert "PgUp/Dn" in content.plain
         assert "Scroll preview" in content.plain
+        assert "Enter" not in content.plain
+        assert "Tags→Note" not in content.plain
         assert "Move" not in content.plain
         assert "Branch" not in content.plain
 

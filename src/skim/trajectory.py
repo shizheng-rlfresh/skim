@@ -352,8 +352,6 @@ class AnnotationEditor(ModalScreen[AnnotationEditorResult | None]):
         text.append(" Close  ")
         text.append("Tab", style="bold")
         text.append(" Next field  ")
-        text.append("Enter", style="bold")
-        text.append(" Tags→Note  ")
         text.append("PgUp/Dn", style="bold")
         text.append(" Scroll preview")
         return text
