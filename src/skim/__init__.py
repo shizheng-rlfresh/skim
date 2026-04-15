@@ -11,9 +11,10 @@ from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.css.query import NoMatches
 from textual.events import Key
 from textual.widget import Widget
-from textual.widgets import DirectoryTree, Header, Markdown, Static, Tree
+from textual.widgets import Collapsible, DirectoryTree, Header, Markdown, Static, Tree
 
 SYNTAX_MAP = {
     ".py": "python",
@@ -52,6 +53,9 @@ HUMAN_TEXT_KEYS = {
     "stdout",
     "text",
 }
+WRAPPER_KEYS = ("arguments", "content", "output", "result", "text")
+PRIMARY_CONTENT_KEYS = ("stdout", "code", "command", "text", "value")
+SECONDARY_COLLAPSED_KEYS = {"stderr", "pages", "json", "metadata", "other"}
 SUBMISSION_KEYS = {
     "agentic_grader_guidance",
     "prompt",
@@ -91,13 +95,39 @@ class TrajectoryEvent:
 
 
 @dataclass(frozen=True)
+class ToolInteraction:
+    """Paired tool call and result linked by call id."""
+
+    index: int
+    tool_name: str
+    short_name: str
+    call_id: str
+    short_call_id: str
+    call_event: TrajectoryEvent | None = None
+    result_event: TrajectoryEvent | None = None
+
+
+@dataclass(frozen=True)
+class StepTimelineItem:
+    """Display row inside one trajectory step."""
+
+    kind: str
+    index: int
+    title: Text
+    event: TrajectoryEvent | None = None
+    interaction: ToolInteraction | None = None
+
+
+@dataclass(frozen=True)
 class TrajectoryTreeItem:
     """Data attached to a trajectory tree node."""
 
     kind: str
     title: str
-    detail: Any
+    detail: Any = None
     event: TrajectoryEvent | None = None
+    interaction: ToolInteraction | None = None
+    focus: str = "full"
 
 
 def render_file(path: Path) -> list[Widget]:
@@ -194,6 +224,88 @@ def normalize_step_events(trajectory: dict[str, Any]) -> list[list[TrajectoryEve
     return groups
 
 
+def normalize_step_timeline(trajectory: dict[str, Any]) -> list[list[StepTimelineItem]]:
+    """Return step items with paired tool interactions."""
+    timeline_groups: list[list[StepTimelineItem]] = []
+    for events in normalize_step_events(trajectory):
+        group: list[StepTimelineItem] = []
+        pending_calls: dict[str, int] = {}
+        for event in events:
+            if event.kind == "function_call":
+                interaction = ToolInteraction(
+                    index=event.index,
+                    tool_name=_tool_name(event.raw),
+                    short_name=_short_tool_name(_tool_name(event.raw)),
+                    call_id=_call_id(event.raw),
+                    short_call_id=_short_call_id(_call_id(event.raw)),
+                    call_event=event,
+                )
+                group.append(
+                    StepTimelineItem(
+                        kind="tool",
+                        index=event.index,
+                        title=_tool_tree_label(interaction),
+                        interaction=interaction,
+                    )
+                )
+                if interaction.call_id:
+                    pending_calls[interaction.call_id] = len(group) - 1
+                continue
+
+            if event.kind == "function_call_result":
+                call_id = _call_id(event.raw)
+                group_index = pending_calls.pop(call_id, None) if call_id else None
+                if group_index is not None:
+                    interaction = group[group_index].interaction
+                    if interaction is None:
+                        continue
+                    updated = ToolInteraction(
+                        index=interaction.index,
+                        tool_name=interaction.tool_name,
+                        short_name=interaction.short_name,
+                        call_id=interaction.call_id,
+                        short_call_id=interaction.short_call_id,
+                        call_event=interaction.call_event,
+                        result_event=event,
+                    )
+                    group[group_index] = StepTimelineItem(
+                        kind="tool",
+                        index=updated.index,
+                        title=_tool_tree_label(updated),
+                        interaction=updated,
+                    )
+                    continue
+
+                orphan = ToolInteraction(
+                    index=event.index,
+                    tool_name=_tool_name(event.raw),
+                    short_name=_short_tool_name(_tool_name(event.raw)),
+                    call_id=call_id,
+                    short_call_id=_short_call_id(call_id),
+                    result_event=event,
+                )
+                group.append(
+                    StepTimelineItem(
+                        kind="tool",
+                        index=event.index,
+                        title=_tool_tree_label(orphan, suffix=" Output"),
+                        interaction=orphan,
+                    )
+                )
+                continue
+
+            group.append(
+                StepTimelineItem(
+                    kind=event.kind,
+                    index=event.index,
+                    title=_standalone_tree_label(event),
+                    event=event,
+                )
+            )
+        timeline_groups.append(group)
+    return timeline_groups
+
+
 def _specialized_json_widget(data: Any) -> Widget | None:
     trajectory = _extract_trajectory(data)
     if trajectory is not None:
@@ -224,6 +336,28 @@ def _event_label(raw: dict[str, Any]) -> str:
         if value:
             return str(value)
     return ""
+
+
+def _tool_name(raw: dict[str, Any]) -> str:
+    value = raw.get("name")
+    return str(value) if value else "tool"
+
+
+def _call_id(raw: dict[str, Any]) -> str:
+    value = raw.get("callId") or raw.get("call_id")
+    return str(value) if value else ""
+
+
+def _short_tool_name(name: str) -> str:
+    if "__" in name:
+        return name.split("__")[-1]
+    return name
+
+
+def _short_call_id(call_id: str) -> str:
+    if not call_id:
+        return ""
+    return call_id[-3:]
 
 
 def _event_excerpt(raw: dict[str, Any]) -> str:
@@ -329,6 +463,8 @@ def _final_output_detail(trajectory: dict[str, Any]) -> str:
 
 
 def _detail_widgets_for_item(item: TrajectoryTreeItem) -> list[Widget]:
+    if item.interaction is not None:
+        return _tool_interaction_detail_widgets(item.interaction, item.focus)
     if item.event is not None:
         return _event_detail_widgets(item.event)
     if isinstance(item.detail, Text):
@@ -339,80 +475,102 @@ def _detail_widgets_for_item(item: TrajectoryTreeItem) -> list[Widget]:
 
 
 def _event_detail_widgets(event: TrajectoryEvent) -> list[Widget]:
-    header = Text(f"{event.index + 1}. {event.kind}")
-    if event.label:
-        header.append(f"\nlabel: {event.label}")
+    header = Text(f"{event.index + 1:03d} ", style="dim")
+    header.append(_standalone_title(event), style="bold")
     widgets: list[Widget] = [Static(header, classes="trajectory-detail-heading")]
 
-    if event.kind == "function_call":
-        widgets.extend(_function_call_detail_widgets(event.raw))
-    elif event.kind == "function_call_result":
-        widgets.extend(_function_call_result_detail_widgets(event.raw))
-    else:
+    if event.kind == "message":
+        widgets.extend(
+            _metadata_fields(
+                [("Role", _message_role(event.raw)), ("Status", _status_value(event.raw))]
+            )
+        )
         text = _event_text(event.raw)
         if text:
             widgets.extend(_render_string_detail(text))
         else:
             widgets.extend(_render_payload_detail(_event_payload(event.raw)))
-    return widgets
-
-
-def _function_call_detail_widgets(raw: dict[str, Any]) -> list[Widget]:
-    widgets = _tool_identity_widgets(raw)
-    decoded = _decode_nested_json(raw.get("arguments"))
-
-    if isinstance(decoded, dict):
-        if _has_human_text(decoded):
-            widgets.extend(_render_dict_sections(decoded))
+    elif event.kind == "reasoning":
+        text = _event_text(event.raw)
+        if text:
+            widgets.extend(_render_string_detail(text))
         else:
-            widgets.extend(_render_payload_detail(decoded))
+            widgets.extend(_render_payload_detail(_event_payload(event.raw)))
     else:
-        widgets.extend(_render_payload_detail(decoded))
+        widgets.extend(_render_payload_detail(_event_payload(event.raw)))
     return widgets
 
 
-def _function_call_result_detail_widgets(raw: dict[str, Any]) -> list[Widget]:
-    widgets = _tool_identity_widgets(raw)
-    decoded = _decoded_tool_result(raw.get("output"))
-
-    if isinstance(decoded, dict):
-        handled = False
-        for key in ("returncode", "stdout", "stderr"):
-            if key not in decoded:
-                continue
-            handled = True
-            widgets.append(_detail_heading(key))
-            value = decoded[key]
-            if isinstance(value, str):
-                widgets.extend(_render_string_detail(value))
-            else:
-                widgets.extend(_render_payload_detail(value))
-        rest = {
-            key: value
-            for key, value in decoded.items()
-            if key not in {"returncode", "stdout", "stderr"}
-        }
-        if rest:
-            widgets.append(_detail_heading("Output"))
-            widgets.extend(_render_payload_detail(rest))
-        if handled:
-            return widgets
-
-    widgets.extend(_render_payload_detail(decoded))
+def _tool_interaction_detail_widgets(
+    interaction: ToolInteraction, focus: str = "full"
+) -> list[Widget]:
+    title = Text(f"{interaction.index + 1:03d} ", style="dim")
+    title.append(interaction.short_name, style="bold cyan")
+    if interaction.short_call_id:
+        title.append(f" #{interaction.short_call_id}", style="magenta")
+    widgets: list[Widget] = [Static(title, classes="trajectory-detail-heading")]
+    widgets.append(
+        _section_widget(
+            "Tool",
+            _metadata_fields(
+                [
+                    ("Tool", interaction.tool_name),
+                    ("Call ID", interaction.call_id),
+                    ("Status", _interaction_status(interaction)),
+                ]
+            ),
+            collapsed=False,
+        )
+    )
+    widgets.append(
+        _section_widget(
+            "Input",
+            _tool_section_widgets(interaction.call_event, "input"),
+            collapsed=False,
+            selected=focus == "input",
+        )
+    )
+    widgets.append(
+        _section_widget(
+            "Output",
+            _tool_section_widgets(interaction.result_event, "output"),
+            collapsed=False,
+            selected=focus == "output",
+        )
+    )
     return widgets
+
+
+def _tool_section_widgets(event: TrajectoryEvent | None, focus: str) -> list[Widget]:
+    if event is None:
+        return [Static(Text(f"No {focus}"), classes="trajectory-detail")]
+    if focus == "input":
+        return _render_payload_detail(_decode_nested_json(event.raw.get("arguments")))
+    return _render_payload_detail(_decoded_tool_result(event.raw.get("output")))
 
 
 def _decoded_tool_result(output: Any) -> Any:
-    decoded = _decode_nested_json(output)
-    if isinstance(decoded, dict) and set(decoded) == {"text"}:
-        return decoded["text"]
-    if (
-        isinstance(decoded, dict)
-        and isinstance(decoded.get("text"), dict)
-        and any(key in decoded["text"] for key in ("stdout", "stderr", "returncode"))
-    ):
-        return {**decoded, **decoded["text"]}
-    return decoded
+    return _normalize_text_wrapper(_decode_nested_json(output))
+
+
+def _normalize_text_wrapper(value: Any) -> Any:
+    decoded = _decode_nested_json(value)
+    if not isinstance(decoded, dict):
+        return decoded
+    if set(decoded) == {"text"}:
+        return _normalize_text_wrapper(decoded["text"])
+    if isinstance(decoded.get("text"), dict):
+        text_payload = _normalize_text_wrapper(decoded["text"])
+        if isinstance(text_payload, dict) and any(
+            key in text_payload for key in ("stdout", "stderr", "returncode", "pages", "code")
+        ):
+            siblings = {
+                key: _normalize_text_wrapper(item)
+                for key, item in decoded.items()
+                if key != "text" and key not in text_payload
+            }
+            return {**text_payload, **siblings}
+    return {key: _normalize_text_wrapper(item) for key, item in decoded.items()}
 
 
 def _tool_identity_widgets(raw: dict[str, Any]) -> list[Widget]:
@@ -426,17 +584,27 @@ def _tool_identity_widgets(raw: dict[str, Any]) -> list[Widget]:
     return [Static(Text("\n".join(lines)), classes="trajectory-detail")]
 
 
+def _metadata_fields(fields: list[tuple[str, str | None]]) -> list[Widget]:
+    widgets: list[Widget] = []
+    for label, value in fields:
+        if value in (None, ""):
+            continue
+        text = Text()
+        text.append(f"{label}: ", style="bold cyan")
+        text.append(str(value), style="white")
+        widgets.append(Static(text, classes="trajectory-detail-field"))
+    return widgets
+
+
 def _render_payload_detail(value: Any) -> list[Widget]:
     decoded = _decode_nested_json(value)
     if isinstance(decoded, dict | list):
+        promoted = _promote_wrapper_value(decoded)
+        if promoted is not None:
+            return _render_structured_detail(promoted, nested=True)
         if _has_human_text(decoded):
-            return _render_structured_detail(decoded)
-        return [
-            Static(
-                Syntax(json.dumps(decoded, indent=2), "json", word_wrap=True),
-                classes="trajectory-detail",
-            )
-        ]
+            return _render_structured_detail(decoded, nested=True)
+        return _render_json_block(decoded)
     if decoded is None:
         return [Static(Text(""))]
     return _render_string_detail(str(decoded))
@@ -448,42 +616,105 @@ def _render_string_detail(value: str) -> list[Widget]:
 
     decoded = _try_decode_json(value)
     if isinstance(decoded, dict | list):
+        promoted = _promote_wrapper_value(decoded)
+        if promoted is not None:
+            return _render_structured_detail(promoted, nested=True)
         if _has_human_text(decoded):
-            return _render_structured_detail(decoded)
-        return [
-            Static(
-                Syntax(json.dumps(decoded, indent=2), "json", word_wrap=True),
-                classes="trajectory-detail",
-            )
-        ]
+            return _render_structured_detail(decoded, nested=True)
+        return _render_json_block(decoded)
 
     if _looks_like_markdown(value):
         return [Markdown(value, classes="trajectory-markdown")]
+    if _looks_like_preformatted_text(value):
+        return [Static(Syntax(value, "text", word_wrap=True), classes="trajectory-detail")]
     return [Static(Text(value), classes="trajectory-detail")]
 
 
-def _render_structured_detail(value: Any) -> list[Widget]:
-    if isinstance(value, dict):
-        return _render_dict_sections(value)
+def _promote_wrapper_value(value: Any) -> Any | None:
+    current = _decode_nested_json(value)
+    while isinstance(current, dict):
+        candidates = [
+            key for key in WRAPPER_KEYS if key in current and _can_promote_wrapper(current, key)
+        ]
+        if not candidates:
+            return None
+        promoted_key = candidates[0]
+        promoted_value = _decode_nested_json(current[promoted_key])
+        siblings = {
+            key: item
+            for key, item in current.items()
+            if key != promoted_key and not _is_empty_value(_decode_nested_json(item))
+        }
+        if siblings:
+            current = {"value": promoted_value, **siblings}
+        else:
+            current = promoted_value
+        current = _decode_nested_json(current)
+    return current if current is not value else None
+
+
+def _can_promote_wrapper(container: dict[str, Any], key: str) -> bool:
+    value = _decode_nested_json(container.get(key))
+    siblings = {
+        sibling_key: _decode_nested_json(item)
+        for sibling_key, item in container.items()
+        if sibling_key != key and not _is_empty_value(_decode_nested_json(item))
+    }
+    if not _is_renderable_leaf(value):
+        return False
+    if not siblings:
+        return True
+    return all(not _has_human_text(item) for item in siblings.values())
+
+
+def _is_renderable_leaf(value: Any) -> bool:
+    if isinstance(value, str):
+        return bool(value.strip())
     if isinstance(value, list):
-        return _render_list_sections(value)
+        return any(_is_renderable_leaf(item) for item in value)
+    if isinstance(value, dict):
+        return _has_human_text(value)
+    return False
+
+
+def _render_structured_detail(value: Any, nested: bool = False) -> list[Widget]:
+    if isinstance(value, dict):
+        return _render_dict_sections(value, nested=nested)
+    if isinstance(value, list):
+        return _render_list_sections(value, nested=nested)
     return _render_payload_detail(value)
 
 
-def _render_dict_sections(value: dict[str, Any]) -> list[Widget]:
+def _render_dict_sections(value: dict[str, Any], nested: bool = True) -> list[Widget]:
     widgets: list[Widget] = []
+    metadata: list[tuple[str, str | None]] = []
+    if "value" in value and not _is_empty_value(_decode_nested_json(value["value"])):
+        widgets.extend(_render_payload_detail(_decode_nested_json(value["value"])))
     for key, item in value.items():
+        if key == "value":
+            continue
         decoded = _decode_nested_json(item)
         if _is_empty_value(decoded):
             continue
-        widgets.append(_detail_heading(str(key)))
-        widgets.extend(_render_keyed_value(str(key), decoded))
+        if _is_scalar_metadata(key, decoded):
+            metadata.append((_display_label(key), str(decoded)))
+            continue
+        widgets.append(
+            _section_widget(
+                _display_label(key),
+                _render_keyed_value(str(key), decoded),
+                collapsed=_section_collapsed(key, nested=nested),
+                secondary=_section_collapsed(key, nested=nested),
+            )
+        )
+    if metadata:
+        widgets = _metadata_fields(metadata) + widgets
     if widgets:
         return widgets
     return _render_json_block(value)
 
 
-def _render_list_sections(value: list[Any]) -> list[Widget]:
+def _render_list_sections(value: list[Any], nested: bool = True) -> list[Widget]:
     if not _has_human_text(value):
         return _render_json_block(value)
 
@@ -492,8 +723,14 @@ def _render_list_sections(value: list[Any]) -> list[Widget]:
         decoded = _decode_nested_json(item)
         if _is_empty_value(decoded):
             continue
-        widgets.append(_detail_heading(f"Item {index}"))
-        widgets.extend(_render_keyed_value("", decoded))
+        widgets.append(
+            _section_widget(
+                f"Item {index}",
+                _render_keyed_value("", decoded),
+                collapsed=nested,
+                secondary=nested,
+            )
+        )
     if widgets:
         return widgets
     return _render_json_block(value)
@@ -504,14 +741,17 @@ def _render_keyed_value(key: str, value: Any) -> list[Widget]:
     if isinstance(value, str):
         return _render_keyed_string(normalized_key, value)
     if isinstance(value, dict):
+        promoted = _promote_wrapper_value(value)
+        if promoted is not None:
+            return _render_structured_detail(promoted, nested=True)
         if _has_human_text(value):
-            return _render_dict_sections(value)
+            return _render_dict_sections(value, nested=True)
         return _render_json_block(value)
     if isinstance(value, list):
         if normalized_key == "pages":
             return _render_pages(value)
         if _has_human_text(value):
-            return _render_list_sections(value)
+            return _render_list_sections(value, nested=True)
         return _render_json_block(value)
     return [Static(Text(str(value)), classes="trajectory-detail")]
 
@@ -519,8 +759,11 @@ def _render_keyed_value(key: str, value: Any) -> list[Widget]:
 def _render_keyed_string(key: str, value: str) -> list[Widget]:
     decoded = _try_decode_json(value)
     if isinstance(decoded, dict | list):
+        promoted = _promote_wrapper_value(decoded)
+        if promoted is not None:
+            return _render_structured_detail(promoted, nested=True)
         return (
-            _render_structured_detail(decoded)
+            _render_structured_detail(decoded, nested=True)
             if _has_human_text(decoded)
             else _render_json_block(decoded)
         )
@@ -539,8 +782,14 @@ def _render_pages(value: list[Any]) -> list[Widget]:
     widgets: list[Widget] = []
     for index, item in enumerate(value, start=1):
         decoded = _decode_nested_json(item)
-        widgets.append(_detail_heading(f"Page {index}"))
-        widgets.extend(_render_keyed_value("text", decoded))
+        widgets.append(
+            _section_widget(
+                f"Page {index}",
+                _render_keyed_value("text", decoded),
+                collapsed=True,
+                secondary=True,
+            )
+        )
     return widgets or _render_json_block(value)
 
 
@@ -555,7 +804,12 @@ def _render_json_block(value: Any) -> list[Widget]:
 
 def _has_human_text(value: Any) -> bool:
     if isinstance(value, str):
-        return "\n" in value or _looks_like_markdown(value) or bool(value.strip())
+        return (
+            "\n" in value
+            or _looks_like_markdown(value)
+            or _looks_like_preformatted_text(value)
+            or bool(value.strip())
+        )
     if isinstance(value, dict):
         return any(
             str(key).lower() in HUMAN_TEXT_KEYS and _has_human_text(item)
@@ -598,13 +852,129 @@ def _looks_like_markdown(value: str) -> bool:
     )
 
 
+def _looks_like_preformatted_text(value: str) -> bool:
+    lines = value.splitlines()
+    if len(lines) < 2:
+        return False
+    sample = lines[:30]
+    indented = sum(1 for line in sample if line.startswith(("    ", "\t")))
+    if indented / max(len(sample), 1) > 0.3:
+        return True
+    if value.count("/") > 5 or value.count("\t") > 3:
+        return True
+    return False
+
+
 def _detail_heading(label: str) -> Static:
     return Static(Text(label, style="bold"), classes="trajectory-detail-heading")
 
 
-def _event_tree_label(event: TrajectoryEvent) -> str:
-    label = f" {event.label}" if event.label else ""
-    return f"{event.index + 1:03d} {event.kind}{label} {event.excerpt}"
+def _section_widget(
+    title: str,
+    body: list[Widget],
+    *,
+    collapsed: bool,
+    selected: bool = False,
+    secondary: bool = False,
+) -> Collapsible:
+    if not body:
+        body = [Static(Text("(empty)"), classes="trajectory-detail")]
+    classes = ["trajectory-section"]
+    if selected:
+        classes.append("trajectory-section-selected")
+    if secondary:
+        classes.append("trajectory-section-secondary")
+    return Collapsible(*body, title=title, collapsed=collapsed, classes=" ".join(classes))
+
+
+def _display_label(key: str) -> str:
+    special = {
+        "call_id": "Call ID",
+        "code": "code",
+        "command": "command",
+        "pages": "pages",
+        "returncode": "returncode",
+        "stderr": "stderr",
+        "stdout": "stdout",
+        "text": "text",
+    }
+    if key in special:
+        return special[key]
+    return key
+
+
+def _section_collapsed(key: str, *, nested: bool) -> bool:
+    if key.lower() in PRIMARY_CONTENT_KEYS:
+        return False
+    if key.lower() in SECONDARY_COLLAPSED_KEYS:
+        return True
+    return nested
+
+
+def _is_scalar_metadata(key: str, value: Any) -> bool:
+    if isinstance(value, bool | int | float):
+        return True
+    if isinstance(value, str):
+        if key.lower() in {"stdout", "stderr", "text", "code", "command"}:
+            return False
+        return "\n" not in value and len(value) <= 120
+    return False
+
+
+def _standalone_title(event: TrajectoryEvent) -> str:
+    if event.kind == "reasoning":
+        return "Reasoning"
+    if event.kind == "message":
+        return _message_role(event.raw)
+    return event.kind.replace("_", " ").title()
+
+
+def _standalone_tree_label(event: TrajectoryEvent) -> Text:
+    label = Text(f"{event.index + 1:03d} ", style="dim")
+    label.append(_standalone_title(event), style=_tree_kind_style(event.kind))
+    if event.excerpt:
+        label.append(f" {_clip(event.excerpt, 64)}", style="default")
+    return label
+
+
+def _tool_tree_label(interaction: ToolInteraction, suffix: str = "") -> Text:
+    label = Text(f"{interaction.index + 1:03d} ", style="dim")
+    label.append(interaction.short_name, style="bold cyan")
+    if interaction.short_call_id:
+        label.append(f" #{interaction.short_call_id}", style="magenta")
+    if suffix:
+        label.append(suffix, style="bold yellow")
+    return label
+
+
+def _message_role(raw: dict[str, Any]) -> str:
+    role = raw.get("role")
+    if not role:
+        return "Message"
+    return str(role).title()
+
+
+def _status_value(raw: dict[str, Any]) -> str | None:
+    value = raw.get("status")
+    return str(value) if value else None
+
+
+def _interaction_status(interaction: ToolInteraction) -> str | None:
+    for event in (interaction.result_event, interaction.call_event):
+        if event is None:
+            continue
+        status = _status_value(event.raw)
+        if status:
+            return status
+    return None
+
+
+def _tree_kind_style(kind: str) -> str:
+    if kind == "reasoning":
+        return "yellow"
+    if kind == "message":
+        return "green"
+    return "cyan"
 
 
 def _format_submission(data: dict[str, Any]) -> Text:
@@ -625,7 +995,9 @@ class TrajectoryViewer(Vertical):
         super().__init__(classes="trajectory-viewer")
         self.trajectory = trajectory
         self.step_events = normalize_step_events(trajectory)
+        self.step_items = normalize_step_timeline(trajectory)
         self.events = normalize_events(trajectory)
+        self._input_mode = "tree"
         self._summary = Static(Text(_metadata_header(trajectory)), classes="trajectory-summary")
         self._tree: Tree[TrajectoryTreeItem] = Tree("Trajectory", classes="trajectory-tree")
         self._build_tree()
@@ -633,7 +1005,8 @@ class TrajectoryViewer(Vertical):
         initial_widgets: list[Widget] = []
         if isinstance(first_item, TrajectoryTreeItem):
             initial_widgets = _detail_widgets_for_item(first_item)
-        self._detail_wrap = VerticalScroll(*initial_widgets, classes="trajectory-detail-wrap")
+        self._detail_wrap = FocusableDetailWrap(*initial_widgets, classes="trajectory-detail-wrap")
+        self._footer = Static(self._footer_text(), classes="trajectory-footer")
 
     def compose(self) -> ComposeResult:
         """Compose the trajectory summary, event tree, and detail panel."""
@@ -641,6 +1014,7 @@ class TrajectoryViewer(Vertical):
         with Horizontal(classes="trajectory-body"):
             yield self._tree
             yield self._detail_wrap
+        yield self._footer
 
     def on_tree_node_selected(self, event: Tree.NodeSelected[TrajectoryTreeItem]) -> None:
         """Update detail when a trajectory tree node is selected."""
@@ -655,6 +1029,108 @@ class TrajectoryViewer(Vertical):
         self._detail_wrap.mount(*_detail_widgets_for_item(item))
         self._detail_wrap.scroll_home(animate=False)
 
+    def scroll_detail(self, delta: int) -> None:
+        """Scroll the rendered detail panel."""
+        self._detail_wrap.scroll_relative(y=delta, animate=False)
+
+    def is_tree_mode(self) -> bool:
+        """Return whether keyboard navigation is driving the left tree."""
+        return self._input_mode == "tree"
+
+    def focus_tree_mode(self) -> None:
+        """Route navigation input to the tree."""
+        self._input_mode = "tree"
+        self._update_footer()
+        self._ensure_tree_cursor()
+        if self.is_attached:
+            self._tree.focus(scroll_visible=False)
+
+    def focus_detail_mode(self) -> None:
+        """Route navigation input to the rendered detail pane."""
+        self._input_mode = "detail"
+        self._update_footer()
+        if self.is_attached:
+            self._detail_wrap.focus(scroll_visible=False)
+
+    def handle_vertical_key(self, delta: int) -> bool:
+        """Handle up/down keys for the active trajectory sub-view."""
+        if self.is_tree_mode():
+            if delta < 0:
+                self._tree.action_cursor_up()
+            else:
+                self._tree.action_cursor_down()
+            return True
+        self.scroll_detail(delta)
+        return True
+
+    def handle_horizontal_key(self, key: str) -> bool:
+        """Handle left/right tree navigation."""
+        if not self.is_tree_mode():
+            return False
+        node = self._tree.cursor_node
+        if node is None:
+            return False
+        if key == "left":
+            if node.allow_expand and node.is_expanded:
+                node.collapse()
+            elif node.parent is not None:
+                self._tree.move_cursor(node.parent, animate=False)
+            return True
+        if key == "right":
+            if node.allow_expand and node.is_collapsed:
+                node.expand()
+            elif node.children:
+                self._tree.move_cursor(node.children[0], animate=False)
+            return True
+        return False
+
+    def handle_enter_key(self) -> bool:
+        """Select the current tree item and move focus to the detail pane."""
+        if not self.is_tree_mode():
+            return False
+        self._ensure_tree_cursor()
+        self._tree.action_select_cursor()
+        self.focus_detail_mode()
+        return True
+
+    def handle_escape_key(self) -> bool:
+        """Return keyboard control from detail back to the tree."""
+        if self.is_tree_mode():
+            return False
+        self.focus_tree_mode()
+        return True
+
+    def _ensure_tree_cursor(self) -> None:
+        """Keep the tree cursor on the first visible child instead of the root."""
+        cursor = self._tree.cursor_node
+        if (cursor is None or cursor.is_root) and self._tree.root.children:
+            self._tree.move_cursor(self._tree.root.children[0], animate=False)
+
+    def _footer_text(self) -> Text:
+        """Build the mode-aware local footer text."""
+        text = Text()
+        if self.is_tree_mode():
+            text.append(" JSON ", style="reverse")
+            text.append(" ")
+            text.append("↑↓", style="bold")
+            text.append(" Move  ")
+            text.append("←→", style="bold")
+            text.append(" Branch  ")
+            text.append("Enter", style="bold")
+            text.append(" Detail")
+        else:
+            text.append(" Detail ", style="reverse")
+            text.append(" ")
+            text.append("↑↓", style="bold")
+            text.append(" Scroll  ")
+            text.append("Esc", style="bold")
+            text.append(" Back to JSON")
+        return text
+
+    def _update_footer(self) -> None:
+        """Refresh the local footer after mode changes."""
+        self._footer.update(self._footer_text())
+
     def _build_tree(self) -> None:
         """Populate the trajectory tree."""
         self._tree.root.expand()
@@ -668,26 +1144,55 @@ class TrajectoryViewer(Vertical):
                 "final_output", "Final Output", _final_output_detail(self.trajectory)
             ),
         )
-        for step_index, events in enumerate(self.step_events, start=1):
+        for step_index, items in enumerate(self.step_items, start=1):
             step = self._tree.root.add(
                 f"Step {step_index}",
                 data=TrajectoryTreeItem(
                     "step",
                     f"Step {step_index}",
-                    Text(f"Step {step_index}\n\n{len(events)} events"),
+                    Text(f"Step {step_index}\n\n{len(items)} items"),
                 ),
                 expand=True,
             )
-            for event in events:
-                step.add_leaf(
-                    _event_tree_label(event),
-                    data=TrajectoryTreeItem(
-                        "event",
-                        _event_tree_label(event),
-                        None,
-                        event=event,
-                    ),
-                )
+            for item in items:
+                if item.interaction is not None:
+                    parent = step.add(
+                        item.title,
+                        data=TrajectoryTreeItem(
+                            "tool",
+                            item.title.plain,
+                            interaction=item.interaction,
+                            focus="full",
+                        ),
+                        expand=True,
+                    )
+                    parent.add_leaf(
+                        Text("Input", style="bold yellow"),
+                        data=TrajectoryTreeItem(
+                            "tool_input",
+                            "Input",
+                            interaction=item.interaction,
+                            focus="input",
+                        ),
+                    )
+                    parent.add_leaf(
+                        Text("Output", style="bold yellow"),
+                        data=TrajectoryTreeItem(
+                            "tool_output",
+                            "Output",
+                            interaction=item.interaction,
+                            focus="output",
+                        ),
+                    )
+                elif item.event is not None:
+                    step.add_leaf(
+                        item.title,
+                        data=TrajectoryTreeItem(
+                            "event",
+                            item.title.plain,
+                            event=item.event,
+                        ),
+                    )
 
 
 class SubmissionSummary(Static):
@@ -698,6 +1203,10 @@ class SubmissionSummary(Static):
         self.data = data
         self.summary_text = _format_submission(data)
         super().__init__(self.summary_text, classes="submission-summary")
+
+
+class FocusableDetailWrap(VerticalScroll, can_focus=True):
+    """Focusable scroll container for trajectory detail rendering."""
 
 
 class PreviewPane(VerticalScroll, can_focus=True):
@@ -718,15 +1227,42 @@ class PreviewPane(VerticalScroll, can_focus=True):
         """Render a file into the pane."""
         self.current_path = path
         self.remove_children()
-        for widget in render_file(path):
+        widgets = render_file(path)
+        for widget in widgets:
             self.mount(widget)
         self.scroll_home(animate=False)
+        if (
+            widgets
+            and isinstance(widgets[0], TrajectoryViewer)
+            and isinstance(self.app, SkimApp)
+            and self.id == self.app.active_pane_id
+        ):
+            self.call_after_refresh(widgets[0].focus_tree_mode)
 
     def on_click(self) -> None:
         """Mark this pane as the active preview when clicked."""
         app = self.app
         if isinstance(app, SkimApp) and self.id is not None:
             app.set_active_pane(self.id)
+
+    def scroll_content(self, delta: int) -> None:
+        """Scroll specialized inner content when present, else scroll the pane."""
+        try:
+            viewer = self.query(TrajectoryViewer).first()
+        except NoMatches:
+            viewer = None
+        if isinstance(viewer, TrajectoryViewer):
+            viewer.handle_vertical_key(delta)
+        else:
+            self.scroll_relative(y=delta, animate=False)
+
+    def active_trajectory_viewer(self) -> TrajectoryViewer | None:
+        """Return the mounted trajectory viewer, if this pane has one."""
+        try:
+            viewer = self.query(TrajectoryViewer).first()
+        except NoMatches:
+            return None
+        return viewer if isinstance(viewer, TrajectoryViewer) else None
 
 
 class SkimApp(App):
@@ -772,6 +1308,25 @@ class SkimApp(App):
         width: 2fr;
         height: 1fr;
         padding: 0 1;
+    }
+    .trajectory-detail-field {
+        padding: 0 1;
+    }
+    .trajectory-footer {
+        height: 1;
+        color: $text-muted;
+        background: $surface-lighten-1;
+        padding: 0 1;
+        margin: 1 0 0 0;
+    }
+    Collapsible.trajectory-section {
+        margin: 0 0 1 0;
+    }
+    Collapsible.trajectory-section-selected {
+        border: round $accent;
+    }
+    Collapsible.trajectory-section-secondary {
+        border: round $panel-lighten-1;
     }
     #status-bar {
         dock: bottom;
@@ -890,7 +1445,7 @@ class SkimApp(App):
             return
         try:
             pane = self.query_one(f"#{self.active_pane_id}", PreviewPane)
-            pane.scroll_relative(y=SCROLL_STEP, animate=False)
+            pane.scroll_content(SCROLL_STEP)
         except Exception:
             pass
 
@@ -902,7 +1457,7 @@ class SkimApp(App):
             return
         try:
             pane = self.query_one(f"#{self.active_pane_id}", PreviewPane)
-            pane.scroll_relative(y=-SCROLL_STEP, animate=False)
+            pane.scroll_content(-SCROLL_STEP)
         except Exception:
             pass
 
@@ -942,6 +1497,31 @@ class SkimApp(App):
             event.prevent_default()
             event.stop()
             return
+
+        viewer: TrajectoryViewer | None = None
+        try:
+            active_pane = self.query_one(f"#{self.active_pane_id}", PreviewPane)
+            viewer = active_pane.active_trajectory_viewer()
+        except Exception:
+            viewer = None
+
+        if viewer is not None and event.key in {"left", "right"}:
+            if viewer.handle_horizontal_key(event.key):
+                event.prevent_default()
+                event.stop()
+                return
+
+        if viewer is not None and event.key == "escape":
+            if viewer.handle_escape_key():
+                event.prevent_default()
+                event.stop()
+                return
+
+        if viewer is not None and event.key == "enter":
+            if viewer.handle_enter_key():
+                event.prevent_default()
+                event.stop()
+                return
 
         # shift+arrows navigate the file tree, enter opens
         if event.key == "shift+down":
