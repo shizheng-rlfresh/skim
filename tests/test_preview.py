@@ -107,7 +107,7 @@ def test_ipynb_renders_code_cells_and_outputs(tmp_path):
 
     widgets = render_file(test_file)
 
-    assert len(widgets) >= 6
+    assert len(widgets) >= 7
     assert isinstance(widgets[1], Static)
     assert "Code Cell 1" in _static_content(widgets[1]).plain
     assert isinstance(_static_content(widgets[2]), Syntax)
