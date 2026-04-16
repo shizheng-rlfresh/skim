@@ -26,7 +26,7 @@ from textual.widgets import Collapsible, Input, Markdown, Static, TextArea, Tree
 
 import skim.trajectory as trajectory_module
 from skim import JsonInspector, PreviewPane, SkimApp, render_file
-from skim.preview import CsvPreview, NotebookPreview
+from skim.preview import CsvPreview
 from skim.scrolling import FocusableDetailWrap
 from skim.trajectory import AnnotationStore
 
@@ -43,8 +43,8 @@ def test_generic_json_uses_json_inspector(tmp_path):
     assert _tree_labels(widgets[0]._tree) == ["Hello world"]
 
 
-def test_ipynb_uses_notebook_preview(tmp_path):
-    """Notebook files should use the specialized notebook preview."""
+def test_ipynb_uses_flat_notebook_document(tmp_path):
+    """Notebook files should render as a flat preview document."""
     test_file = tmp_path / "notebook.ipynb"
     test_file.write_text(
         json.dumps(
@@ -65,18 +65,16 @@ def test_ipynb_uses_notebook_preview(tmp_path):
 
     widgets = render_file(test_file)
 
-    assert len(widgets) == 1
-    preview = widgets[0]
-    assert isinstance(preview, NotebookPreview)
-    assert isinstance(preview._widgets[0], Static)
-    assert "Notebook Preview" in _static_content(preview._widgets[0]).plain
-    first_cell = preview._widgets[1]
-    assert isinstance(first_cell, Collapsible)
-    assert first_cell.title == "Markdown Cell 1"
+    assert len(widgets) >= 3
+    assert isinstance(widgets[0], Static)
+    assert "Notebook Preview" in _static_content(widgets[0]).plain
+    assert isinstance(widgets[1], Static)
+    assert "Markdown Cell 1" in _static_content(widgets[1]).plain
+    assert isinstance(widgets[2], Markdown)
 
 
 def test_ipynb_renders_code_cells_and_outputs(tmp_path):
-    """Notebook previews should render code cells with visible outputs."""
+    """Notebook previews should render code cells and outputs inline."""
     test_file = tmp_path / "notebook.ipynb"
     test_file.write_text(
         json.dumps(
@@ -92,6 +90,10 @@ def test_ipynb_renders_code_cells_and_outputs(tmp_path):
                                 "output_type": "stream",
                                 "name": "stdout",
                                 "text": ["hi\n"],
+                            },
+                            {
+                                "output_type": "execute_result",
+                                "data": {"text/plain": ["42"]},
                             }
                         ],
                     }
@@ -105,15 +107,19 @@ def test_ipynb_renders_code_cells_and_outputs(tmp_path):
 
     widgets = render_file(test_file)
 
-    assert len(widgets) == 1
-    preview = widgets[0]
-    assert isinstance(preview, NotebookPreview)
-    code_cell = preview._widgets[1]
-    assert isinstance(code_cell, Collapsible)
-    assert code_cell.title == "Code Cell 1"
-    output_cell = preview._widgets[2]
-    assert isinstance(output_cell, Collapsible)
-    assert output_cell.title == "Output 1.1"
+    assert len(widgets) >= 6
+    assert isinstance(widgets[1], Static)
+    assert "Code Cell 1" in _static_content(widgets[1]).plain
+    assert isinstance(_static_content(widgets[2]), Syntax)
+    assert "print('hi')" in _static_content(widgets[2]).code
+    assert isinstance(widgets[3], Static)
+    assert "Output 1.1" in _static_content(widgets[3]).plain
+    assert isinstance(widgets[4], Static)
+    assert "hi" in _static_content(widgets[4]).plain
+    assert isinstance(widgets[5], Static)
+    assert "Output 1.2" in _static_content(widgets[5]).plain
+    assert isinstance(widgets[6], Static)
+    assert "42" in _static_content(widgets[6]).plain
 
 
 def test_render_file_passes_source_context_to_json_inspector(tmp_path):
@@ -231,6 +237,76 @@ def test_ipynd_falls_back_to_plain_text_preview(tmp_path):
     assert len(widgets) == 1
     assert isinstance(widgets[0], Static)
     assert not isinstance(_static_content(widgets[0]), Syntax)
+
+
+async def test_long_ipynb_scrolls_in_outer_preview_pane(tmp_path):
+    """Notebook previews should scroll through the outer preview pane."""
+    long_markdown = "\n".join(f"line {index}" for index in range(400))
+    test_file = tmp_path / "notebook.ipynb"
+    test_file.write_text(
+        json.dumps(
+            {
+                "cells": [
+                    {
+                        "cell_type": "markdown",
+                        "metadata": {},
+                        "source": [long_markdown],
+                    }
+                ],
+                "metadata": {},
+                "nbformat": 4,
+                "nbformat_minor": 5,
+            }
+        )
+    )
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        pane.show_file(test_file)
+        await pilot.pause()
+
+        before = pane.scroll_y
+        await pilot.press("down")
+        await pilot.pause()
+
+        assert pane.scroll_y > before
+
+
+async def test_mouse_drag_scrolls_flat_ipynb_preview(tmp_path):
+    """Dragging inside a long notebook preview should scroll the pane."""
+    long_markdown = "\n".join(f"line {index}" for index in range(400))
+    test_file = tmp_path / "notebook.ipynb"
+    test_file.write_text(
+        json.dumps(
+            {
+                "cells": [
+                    {
+                        "cell_type": "markdown",
+                        "metadata": {},
+                        "source": [long_markdown],
+                    }
+                ],
+                "metadata": {},
+                "nbformat": 4,
+                "nbformat_minor": 5,
+            }
+        )
+    )
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        pane.show_file(test_file)
+        await pilot.pause()
+        before = pane.scroll_y
+
+        await pilot.mouse_down(pane, offset=(5, 10))
+        await pilot.hover(pane, offset=(5, 1))
+        await pilot.mouse_up(pane, offset=(5, 1))
+        await pilot.pause()
+
+        assert pane.scroll_y > before
 
 
 def test_wrapped_trajectory_json_uses_json_inspector(tmp_path):

@@ -71,19 +71,6 @@ class CsvPreview(Vertical):
         yield from self._widgets
 
 
-class NotebookPreview(Vertical):
-    """Notebook preview with cell-aware rendering."""
-
-    def __init__(self, notebook: dict[str, Any]) -> None:
-        """Initialize the notebook preview from parsed notebook JSON."""
-        super().__init__(classes="notebook-preview")
-        self._widgets = _notebook_preview_widgets(notebook)
-
-    def compose(self) -> ComposeResult:
-        """Compose the notebook preview widgets."""
-        yield from self._widgets
-
-
 class PreviewPane(DragScrollMixin, VerticalScroll, can_focus=True):
     """Scrollable panel that shows file contents."""
 
@@ -168,7 +155,7 @@ def render_file(path: Path, *, browse_root: Path | None = None) -> list[Widget]:
         try:
             parsed = json.loads(content)
             if _looks_like_notebook(parsed):
-                return [NotebookPreview(parsed)]
+                return _notebook_preview_widgets(parsed)
         except json.JSONDecodeError:
             pass
 
@@ -307,7 +294,9 @@ def _notebook_preview_widgets(notebook: dict[str, Any]) -> list[Widget]:
         cells = []
     language = _notebook_language(notebook.get("metadata"))
 
-    widgets: list[Widget] = [Static(_notebook_summary_text(notebook, len(cells), language))]
+    widgets: list[Widget] = [
+        Static(_notebook_summary_text(notebook, len(cells), language), classes="notebook-summary")
+    ]
     for index, cell in enumerate(cells, start=1):
         widgets.extend(_notebook_cell_widgets(cell, index, language))
     if len(widgets) == 1:
@@ -343,41 +332,46 @@ def _notebook_summary_text(notebook: dict[str, Any], cell_count: int, language: 
 
 
 def _notebook_cell_widgets(cell: Any, index: int, language: str) -> list[Widget]:
-    """Return widgets for one notebook cell and its outputs."""
+    """Return flat widgets for one notebook cell and its outputs."""
     if not isinstance(cell, dict):
         return [
-            Collapsible(
-                Static(Text("Unsupported cell payload", style="yellow")),
-                title=f"Cell {index}",
-                collapsed=False,
-            )
+            Static(Text(f"Cell {index}", style="bold")),
+            Static(Text("Unsupported cell payload", style="yellow")),
         ]
     cell_type = cell.get("cell_type")
     if not isinstance(cell_type, str):
         cell_type = "raw"
     source = _notebook_text(cell.get("source"))
 
-    if cell_type == "markdown":
-        body: Widget = Markdown(source or "_Empty markdown cell_")
-    elif cell_type == "code":
-        body = Static(Syntax(source, language, line_numbers=True, word_wrap=True))
-    else:
-        body = Static(Text(source))
-
     widgets: list[Widget] = [
-        Collapsible(body, title=f"{cell_type.title()} Cell {index}", collapsed=False)
+        Static(
+            Text(f"{cell_type.title()} Cell {index}", style="bold"),
+            classes="notebook-cell-label",
+        )
     ]
+    if cell_type == "markdown":
+        widgets.append(Markdown(source or "_Empty markdown cell_"))
+    elif cell_type == "code":
+        widgets.append(
+            Static(
+                Syntax(source, language, line_numbers=True, word_wrap=True),
+                classes="notebook-code-cell",
+            )
+        )
+    else:
+        widgets.append(Static(Text(source), classes="notebook-raw-cell"))
+
     if cell_type == "code":
         outputs = cell.get("outputs")
         if isinstance(outputs, list):
             for output_index, output in enumerate(outputs, start=1):
                 widgets.append(
-                    Collapsible(
-                        _notebook_output_widget(output),
-                        title=f"Output {index}.{output_index}",
-                        collapsed=False,
+                    Static(
+                        Text(f"Output {index}.{output_index}", style="bold"),
+                        classes="notebook-output-label",
                     )
                 )
+                widgets.append(_notebook_output_widget(output))
     return widgets
 
 
