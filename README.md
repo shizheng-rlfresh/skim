@@ -88,15 +88,7 @@ JSON files open in a structural inspector rather than a plain text dump. The ins
 Annotations bind to the underlying raw JSON location, using `annotation_path` when an
 overlay node maps to a raw node and falling back to `raw_path` otherwise.
 
-## Supported file types and limits
-
-Syntax highlighting works for Python, JSON, JavaScript, TypeScript, HTML, CSS, YAML,
-TOML, Bash, Rust, Go, SQL, and XML. Markdown files are rendered with formatting.
-
-JSON files are parsed into the inspector described above. CSV files render as a compact
-table preview with the raw CSV available below it, capped for readability. Non-JSON,
-non-Markdown text formats fall back to syntax-highlighted source when a lexer is
-available.
+## File size limits
 
 Files over `1MB` are skipped to keep text previews responsive. JSON files get a higher
 limit of `10MB`.
