@@ -105,8 +105,8 @@ overlay node maps to a raw node and falling back to `raw_path` otherwise.
 
 ## File size limits
 
-Files over `1MB` are skipped to keep text previews responsive. JSON files get a higher
-limit of `10MB`.
+Files over `1MB` are skipped to keep text previews responsive. JSON and notebook
+(`.ipynb`) files get a higher limit of `10MB`.
 
 ## License
 
