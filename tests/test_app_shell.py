@@ -5,10 +5,12 @@ focus mode, global key routing, and generic scroll behavior. It does not cover
 preview classification or trajectory-specific rendering rules.
 """
 
+import json
+
 from conftest import _static_content
 from textual.widgets import Static
 
-from skim import PreviewPane, SkimApp
+from skim import JsonInspector, PreviewPane, SkimApp
 
 
 async def test_app_launches():
@@ -200,7 +202,149 @@ async def test_file_tree_mode_escape_returns_to_active_pane(tmp_path):
 
         assert not app.file_tree_mode
         assert app.focused is pane
-        assert "Toggle tree" in _static_content(footer)
+        content = _static_content(footer)
+        assert "Tree" in content
+        assert "Toggle tree" not in content
+
+
+async def test_right_outside_file_tree_mode_still_routes_to_json_viewer(tmp_path):
+    """Outside file-tree mode, right should keep driving the active JSON tree."""
+    test_file = tmp_path / "plain.json"
+    test_file.write_text(json.dumps({"alpha": {"nested": 1}, "beta": 2}))
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        pane.show_file(test_file)
+        await pilot.pause()
+
+        inspector = pane.query_one(JsonInspector)
+        first_node = inspector._tree.root.children[0]
+        inspector._tree.move_cursor(first_node, animate=False)
+        await pilot.pause()
+
+        assert inspector._tree.cursor_node is first_node
+        assert first_node.is_collapsed
+
+        await pilot.press("right")
+        await pilot.pause()
+
+        assert inspector._tree.cursor_node is first_node
+        assert first_node.is_expanded
+
+
+async def test_file_tree_mode_right_does_not_leak_to_json_viewer(tmp_path):
+    """File-tree mode should consume right without mutating the active JSON tree."""
+    (tmp_path / "folder").mkdir()
+    test_file = tmp_path / "plain.json"
+    test_file.write_text(json.dumps({"alpha": {"nested": 1}, "beta": 2}))
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        pane.show_file(test_file)
+        await pilot.pause()
+
+        inspector = pane.query_one(JsonInspector)
+        first_node = inspector._tree.root.children[0]
+        inspector._tree.move_cursor(first_node, animate=False)
+        await pilot.pause()
+
+        await pilot.press("f")
+        await pilot.pause()
+        assert app.file_tree_mode
+
+        await pilot.press("right")
+        await pilot.pause()
+
+        assert inspector._tree.cursor_node is first_node
+        assert first_node.is_collapsed
+
+
+async def test_file_tree_mode_right_expands_directory(tmp_path):
+    """Right should branch into a collapsed directory while file-tree mode is active."""
+    child = tmp_path / "folder"
+    child.mkdir()
+    (child / "inside.txt").write_text("x")
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        tree = app.query_one("DirectoryTree")
+        folder_node = tree.root.children[0]
+
+        await pilot.press("f")
+        await pilot.pause()
+        tree.move_cursor(folder_node, animate=False)
+        await pilot.pause()
+
+        assert folder_node.is_collapsed
+
+        await pilot.press("right")
+        await pilot.pause()
+
+        assert tree.cursor_node is folder_node
+        assert folder_node.is_expanded
+
+
+async def test_file_tree_mode_left_collapses_directory_then_moves_to_parent(tmp_path):
+    """Left should collapse the current branch, then move up on a second press."""
+    child = tmp_path / "folder"
+    child.mkdir()
+    (child / "inside.txt").write_text("x")
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        tree = app.query_one("DirectoryTree")
+        folder_node = tree.root.children[0]
+
+        await pilot.press("f")
+        await pilot.pause()
+        tree.move_cursor(folder_node, animate=False)
+        folder_node.expand()
+        await pilot.pause()
+
+        assert tree.cursor_node is folder_node
+        assert folder_node.is_expanded
+
+        await pilot.press("left")
+        await pilot.pause()
+
+        assert tree.cursor_node is folder_node
+        assert folder_node.is_collapsed
+
+        await pilot.press("left")
+        await pilot.pause()
+
+        assert tree.cursor_node is tree.root
+
+
+async def test_file_tree_mode_right_on_file_opens_it_and_returns_to_pane(tmp_path):
+    """Right on a file should open it and leave file-tree mode."""
+    test_file = tmp_path / "open-me.txt"
+    test_file.write_text("hello")
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        tree = app.query_one("DirectoryTree")
+        file_node = tree.root.children[0]
+
+        await pilot.press("f")
+        await pilot.pause()
+        tree.move_cursor(file_node, animate=False)
+        await pilot.pause()
+
+        await pilot.press("right")
+        await pilot.pause()
+
+        assert pane.current_path == test_file
+        assert not app.file_tree_mode
+        assert app.focused is pane
 
 
 async def test_down_outside_file_tree_mode_still_scrolls_preview_pane(tmp_path):
@@ -273,12 +417,35 @@ async def test_global_footer_only_shows_app_wide_commands():
 
         assert isinstance(content, str)
         assert "Scroll" in content
-        assert "Toggle tree" in content
-        assert "Open" in content
+        assert "PgUp/Dn" in content
+        assert "Tree" in content
+        assert "Open" not in content
+        assert "Toggle tree" not in content
+        assert "shortcut" not in content
         assert "JSON" not in content
         assert "Branch" not in content
         assert "Detail" not in content
         assert "Esc" not in content
+
+
+async def test_file_tree_footer_shows_branch_controls(tmp_path):
+    """File-tree mode footer should advertise left/right branch navigation."""
+    (tmp_path / "one.txt").write_text("x")
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        footer = app.query_one("#status-bar", Static)
+
+        await pilot.press("f")
+        await pilot.pause()
+
+        content = _static_content(footer)
+        assert isinstance(content, str)
+        assert "←→" in content
+        assert "Branch" in content
+        assert "Open" not in content
+        assert "shortcut" not in content
 
 
 async def test_mouse_drag_scrolls_preview_pane(tmp_path):

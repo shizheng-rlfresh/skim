@@ -28,6 +28,7 @@ from .trajectory import JsonInspector, TrajectoryViewer
 SYNTAX_MAP = {
     ".py": "python",
     ".json": "json",
+    ".ipynb": "json",
     ".js": "javascript",
     ".ts": "typescript",
     ".html": "html",
@@ -44,6 +45,8 @@ SYNTAX_MAP = {
     ".csv": "csv",
 }
 MARKDOWN_EXTENSIONS = {".md", ".markdown", ".mdown"}
+JSON_EXTENSIONS = {".json"}
+NOTEBOOK_EXTENSIONS = {".ipynb"}
 MAX_FILE_SIZE = 1_000_000
 MAX_JSON_FILE_SIZE = 10_000_000
 MAX_CSV_ROWS = 20
@@ -132,7 +135,11 @@ def render_file(path: Path, *, browse_root: Path | None = None) -> list[Widget]:
 
     suffix = path.suffix.lower()
     size = path.stat().st_size
-    max_size = MAX_JSON_FILE_SIZE if suffix == ".json" else MAX_FILE_SIZE
+    max_size = (
+        MAX_JSON_FILE_SIZE
+        if suffix in JSON_EXTENSIONS or suffix in NOTEBOOK_EXTENSIONS
+        else MAX_FILE_SIZE
+    )
     if size > max_size:
         return [Static(Text(f"{path.name} is too large ({size:,} bytes)", style="red"))]
 
@@ -144,7 +151,15 @@ def render_file(path: Path, *, browse_root: Path | None = None) -> list[Widget]:
     if suffix in MARKDOWN_EXTENSIONS:
         return [Markdown(content)]
 
-    if suffix == ".json":
+    if suffix in NOTEBOOK_EXTENSIONS:
+        try:
+            parsed = json.loads(content)
+            if _looks_like_notebook(parsed):
+                return _notebook_preview_widgets(parsed)
+        except json.JSONDecodeError:
+            pass
+
+    if suffix in JSON_EXTENSIONS:
         try:
             parsed = json.loads(content)
             return [
@@ -261,3 +276,130 @@ def _raw_csv_section(content: str, *, collapsed: bool = True) -> Collapsible:
         collapsed=collapsed,
         classes="csv-raw-section",
     )
+
+
+def _looks_like_notebook(data: Any) -> bool:
+    """Return whether parsed JSON looks like a notebook payload."""
+    return (
+        isinstance(data, dict)
+        and isinstance(data.get("cells"), list)
+        and isinstance(data.get("nbformat"), int)
+    )
+
+
+def _notebook_preview_widgets(notebook: dict[str, Any]) -> list[Widget]:
+    """Build the notebook preview widgets."""
+    cells = notebook.get("cells")
+    if not isinstance(cells, list):
+        cells = []
+    language = _notebook_language(notebook.get("metadata"))
+
+    widgets: list[Widget] = [
+        Static(_notebook_summary_text(notebook, len(cells), language), classes="notebook-summary")
+    ]
+    for index, cell in enumerate(cells, start=1):
+        widgets.extend(_notebook_cell_widgets(cell, index, language))
+    if len(widgets) == 1:
+        widgets.append(Static(Text("Empty notebook", style="dim italic")))
+    return widgets
+
+
+def _notebook_language(metadata: Any) -> str:
+    """Return the notebook language, defaulting to python."""
+    if isinstance(metadata, dict):
+        language_info = metadata.get("language_info")
+        if isinstance(language_info, dict):
+            candidate = language_info.get("name")
+            if isinstance(candidate, str) and candidate:
+                return candidate
+    return "python"
+
+
+def _notebook_summary_text(notebook: dict[str, Any], cell_count: int, language: str) -> Text:
+    """Return a short summary for the notebook preview."""
+    text = Text()
+    text.append("Notebook Preview", style="bold")
+    text.append(f"  {cell_count:,} cells", style="dim")
+    nbformat = notebook.get("nbformat")
+    nbformat_minor = notebook.get("nbformat_minor")
+    if isinstance(nbformat, int):
+        version = str(nbformat)
+        if isinstance(nbformat_minor, int):
+            version += f".{nbformat_minor}"
+        text.append(f"  nbformat {version}", style="dim")
+    text.append(f"  {language}", style="dim")
+    return text
+
+
+def _notebook_cell_widgets(cell: Any, index: int, language: str) -> list[Widget]:
+    """Return flat widgets for one notebook cell and its outputs."""
+    if not isinstance(cell, dict):
+        return [
+            Static(Text(f"Cell {index}", style="bold")),
+            Static(Text("Unsupported cell payload", style="yellow")),
+        ]
+    cell_type = cell.get("cell_type")
+    if not isinstance(cell_type, str):
+        cell_type = "raw"
+    source = _notebook_text(cell.get("source"))
+
+    widgets: list[Widget] = [
+        Static(
+            Text(f"{cell_type.title()} Cell {index}", style="bold"),
+            classes="notebook-cell-label",
+        )
+    ]
+    if cell_type == "markdown":
+        widgets.append(Markdown(source or "_Empty markdown cell_"))
+    elif cell_type == "code":
+        widgets.append(
+            Static(
+                Syntax(source, language, line_numbers=True, word_wrap=True),
+                classes="notebook-code-cell",
+            )
+        )
+    else:
+        widgets.append(Static(Text(source), classes="notebook-raw-cell"))
+
+    if cell_type == "code":
+        outputs = cell.get("outputs")
+        if isinstance(outputs, list):
+            for output_index, output in enumerate(outputs, start=1):
+                widgets.append(
+                    Static(
+                        Text(f"Output {index}.{output_index}", style="bold"),
+                        classes="notebook-output-label",
+                    )
+                )
+                widgets.append(_notebook_output_widget(output))
+    return widgets
+
+
+def _notebook_output_widget(output: Any) -> Widget:
+    """Return a widget for one code-cell output."""
+    if not isinstance(output, dict):
+        return Static(Text(str(output)))
+    if output.get("output_type") == "stream":
+        return Static(Text(_notebook_text(output.get("text"))))
+    if output.get("output_type") in {"display_data", "execute_result"}:
+        data = output.get("data")
+        if isinstance(data, dict):
+            markdown = data.get("text/markdown")
+            if markdown is not None:
+                return Markdown(_notebook_text(markdown))
+            plain = data.get("text/plain")
+            if plain is not None:
+                return Static(Text(_notebook_text(plain)))
+    traceback = output.get("traceback") if isinstance(output, dict) else None
+    if traceback is not None:
+        return Static(Text(_notebook_text(traceback), style="red"))
+    return Static(Text(json.dumps(output, indent=2)))
+
+
+def _notebook_text(value: Any) -> str:
+    """Normalize notebook text content."""
+    if isinstance(value, list):
+        return "".join(str(item) for item in value)
+    if value is None:
+        return ""
+    return str(value)

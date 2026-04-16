@@ -256,10 +256,9 @@ class SkimApp(App):
         if self.file_tree_mode:
             return (
                 " [bold]q[/] Quit  "
-                "[bold]↑↓[/] Move tree  "
-                "[bold]Enter[/] Open  "
+                "[bold]↑↓[/] Move  "
+                "[bold]←→[/] Branch  "
                 "[bold]Esc[/] Back  "
-                "[bold]⇧↑↓[/] Tree shortcut  "
                 "[bold]s[/]+arrow Split  "
                 "[bold]d[/] Close  "
                 "[bold]w[/] Next pane"
@@ -267,9 +266,8 @@ class SkimApp(App):
         return (
             " [bold]q[/] Quit  "
             "[bold]↑↓[/] Scroll  "
-            "[bold]f[/] Toggle tree  "
-            "[bold]⇧↑↓[/] Tree shortcut  "
-            "[bold]Enter[/] Open  "
+            "[bold]PgUp/Dn[/] Page  "
+            "[bold]f[/] Tree  "
             "[bold]s[/]+arrow Split  "
             "[bold]d[/] Close  "
             "[bold]w[/] Next pane"
@@ -368,6 +366,37 @@ class SkimApp(App):
             return
         self.query_one(DirectoryTree).action_select_cursor()
 
+    def action_tree_left(self) -> None:
+        """Collapse the current file-tree branch or move to its parent."""
+        if self._modal_is_active():
+            return
+        tree = self.query_one(DirectoryTree)
+        node = tree.cursor_node
+        if node is None:
+            return
+        if node.allow_expand and node.is_expanded:
+            node.collapse()
+            return
+        if node.parent is not None:
+            tree.move_cursor(node.parent, animate=False)
+
+    def action_tree_right(self) -> None:
+        """Expand the current file-tree branch, move into it, or open a file."""
+        if self._modal_is_active():
+            return
+        tree = self.query_one(DirectoryTree)
+        node = tree.cursor_node
+        if node is None:
+            return
+        if node.allow_expand:
+            if node.is_collapsed:
+                node.expand()
+                return
+            if node.children:
+                tree.move_cursor(node.children[0], animate=False)
+            return
+        self.action_tree_select()
+
     def action_page_down(self) -> None:
         """Scroll the active content by a page-sized amount."""
         if self._modal_is_active():
@@ -436,6 +465,16 @@ class SkimApp(App):
                 return
             if event.key in {"down", "j"}:
                 self.action_tree_down()
+                event.prevent_default()
+                event.stop()
+                return
+            if event.key == "left":
+                self.action_tree_left()
+                event.prevent_default()
+                event.stop()
+                return
+            if event.key == "right":
+                self.action_tree_right()
                 event.prevent_default()
                 event.stop()
                 return
