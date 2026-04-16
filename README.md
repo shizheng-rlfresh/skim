@@ -4,8 +4,8 @@ A terminal UI for browsing folders and reviewing local artifacts. Built with
 [Textual](https://textual.textualize.io/).
 
 Point it at any directory to get a file tree on the left and a content preview on the
-right, with syntax highlighting, markdown rendering, split panes, and a **JSON inspector**
-that now supports `local node annotations`.
+right, with syntax highlighting, markdown rendering, split panes, flat `.ipynb`
+rendering, and a **JSON inspector** that now supports `local node annotations`.
 
 ## Install
 
@@ -27,20 +27,34 @@ uv run skim-dev          # launch Textual dev mode
 
 ## Keybindings
 
+### Shell And Pane Navigation
+
 | Key | Action |
 |---|---|
-| `f` | Toggle between the file tree and the active preview pane |
-| `Shift+Up/Down` | Move the file tree cursor |
-| `Enter` | Open the selected file from the tree |
-| `Esc` | Leave file-tree mode or return from trajectory detail to the trajectory tree |
 | `Up/Down` or `j/k` | Scroll the active preview pane |
-| `PageUp/PageDown` | Page-scroll the active preview pane or JSON detail panel |
+| `PageUp/PageDown` | Page-scroll the active preview pane |
+| `f` | Toggle file-tree mode |
+| `Shift+Up/Down` | Move the file-tree cursor without leaving the active preview |
+| `Enter` | Open the current file-tree selection in the active pane |
 | `s` then arrow or `h/j/k/l` | Split in a direction |
 | `d` | Close the active pane |
 | `w` | Cycle to the next pane |
 | `q` | Quit |
 
-Specialized previews also show local command footers.
+### File-Tree Mode
+
+| Key | Action |
+|---|---|
+| `Up/Down` or `j/k` | Move the file-tree cursor |
+| `Left/Right` | Collapse, expand, or move across file-tree branches |
+| `Right` on a file | Open that file in the active pane |
+| `Enter` | Open the selected file or directory entry |
+| `Esc` | Return to the active preview pane |
+
+Trajectory and JSON previews show their own local command footers when they have
+specialized navigation. Flat notebook previews use the generic pane scrolling above.
+
+### Trajectory Preview
 
 Trajectory previews use a tree/detail model:
 
@@ -51,6 +65,8 @@ Trajectory previews use a tree/detail model:
 | `Enter` | Open the selected trajectory node in the detail pane |
 | `Esc` | Return from the detail pane to the trajectory tree |
 
+### JSON Inspector
+
 JSON previews use a live inspector model:
 
 | Key | Action |
@@ -60,7 +76,7 @@ JSON previews use a live inspector model:
 | `PageUp/PageDown` | Scroll the right-hand detail panel |
 | `a` | Open the annotation editor for the selected annotatable node |
 
-Inside the annotation modal:
+### Annotation Modal
 
 | Key | Action |
 |---|---|
@@ -78,8 +94,7 @@ You can have up to 6 panes arranged in a 2 row by 3 column grid. Press `s` follo
 JSON files open in a structural inspector rather than a plain text dump. The inspector:
 
 - shows a tree on the left and detail panels on the right
-- adds schema-aware overlays for supported artifacts such as raw trajectories, bundles,
-  submissions, and Hermes-style transcripts
+- adds schema-aware overlays for supported artifacts such as raw agent trajectories.
 - keeps annotations local in `<browse-root>/.skim/review.json`
 - marks annotated nodes in the tree and shows annotation state in a separate status panel
 - opens a split annotation modal with tags and note editing on the left and a read-only
