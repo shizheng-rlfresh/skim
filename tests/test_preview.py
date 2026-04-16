@@ -94,7 +94,7 @@ def test_ipynb_renders_code_cells_and_outputs(tmp_path):
                             {
                                 "output_type": "execute_result",
                                 "data": {"text/plain": ["42"]},
-                            }
+                            },
                         ],
                     }
                 ],
