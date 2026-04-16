@@ -32,7 +32,7 @@ uv run skim-dev          # launch Textual dev mode
 | Key | Action |
 |---|---|
 | `Up/Down` or `j/k` | Scroll the active preview pane |
-| `PageUp/PageDown` | Page-scroll the active preview pane |
+| `PageUp/PageDown` | Page-scroll the active preview pane; in JSON inspector mode, scroll the detail panel |
 | `f` | Toggle file-tree mode |
 | `Shift+Up/Down` | Move the file-tree cursor without leaving the active preview |
 | `Enter` | Open the current file-tree selection in the active pane |
