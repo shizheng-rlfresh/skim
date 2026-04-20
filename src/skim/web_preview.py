@@ -9,8 +9,14 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
+
+from pygments import highlight
+from pygments.formatters import HtmlFormatter
+from pygments.lexers import get_lexer_by_name
+from pygments.util import ClassNotFound
 
 from .preview import (
     JSON_EXTENSIONS,
@@ -637,6 +643,7 @@ def _serialize_csv_preview(content: str, *, name: str, relative_path: str) -> di
         "columns": display_header,
         "rows": rows,
         "raw": content,
+        "raw_render": _syntax_payload(content, language="csv", line_numbers=True),
         "parse_error": None,
         "summary": f"CSV Preview  {len(body):,} rows x {len(header):,} columns",
         "truncated_rows": len(body) > MAX_CSV_ROWS,
@@ -657,6 +664,7 @@ def _text_payload(
         "path": relative_path,
         "language": language,
         "content": content,
+        "render": _syntax_payload(content, language=language, line_numbers=True),
     }
 
 
@@ -703,7 +711,7 @@ def _serialize_string_detail(value: str) -> list[dict[str, Any]]:
     if _looks_like_markdown(value):
         return [{"kind": "markdown", "value": value}]
     if _looks_like_preformatted_text(value):
-        return [{"kind": "code", "language": "text", "value": value}]
+        return [_syntax_payload(value, language="text", line_numbers=False)]
     return [_text_detail_block(value)]
 
 
@@ -811,9 +819,9 @@ def _serialize_keyed_string(key: str, value: str) -> list[dict[str, Any]]:
             return _serialize_structured_detail(decoded, nested=True)
         return [_json_detail_block(decoded)]
     if key == "command":
-        return [{"kind": "code", "language": "bash", "value": value}]
+        return [_syntax_payload(value, language="bash", line_numbers=False)]
     if key == "code":
-        return [{"kind": "code", "language": _guess_code_lexer(value), "value": value}]
+        return [_syntax_payload(value, language=_guess_code_lexer(value), line_numbers=False)]
     return _serialize_string_detail(value)
 
 
@@ -834,7 +842,7 @@ def _serialize_pages(value: list[Any]) -> list[dict[str, Any]]:
 
 
 def _json_detail_block(value: Any) -> dict[str, Any]:
-    return {"kind": "json", "value": value}
+    return _syntax_payload(json.dumps(value, indent=2), language="json", line_numbers=False)
 
 
 def _text_detail_block(value: str) -> dict[str, Any]:
@@ -844,20 +852,20 @@ def _text_detail_block(value: str) -> dict[str, Any]:
 def _render_value(value: Any, *, key: str = "") -> dict[str, Any]:
     decoded = _decode_json_value(value)
     if isinstance(decoded, dict | list):
-        return {"kind": "json", "value": decoded}
+        return _syntax_payload(json.dumps(decoded, indent=2), language="json", line_numbers=False)
     if decoded is None:
         return {"kind": "text", "value": ""}
 
     text = str(decoded)
     normalized_key = key.lower()
     if normalized_key == "command":
-        return {"kind": "code", "language": "bash", "value": text}
+        return _syntax_payload(text, language="bash", line_numbers=False)
     if normalized_key == "code":
-        return {"kind": "code", "language": _guess_language(text), "value": text}
+        return _syntax_payload(text, language=_guess_language(text), line_numbers=False)
     if _looks_like_markdown(text):
         return {"kind": "markdown", "value": text}
     if _looks_like_preformatted_text(text):
-        return {"kind": "code", "language": "text", "value": text}
+        return _syntax_payload(text, language="text", line_numbers=False)
     return {"kind": "text", "value": text}
 
 
@@ -868,6 +876,42 @@ def _guess_language(value: str) -> str:
     if lowered.startswith("{") or lowered.startswith("["):
         return "json"
     return "text"
+
+
+@lru_cache(maxsize=2)
+def _syntax_formatter(*, line_numbers: bool) -> HtmlFormatter:
+    """Return the shared HTML formatter used by the web client."""
+    return HtmlFormatter(
+        style="monokai",
+        cssclass="syntax-block",
+        classprefix="tok-",
+        linenos="table" if line_numbers else False,
+        nobackground=True,
+    )
+
+
+def _syntax_payload(value: str, *, language: str | None, line_numbers: bool) -> dict[str, Any]:
+    """Return a syntax-highlighted HTML payload with a safe plain-text fallback."""
+    text = value or ""
+    if not language:
+        return {"kind": "text", "value": text}
+    try:
+        lexer = get_lexer_by_name(language)
+    except ClassNotFound:
+        return {"kind": "text", "value": text}
+
+    try:
+        html = highlight(text, lexer, _syntax_formatter(line_numbers=line_numbers))
+    except Exception:
+        return {"kind": "text", "value": text}
+
+    return {
+        "kind": "syntax",
+        "language": language,
+        "line_numbers": line_numbers,
+        "value": text,
+        "html": html,
+    }
 
 
 def _decode_json_value(value: Any) -> Any:

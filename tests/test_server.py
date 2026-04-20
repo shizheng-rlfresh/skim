@@ -82,6 +82,10 @@ def test_api_preview_returns_text_payload_for_plain_file(tmp_path):
     assert payload["path"] == "example.py"
     assert payload["language"] == "python"
     assert "print('hello')" in payload["content"]
+    assert payload["render"]["kind"] == "syntax"
+    assert payload["render"]["language"] == "python"
+    assert payload["render"]["line_numbers"] is True
+    assert "tok-nb" in payload["render"]["html"] or "tok-n" in payload["render"]["html"]
 
 
 def test_api_preview_falls_back_to_text_for_invalid_json(tmp_path):
@@ -216,6 +220,17 @@ def test_root_serves_local_static_shell_without_cdn_dependencies(tmp_path):
     assert "text/babel" not in html
 
 
+def test_stylesheet_includes_syntax_theme_classes(tmp_path):
+    """The checked-in stylesheet should include token classes for syntax HTML."""
+    with running_server(tmp_path) as base_url:
+        request = urllib.request.Request(base_url + "/styles.css")
+        with urllib.request.urlopen(request) as response:
+            css = response.read().decode()
+
+    assert ".syntax-block" in css
+    assert ".tok-k" in css
+
+
 def test_real_output_json_stays_in_json_inspector_and_keeps_trajectory_branch():
     """The repo's wrapped output artifact should keep the JSON-inspector tree shape."""
     repo_root = Path(__file__).resolve().parents[1]
@@ -257,6 +272,23 @@ def test_real_submission_json_serializes_structured_detail_blocks():
     assert "Prompt" in section_titles
     assert "Task Solution" in section_titles
     assert "Grader Guidance" in section_titles
+
+
+def test_json_detail_blocks_include_syntax_html_for_raw_objects(tmp_path):
+    """Raw JSON detail blocks should include highlighted HTML for structured values."""
+    test_file = tmp_path / "plain.json"
+    test_file.write_text(json.dumps({"plan": {"step": 1, "done": False}}))
+
+    payload = serialize_preview(test_file, browse_root=tmp_path)
+    plan_node = next(node for node in payload["tree"] if node["path"] == "$.plan")
+
+    assert payload["kind"] == "json_inspector"
+    assert plan_node["detail"]["kind"] == "detail"
+    syntax_block = plan_node["detail"]["blocks"][0]
+    assert syntax_block["kind"] == "syntax"
+    assert syntax_block["language"] == "json"
+    assert syntax_block["line_numbers"] is False
+    assert "tok-nt" in syntax_block["html"] or "tok-n" in syntax_block["html"]
 
 
 def test_real_hermes_json_keeps_transcript_labels_and_structured_summary():

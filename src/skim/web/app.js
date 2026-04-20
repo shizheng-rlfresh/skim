@@ -62,13 +62,13 @@ async function bootstrap() {
 async function onTreeClick(event) {
   const toggle = event.target.closest("[data-toggle-dir]");
   if (toggle) {
-    const path = toggle.dataset.toggleDir;
-    if (state.expandedDirs.has(path)) {
-      state.expandedDirs.delete(path);
-    } else {
-      state.expandedDirs.add(path);
-    }
-    renderTree();
+    toggleDirectory(toggle.dataset.toggleDir);
+    return;
+  }
+
+  const directory = event.target.closest("[data-dir-path]");
+  if (directory) {
+    toggleDirectory(directory.dataset.dirPath);
     return;
   }
 
@@ -80,41 +80,45 @@ async function onTreeClick(event) {
 }
 
 async function onPreviewClick(event) {
-  const jsonNode = event.target.closest("[data-json-node]");
-  if (jsonNode) {
-    state.selectedJsonNodeId = jsonNode.dataset.jsonNode;
-    renderPreview();
-    return;
-  }
-
-  const jsonToggle = event.target.closest("[data-toggle-json]");
-  if (jsonToggle) {
-    const path = jsonToggle.dataset.toggleJson;
-    if (state.expandedJson.has(path)) {
-      state.expandedJson.delete(path);
-    } else {
-      state.expandedJson.add(path);
-    }
-    renderPreview();
+  const annotate = event.target.closest("[data-annotate]");
+  if (annotate) {
+    openModal({
+      file: state.currentPath,
+      path: annotate.dataset.annotate,
+      annotation: decodeAnnotation(annotate.dataset.annotation),
+    });
     return;
   }
 
   const stepRow = event.target.closest("[data-step-id]");
   if (stepRow) {
     state.selectedStepId = stepRow.dataset.stepId;
-    renderPreview();
+    updateTrajectoryPreview();
     return;
   }
 
-  const annotate = event.target.closest("[data-annotate]");
-  if (!annotate) {
+  const jsonToggle = event.target.closest("[data-toggle-json]");
+  if (jsonToggle) {
+    const node = jsonNodeByPath(jsonToggle.dataset.toggleJson);
+    if (node) {
+      toggleJsonNode(node);
+    }
     return;
   }
-  openModal({
-    file: state.currentPath,
-    path: annotate.dataset.annotate,
-    annotation: decodeAnnotation(annotate.dataset.annotation),
-  });
+
+  const jsonNode = event.target.closest("[data-json-node]");
+  if (jsonNode) {
+    const node = jsonNodeById(jsonNode.dataset.jsonNode);
+    if (node) {
+      selectJsonNode(node);
+      if (node.children.length) {
+        toggleJsonNode(node, { preserveSelection: true });
+        return;
+      }
+      updateJsonInspectorPreview();
+    }
+    return;
+  }
 }
 
 async function onSaveAnnotation(event) {
@@ -238,7 +242,9 @@ function renderTreeNode(node, depth) {
     ? `<button class="tree-toggle" type="button" data-toggle-dir="${escapeAttribute(node.path)}">${expanded ? "▾" : "▸"}</button>`
     : `<span></span>`;
   const size = isDir ? "" : `<span class="file-size">${escapeHtml(node.size || "")}</span>`;
-  const labelAttrs = isDir ? "" : ` data-file-path="${escapeAttribute(node.path)}"`;
+  const labelAttrs = isDir
+    ? ` data-dir-path="${escapeAttribute(node.path)}"`
+    : ` data-file-path="${escapeAttribute(node.path)}"`;
   const rowClass = selected ? "tree-node selected" : "tree-node";
   const children = isDir && expanded
     ? `<div class="tree-children">${(node.children || []).map((child) => renderTreeNode(child, depth + 1)).join("")}</div>`
@@ -302,7 +308,7 @@ function renderTextPreview(preview) {
         <span class="path-pill">${escapeHtml(preview.path)}</span>
         ${preview.language ? `<span class="badge">${escapeHtml(preview.language)}</span>` : ""}
       </div>
-      ${renderCodeBlock(preview.content, preview.language || "text")}
+      ${renderRenderValue(preview.render || { kind: "text", value: preview.content })}
     </div>
   `;
 }
@@ -349,39 +355,23 @@ function renderCsvPreview(preview) {
       <div class="preview-block">${table}</div>
       <details class="raw-toggle">
         <summary>Raw CSV</summary>
-        ${renderCodeBlock(preview.raw, "csv")}
+        ${renderRenderValue(preview.raw_render || { kind: "text", value: preview.raw })}
       </details>
     </div>
   `;
 }
 
 function renderJsonInspector(preview) {
-  const nodes = flattenNodes(preview.tree);
-  const selected =
-    nodes.find((node) => node.id === state.selectedJsonNodeId) ||
-    nodes.find((node) => node.id === preview.initial_node_id) ||
-    nodes[0] ||
-    null;
-
+  const selected = selectedJsonNode(preview);
   if (!selected) {
     return `<div class="notice">Empty JSON payload.</div>`;
   }
 
-  state.selectedJsonNodeId = selected.id;
-  state.selectedJsonPath = selected.path;
-
   return `
-    <div class="split-view">
-      <div class="pane-list">${preview.tree.map((node) => renderJsonNode(node, 0)).join("")}</div>
-      <div class="detail-panel">
-        <h3>${escapeHtml(selected.label)}</h3>
-        <div class="detail-meta">
-          <span class="path-pill">${escapeHtml(selected.path)}</span>
-          <span class="badge">${escapeHtml(selected.type_name)}</span>
-          ${selected.annotatable ? renderAnnotateButton(selected.annotation_path, selected.annotation) : ""}
-        </div>
-        ${renderAnnotationPanel(selected.annotation, selected.annotatable)}
-        ${renderDetailPayload(selected.detail)}
+    <div class="split-view" data-json-shell>
+      <div class="pane-list" data-json-pane-list>${renderJsonPaneList(preview)}</div>
+      <div class="detail-panel" data-json-detail>
+        ${renderJsonDetail(selected)}
       </div>
     </div>
   `;
@@ -400,22 +390,18 @@ function renderJsonNode(node, depth) {
     : "";
   return `
     <div class="tree-node ${selected ? "selected" : ""}">
-      <button class="tree-row" type="button" data-json-node="${escapeAttribute(node.id)}" ${rowStyle}>
+      <div class="tree-row" data-json-node="${escapeAttribute(node.id)}" ${rowStyle}>
         ${toggle}
         <span class="tree-label">${marker}${marker ? " " : ""}${escapeHtml(node.label)}</span>
         <span class="file-size">${escapeHtml(node.style)}</span>
-      </button>
+      </div>
       ${children}
     </div>
   `;
 }
 
 function renderTrajectoryPreview(preview) {
-  const selected =
-    preview.steps.find((step) => step.id === state.selectedStepId) ||
-    preview.steps.find((step) => step.id === preview.initial_step_id) ||
-    preview.steps[0] ||
-    null;
+  const selected = selectedTrajectoryStep(preview);
 
   if (!selected) {
     return `
@@ -428,32 +414,13 @@ function renderTrajectoryPreview(preview) {
     `;
   }
 
-  state.selectedStepId = selected.id;
-
   return `
-    <div class="split-view">
-      <div class="pane-list">
-        ${preview.steps.map((step) => `
-          <button class="selection-row ${step.id === selected.id ? "selected" : ""}" type="button" data-step-id="${escapeAttribute(step.id)}">
-            <div class="selection-title">${escapeHtml(step.title)}</div>
-            <div class="selection-subtitle">${escapeHtml(step.summary)}</div>
-          </button>
-        `).join("")}
+    <div class="split-view" data-trajectory-shell>
+      <div class="pane-list" data-trajectory-list>
+        ${renderTrajectoryStepList(preview, selected)}
       </div>
-      <div class="step-detail">
-        <h3>${escapeHtml(preview.header)}</h3>
-        <div class="trajectory-meta">
-          ${preview.metadata_lines.map((line) => `<span class="path-pill">${escapeHtml(line)}</span>`).join("")}
-        </div>
-        <div class="preview-card">
-          <h3>Final Output</h3>
-          ${renderRenderValue(preview.final_output)}
-        </div>
-        <div class="preview-card">
-          <h3>${escapeHtml(selected.title)}</h3>
-          <div class="selection-subtitle">${escapeHtml(selected.path)}</div>
-          ${selected.items.map(renderTrajectoryItem).join("")}
-        </div>
+      <div class="step-detail" data-trajectory-detail>
+        ${renderTrajectoryDetail(preview, selected)}
       </div>
     </div>
   `;
@@ -554,6 +521,8 @@ function renderRenderValue(render) {
     return `<div class="preview-block"><div class="selection-subtitle">No detail available.</div></div>`;
   }
   switch (render.kind) {
+    case "syntax":
+      return renderSyntaxBlock(render);
     case "markdown":
       return `<div class="preview-block">${renderMarkdown(render.value)}</div>`;
     case "code":
@@ -579,6 +548,8 @@ function renderDetailBlock(block) {
     return "";
   }
   switch (block.kind) {
+    case "syntax":
+      return renderSyntaxBlock(block);
     case "fields":
       return `
         <div class="preview-block detail-fields">
@@ -619,6 +590,13 @@ function renderCodeBlock(value, language) {
   `;
 }
 
+function renderSyntaxBlock(render) {
+  if (render && render.html) {
+    return render.html;
+  }
+  return renderCodeBlock(render?.value || "", render?.language || "text");
+}
+
 function renderMarkdown(value) {
   let html = escapeHtml(value || "");
   html = html.replace(/```([\s\S]*?)```/g, (_match, code) => renderCodeBlock(code.trim(), "text"));
@@ -639,6 +617,176 @@ function flattenNodes(nodes) {
     result.push(...flattenNodes(node.children || []));
   }
   return result;
+}
+
+function toggleDirectory(path) {
+  if (state.expandedDirs.has(path)) {
+    state.expandedDirs.delete(path);
+  } else {
+    state.expandedDirs.add(path);
+  }
+  renderTree();
+}
+
+function selectedJsonNode(preview = state.preview) {
+  const nodes = flattenNodes(preview?.tree || []);
+  const selected =
+    nodes.find((node) => node.id === state.selectedJsonNodeId) ||
+    nodes.find((node) => node.id === preview?.initial_node_id) ||
+    nodes[0] ||
+    null;
+  if (selected) {
+    state.selectedJsonNodeId = selected.id;
+    state.selectedJsonPath = selected.path;
+  }
+  return selected;
+}
+
+function jsonNodeById(nodeId) {
+  return flattenNodes(state.preview?.tree || []).find((node) => node.id === nodeId) || null;
+}
+
+function jsonNodeByPath(path) {
+  return flattenNodes(state.preview?.tree || []).find((node) => node.path === path) || null;
+}
+
+function selectJsonNode(node) {
+  state.selectedJsonNodeId = node.id;
+  state.selectedJsonPath = node.path;
+}
+
+function toggleJsonNode(node, options = {}) {
+  if (state.expandedJson.has(node.path)) {
+    state.expandedJson.delete(node.path);
+  } else {
+    state.expandedJson.add(node.path);
+  }
+  if (!options.preserveSelection) {
+    selectJsonNode(node);
+  }
+  updateJsonInspectorPreview();
+}
+
+function renderJsonPaneList(preview) {
+  return preview.tree.map((node) => renderJsonNode(node, 0)).join("");
+}
+
+function renderJsonDetail(selected) {
+  return `
+    <h3>${escapeHtml(selected.label)}</h3>
+    <div class="detail-meta">
+      <span class="path-pill">${escapeHtml(selected.path)}</span>
+      <span class="badge">${escapeHtml(selected.type_name)}</span>
+      ${selected.annotatable ? renderAnnotateButton(selected.annotation_path, selected.annotation) : ""}
+    </div>
+    ${renderAnnotationPanel(selected.annotation, selected.annotatable)}
+    ${renderDetailPayload(selected.detail)}
+  `;
+}
+
+function updateJsonInspectorPreview() {
+  if (!state.preview || state.preview.kind !== "json_inspector") {
+    renderPreview();
+    return;
+  }
+  if (!elements.previewRoot) {
+    renderPreview();
+    return;
+  }
+  const shell = elements.previewRoot.querySelector("[data-json-shell]");
+  if (!shell) {
+    renderPreview();
+    return;
+  }
+  const selected = selectedJsonNode(state.preview);
+  if (!selected) {
+    renderPreview();
+    return;
+  }
+  const paneList = shell.querySelector("[data-json-pane-list]");
+  const detail = shell.querySelector("[data-json-detail]");
+  if (!paneList || !detail) {
+    renderPreview();
+    return;
+  }
+  const paneScroll = paneList.scrollTop;
+  const detailScroll = detail.scrollTop;
+  paneList.innerHTML = renderJsonPaneList(state.preview);
+  detail.innerHTML = renderJsonDetail(selected);
+  paneList.scrollTop = paneScroll;
+  detail.scrollTop = detailScroll;
+}
+
+function selectedTrajectoryStep(preview = state.preview) {
+  const selected =
+    preview?.steps?.find((step) => step.id === state.selectedStepId) ||
+    preview?.steps?.find((step) => step.id === preview.initial_step_id) ||
+    preview?.steps?.[0] ||
+    null;
+  if (selected) {
+    state.selectedStepId = selected.id;
+  }
+  return selected;
+}
+
+function renderTrajectoryStepList(preview, selected) {
+  return preview.steps.map((step) => `
+    <button class="selection-row ${step.id === selected.id ? "selected" : ""}" type="button" data-step-id="${escapeAttribute(step.id)}">
+      <div class="selection-title">${escapeHtml(step.title)}</div>
+      <div class="selection-subtitle">${escapeHtml(step.summary)}</div>
+    </button>
+  `).join("");
+}
+
+function renderTrajectoryDetail(preview, selected) {
+  return `
+    <h3>${escapeHtml(preview.header)}</h3>
+    <div class="trajectory-meta">
+      ${preview.metadata_lines.map((line) => `<span class="path-pill">${escapeHtml(line)}</span>`).join("")}
+    </div>
+    <div class="preview-card">
+      <h3>Final Output</h3>
+      ${renderRenderValue(preview.final_output)}
+    </div>
+    <div class="preview-card">
+      <h3>${escapeHtml(selected.title)}</h3>
+      <div class="selection-subtitle">${escapeHtml(selected.path)}</div>
+      ${selected.items.map(renderTrajectoryItem).join("")}
+    </div>
+  `;
+}
+
+function updateTrajectoryPreview() {
+  if (!state.preview || state.preview.kind !== "trajectory") {
+    renderPreview();
+    return;
+  }
+  if (!elements.previewRoot) {
+    renderPreview();
+    return;
+  }
+  const shell = elements.previewRoot.querySelector("[data-trajectory-shell]");
+  if (!shell) {
+    renderPreview();
+    return;
+  }
+  const selected = selectedTrajectoryStep(state.preview);
+  if (!selected) {
+    renderPreview();
+    return;
+  }
+  const list = shell.querySelector("[data-trajectory-list]");
+  const detail = shell.querySelector("[data-trajectory-detail]");
+  if (!list || !detail) {
+    renderPreview();
+    return;
+  }
+  const listScroll = list.scrollTop;
+  const detailScroll = detail.scrollTop;
+  list.innerHTML = renderTrajectoryStepList(state.preview, selected);
+  detail.innerHTML = renderTrajectoryDetail(state.preview, selected);
+  list.scrollTop = listScroll;
+  detail.scrollTop = detailScroll;
 }
 
 function decodeAnnotation(value) {
