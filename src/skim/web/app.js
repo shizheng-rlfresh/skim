@@ -849,11 +849,20 @@ function rowWeightsForLayout(layoutKey, rowKey) {
 
 function setRowWeightsForLayout(layoutKey, rowKey, weights) {
   if (layoutKey === "grid-2x3") {
+    const layout = ensurePaneLayoutState(layoutKey);
     if (rowKey === "grid-2x3-top") {
-      state.gridTopCols = [...weights];
+      const next = [...(state.gridTopCols || layout.topCols)];
+      for (let index = 0; index < weights.length; index += 1) {
+        next[index] = weights[index];
+      }
+      state.gridTopCols = next;
       return;
     }
-    state.gridBottomCols = [...weights];
+    const next = [...(state.gridBottomCols || layout.bottomCols)];
+    for (let index = 0; index < weights.length; index += 1) {
+      next[index] = weights[index];
+    }
+    state.gridBottomCols = next;
     return;
   }
   state[layoutStateKey(layoutKey)] = weights;

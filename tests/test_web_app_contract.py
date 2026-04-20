@@ -825,6 +825,39 @@ console.log(JSON.stringify({
     }
 
 
+def test_grid_2x3_bottom_row_keeps_hidden_track_when_sixth_pane_is_added():
+    """A bottom-row resize should preserve the latent third track for a later sixth pane."""
+    result = run_app_js(
+        """
+vm.runInContext(`
+state.panes = [
+  createPaneState("pane-1"),
+  createPaneState("pane-2"),
+  createPaneState("pane-3"),
+  createPaneState("pane-4"),
+  createPaneState("pane-5"),
+];
+state.activePaneId = "pane-5";
+state.nextPaneNumber = 6;
+state.gridTopCols = [1, 1, 1];
+state.gridBottomCols = [1, 2, 3];
+state.gridRows = [1, 1];
+`, ctx);
+ctx.setRowWeightsForLayout("grid-2x3", "grid-2x3-bottom", [4, 1]);
+ctx.splitActivePane();
+console.log(JSON.stringify({
+  bottom: ctx.rowWeightsForLayout("grid-2x3", "grid-2x3-bottom"),
+  layout: ctx.currentPaneLayout("grid-2x3"),
+}));
+"""
+    )
+
+    assert result == {
+        "bottom": [4, 1, 3],
+        "layout": {"topCols": [1, 1, 1], "bottomCols": [4, 1, 3], "rows": [1, 1]},
+    }
+
+
 def test_sidebar_resize_is_disabled_when_sidebar_is_hidden():
     """The resize handle should be inactive when the sidebar is hidden."""
     result = run_app_js(

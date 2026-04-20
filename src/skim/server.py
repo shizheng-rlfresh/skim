@@ -197,8 +197,6 @@ class SkimHandler(SimpleHTTPRequestHandler):
         status = 200
         if payload["kind"] == "error":
             status = 404 if "Not a file" in str(payload.get("message")) else 500
-        if payload["kind"] == "too_large":
-            status = 413
         self._json_response(payload, status=status)
 
     def _resolve_browse_target(self, relative_path: str) -> Path | None:

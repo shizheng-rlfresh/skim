@@ -13,6 +13,7 @@ from pathlib import Path
 
 from conftest import sample_hermes_transcript, sample_submission, sample_trajectory
 
+from skim.preview import MAX_FILE_SIZE
 from skim.server import AnnotationStore, SkimHandler
 from skim.web_preview import serialize_preview
 
@@ -103,6 +104,22 @@ def test_api_preview_falls_back_to_text_for_invalid_json(tmp_path):
     assert payload["kind"] == "text"
     assert payload["language"] == "json"
     assert payload["content"] == "{not json"
+
+
+def test_api_preview_returns_too_large_payload_with_success_status(tmp_path):
+    """Oversized files should keep their typed preview payload instead of surfacing as errors."""
+    test_file = tmp_path / "big.py"
+    test_file.write_text("x" * (MAX_FILE_SIZE + 1))
+
+    with running_server(tmp_path) as base_url:
+        status, payload = request_json(
+            base_url,
+            "/api/preview?path=" + urllib.parse.quote("big.py"),
+        )
+
+    assert status == 200
+    assert payload["kind"] == "too_large"
+    assert payload["path"] == "big.py"
 
 
 def test_api_preview_uses_explicit_notebook_payload(tmp_path):
