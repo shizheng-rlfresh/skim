@@ -35,6 +35,26 @@
   --syn-number: #f78c6c;
   --syn-key: #82aaff;
   --syn-decorator: #ffcb6b;
+  --file-kind-directory: #82aaff;
+  --file-kind-python: #ffd866;
+  --file-kind-code: #7aa2f7;
+  --file-kind-config: #e0af68;
+  --file-kind-data: #bb9af7;
+  --file-kind-docs: #7dcfff;
+  --file-kind-media: #f7768e;
+  --file-kind-archive: #ff9e64;
+  --file-kind-binary: #c0caf5;
+  --file-kind-log: #9ece6a;
+  --file-kind-exec: #73daca;
+  --file-kind-generic: #a9b1d6;
+  --json-type-object: #7aa2f7;
+  --json-type-array: #bb9af7;
+  --json-type-string: #9ece6a;
+  --json-type-number: #ff9e64;
+  --json-type-boolean: #e0af68;
+  --json-type-null: #565f89;
+  --json-type-key: #7dcfff;
+  --json-type-synthetic: #f7768e;
   --title-bar-height: 40px;
   --status-bar-height: 24px;
   --sidebar-width: 220px;
@@ -66,6 +86,26 @@
   --syn-number: #c2410c;
   --syn-key: #2563eb;
   --syn-decorator: #ca8a04;
+  --file-kind-directory: #2563eb;
+  --file-kind-python: #b45309;
+  --file-kind-code: #4f46e5;
+  --file-kind-config: #b7791f;
+  --file-kind-data: #7c3aed;
+  --file-kind-docs: #0f766e;
+  --file-kind-media: #be185d;
+  --file-kind-archive: #c2410c;
+  --file-kind-binary: #475569;
+  --file-kind-log: #15803d;
+  --file-kind-exec: #0f766e;
+  --file-kind-generic: #64748b;
+  --json-type-object: #2563eb;
+  --json-type-array: #7c3aed;
+  --json-type-string: #16a34a;
+  --json-type-number: #c2410c;
+  --json-type-boolean: #b7791f;
+  --json-type-null: #94a3b8;
+  --json-type-key: #0f766e;
+  --json-type-synthetic: #be185d;
 }
 
 *,
@@ -340,6 +380,117 @@ button {
   font-size: 14px;
 }
 
+.tree-file-label,
+.json-tree-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.tree-name,
+.json-node-key,
+.json-node-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-icon,
+.json-node-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 20px;
+  padding: 0 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--bg-surface) 88%, transparent);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.tree-row[data-file-group="directory"] .file-icon,
+.tree-row[data-file-kind="directory"] .file-icon {
+  color: var(--file-kind-directory);
+}
+
+.tree-row[data-file-kind="python"] .file-icon {
+  color: var(--file-kind-python);
+}
+
+.tree-row[data-file-group="code"] .file-icon {
+  color: var(--file-kind-code);
+}
+
+.tree-row[data-file-group="config"] .file-icon {
+  color: var(--file-kind-config);
+}
+
+.tree-row[data-file-group="data"] .file-icon {
+  color: var(--file-kind-data);
+}
+
+.tree-row[data-file-group="docs"] .file-icon {
+  color: var(--file-kind-docs);
+}
+
+.tree-row[data-file-group="media"] .file-icon {
+  color: var(--file-kind-media);
+}
+
+.tree-row[data-file-group="archive"] .file-icon {
+  color: var(--file-kind-archive);
+}
+
+.tree-row[data-file-group="binary"] .file-icon {
+  color: var(--file-kind-binary);
+}
+
+.tree-row[data-file-group="log"] .file-icon {
+  color: var(--file-kind-log);
+}
+
+.tree-row[data-file-group="exec"] .file-icon {
+  color: var(--file-kind-exec);
+}
+
+.tree-row[data-file-group="generic"] .file-icon {
+  color: var(--file-kind-generic);
+}
+
+.tree-row[data-file-group="directory"] .tree-name,
+.tree-row[data-file-kind="directory"] .tree-name {
+  color: var(--file-kind-directory);
+}
+
+.tree-row[data-file-group="code"] .tree-name {
+  color: color-mix(in srgb, var(--file-kind-code) 72%, var(--fg-primary));
+}
+
+.tree-row[data-file-group="config"] .tree-name {
+  color: color-mix(in srgb, var(--file-kind-config) 72%, var(--fg-primary));
+}
+
+.tree-row[data-file-group="data"] .tree-name {
+  color: color-mix(in srgb, var(--file-kind-data) 72%, var(--fg-primary));
+}
+
+.tree-row[data-file-group="docs"] .tree-name {
+  color: color-mix(in srgb, var(--file-kind-docs) 72%, var(--fg-primary));
+}
+
+.tree-row[data-file-group="media"] .tree-name,
+.tree-row[data-file-group="archive"] .tree-name,
+.tree-row[data-file-group="binary"] .tree-name,
+.tree-row[data-file-group="log"] .tree-name,
+.tree-row[data-file-group="exec"] .tree-name {
+  color: color-mix(in srgb, var(--fg-primary) 72%, var(--file-kind-generic));
+}
+
 .tree-toggle {
   width: 18px;
   height: 18px;
@@ -439,6 +590,90 @@ button {
   height: 100%;
   display: grid;
   grid-template-columns: 38% minmax(0, 1fr);
+}
+
+.json-tree-row {
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+}
+
+.json-node-key {
+  color: var(--json-type-key);
+}
+
+.json-node-value.json-string {
+  color: var(--json-type-string);
+}
+
+.json-node-value.json-number {
+  color: var(--json-type-number);
+}
+
+.json-node-value.json-boolean {
+  color: var(--json-type-boolean);
+}
+
+.json-node-value.json-null {
+  color: var(--json-type-null);
+}
+
+.json-tree-row[data-value-type="object"] .json-node-icon,
+.json-tree-row[data-node-class="object"] .json-node-icon {
+  color: var(--json-type-object);
+}
+
+.json-tree-row[data-value-type="array"] .json-node-icon,
+.json-tree-row[data-node-class="array"] .json-node-icon {
+  color: var(--json-type-array);
+}
+
+.json-tree-row[data-value-type="string"] .json-node-icon,
+.json-tree-row[data-node-class="string"] .json-node-icon {
+  color: var(--json-type-string);
+}
+
+.json-tree-row[data-value-type="number"] .json-node-icon,
+.json-tree-row[data-node-class="number"] .json-node-icon {
+  color: var(--json-type-number);
+}
+
+.json-tree-row[data-value-type="boolean"] .json-node-icon,
+.json-tree-row[data-node-class="boolean"] .json-node-icon {
+  color: var(--json-type-boolean);
+}
+
+.json-tree-row[data-value-type="null"] .json-node-icon,
+.json-tree-row[data-node-class="null"] .json-node-icon {
+  color: var(--json-type-null);
+}
+
+.json-tree-row[data-node-class="trajectory_metadata"] .json-node-icon,
+.json-tree-row[data-node-class="trajectory_final_output"] .json-node-icon,
+.json-tree-row[data-node-class="trajectory_step"] .json-node-icon,
+.json-tree-row[data-node-class="bundle_summary"] .json-node-icon,
+.json-tree-row[data-node-class="submission_summary"] .json-node-icon,
+.json-tree-row[data-node-class="transcript_summary"] .json-node-icon,
+.json-tree-row[data-node-class="trajectory_tool"] .json-node-icon,
+.json-tree-row[data-node-class="trajectory_tool_input"] .json-node-icon,
+.json-tree-row[data-node-class="trajectory_tool_output"] .json-node-icon,
+.json-tree-row[data-node-class="trajectory_event"] .json-node-icon {
+  color: var(--json-type-synthetic);
+}
+
+.json-tree-row[data-node-class="trajectory_metadata"] .json-node-key,
+.json-tree-row[data-node-class="trajectory_final_output"] .json-node-key,
+.json-tree-row[data-node-class="trajectory_step"] .json-node-key,
+.json-tree-row[data-node-class="bundle_summary"] .json-node-key,
+.json-tree-row[data-node-class="submission_summary"] .json-node-key,
+.json-tree-row[data-node-class="transcript_summary"] .json-node-key,
+.json-tree-row[data-node-class="trajectory_tool"] .json-node-key,
+.json-tree-row[data-node-class="trajectory_tool_input"] .json-node-key,
+.json-tree-row[data-node-class="trajectory_tool_output"] .json-node-key,
+.json-tree-row[data-node-class="trajectory_event"] .json-node-key {
+  color: color-mix(in srgb, var(--json-type-synthetic) 70%, var(--fg-primary));
+}
+
+.json-node-badge {
+  text-transform: uppercase;
 }
 
 .pane-list {

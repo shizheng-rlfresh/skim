@@ -522,6 +522,7 @@ class _JsonInspectorSerializer:
         self._next_id += 1
         annotation_path = self._annotation_key(item)
         annotation = self._annotation_for_path(annotation_path)
+        display_key, display_value, value_type, node_class = _node_display_metadata(item)
         payload: dict[str, Any] = {
             "id": node_id,
             "title": item.title,
@@ -535,6 +536,11 @@ class _JsonInspectorSerializer:
             "style": _node_style(item.kind),
             "type_name": _json_type_name(item.raw_value),
             "key": item.key,
+            "display_key": display_key,
+            "display_value": display_value,
+            "value_type": value_type,
+            "node_class": node_class,
+            "synthetic": item.synthetic,
             "children": children or [],
             "detail": _detail_payload_for_item(item),
         }
@@ -1103,6 +1109,44 @@ def _node_style(kind: str) -> str:
     if kind in {"trajectory_step", "trajectory_tool_input", "trajectory_tool_output"}:
         return "highlight"
     return "default"
+
+
+def _node_display_metadata(item: JsonInspectorItem) -> tuple[str, str | None, str, str]:
+    display_key = item.title if item.synthetic or item.key is None else item.key
+    value_type = _node_value_type(item.raw_value)
+    node_class = item.kind if item.synthetic else value_type
+    return display_key, _node_display_value(item.raw_value), value_type, node_class
+
+
+def _node_value_type(value: Any) -> str:
+    if isinstance(value, dict):
+        return "object"
+    if isinstance(value, list):
+        return "array"
+    if isinstance(value, bool):
+        return "boolean"
+    if value is None:
+        return "null"
+    if isinstance(value, int | float):
+        return "number"
+    return "string"
+
+
+def _node_display_value(value: Any) -> str | None:
+    if isinstance(value, dict):
+        return f"{{{len(value)}}}"
+    if isinstance(value, list):
+        return f"[{len(value)}]"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if value is None:
+        return "null"
+    if isinstance(value, int | float):
+        return str(value)
+    if isinstance(value, str):
+        text = json.dumps(value)
+        return text if len(text) <= 40 else f"{text[:37]}..."
+    return str(value)
 
 
 def _relative_path(path: Path, root: Path) -> str:

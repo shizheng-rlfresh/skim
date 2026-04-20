@@ -158,23 +158,24 @@ function renderTreeNode(node, depth) {
   const isDir = node.type === "dir";
   const expanded = state.expandedDirs.has(node.path);
   const selected = activePane()?.path === node.path;
-  const icon = isDir ? (expanded ? "▾" : "▸") : fileIcon(node.ext || "");
+  const visual = resolveFileVisual(node);
+  const icon = isDir ? (expanded ? "▾" : "▸") : "";
   const indent = `style="padding-left:${14 + depth * 16}px"`;
   const labelAttrs = isDir
     ? ` data-dir-path="${escapeAttribute(node.path)}"`
     : ` data-file-path="${escapeAttribute(node.path)}"`;
   const toggle = isDir
     ? `<button class="tree-toggle" type="button" data-toggle-dir="${escapeAttribute(node.path)}">${icon}</button>`
-    : `<span class="tree-toggle">${escapeHtml(icon)}</span>`;
+    : `<span class="tree-toggle"></span>`;
   const children = isDir && expanded
     ? `<div class="tree-children">${(node.children || []).map((child) => renderTreeNode(child, depth + 1)).join("")}</div>`
     : "";
 
   return `
     <div class="tree-node ${selected ? "selected" : ""}">
-      <div class="tree-row" ${indent}${labelAttrs}>
+      <div class="tree-row" data-file-kind="${escapeAttribute(visual.kind)}" data-file-group="${escapeAttribute(visual.group)}" ${indent}${labelAttrs}>
         ${toggle}
-        <span class="tree-label">${escapeHtml(node.name)}</span>
+        <span class="tree-label tree-file-label">${renderFileIcon(visual)}<span class="tree-name">${escapeHtml(node.name)}</span></span>
         <span class="file-size">${escapeHtml(node.size || "")}</span>
       </div>
       ${children}
@@ -552,15 +553,18 @@ function renderJsonNode(node, depth, pane) {
     ? `<button class="tree-toggle" type="button" data-toggle-json="${escapeAttribute(node.path)}">${expanded ? "▾" : "▸"}</button>`
     : `<span class="tree-toggle"></span>`;
   const marker = node.annotation ? `<span class="annotation-dot"></span>` : "";
+  const key = node.display_key || node.label;
+  const value = node.display_value;
+  const icon = renderJsonNodeIcon(node);
   const children = node.children.length && expanded
     ? `<div class="tree-children">${node.children.map((child) => renderJsonNode(child, depth + 1, pane)).join("")}</div>`
     : "";
   return `
     <div class="tree-node ${selected ? "selected" : ""}">
-      <div class="tree-row" data-json-node="${escapeAttribute(node.id)}" ${rowStyle}>
+      <div class="tree-row json-tree-row" data-json-node="${escapeAttribute(node.id)}" data-node-class="${escapeAttribute(node.node_class || "string")}" data-value-type="${escapeAttribute(node.value_type || "string")}" ${rowStyle}>
         ${toggle}
-        <span class="tree-label">${marker}${marker ? " " : ""}${escapeHtml(node.label)}</span>
-        <span class="file-size">${escapeHtml(node.style)}</span>
+        <span class="tree-label json-tree-label">${marker}${icon}<span class="json-node-key">${escapeHtml(key)}</span>${value ? `<span class="json-node-value json-${escapeAttribute(node.value_type || "string")}">${escapeHtml(value)}</span>` : ""}</span>
+        <span class="file-size json-node-badge">${escapeHtml(node.style)}</span>
       </div>
       ${children}
     </div>
@@ -1228,28 +1232,132 @@ function toggleTheme() {
   renderWorkspace();
 }
 
-function fileIcon(extension) {
-  switch (extension) {
-    case ".py":
-      return "λ";
-    case ".json":
-    case ".jsonl":
-    case ".ipynb":
-      return "{}";
-    case ".yaml":
-    case ".yml":
-      return "⚙";
-    case ".md":
-      return "¶";
-    case ".css":
-      return "#";
-    case ".js":
-    case ".ts":
-    case ".tsx":
-      return "⋯";
-    default:
-      return "•";
+const FILE_NAME_OVERRIDES = {
+  "dockerfile": { kind: "dockerfile", group: "config", token: "DK" },
+  "makefile": { kind: "makefile", group: "config", token: "MK" },
+  "readme": { kind: "readme", group: "docs", token: "RD" },
+  "license": { kind: "license", group: "docs", token: "LC" },
+  "package.json": { kind: "package_json", group: "config", token: "PK" },
+  "package-lock.json": { kind: "lockfile", group: "config", token: "LK" },
+  "pnpm-lock.yaml": { kind: "lockfile", group: "config", token: "LK" },
+  "yarn.lock": { kind: "lockfile", group: "config", token: "LK" },
+  "tsconfig.json": { kind: "tsconfig", group: "config", token: "TS" },
+  ".gitignore": { kind: "git", group: "config", token: "GI" },
+  ".gitattributes": { kind: "git", group: "config", token: "GI" },
+};
+
+const FILE_EXTENSION_MAP = {
+  ".py": { kind: "python", group: "code", token: "Py" },
+  ".pyi": { kind: "python", group: "code", token: "Py" },
+  ".js": { kind: "javascript", group: "code", token: "JS" },
+  ".mjs": { kind: "javascript", group: "code", token: "JS" },
+  ".cjs": { kind: "javascript", group: "code", token: "JS" },
+  ".ts": { kind: "typescript", group: "code", token: "TS" },
+  ".tsx": { kind: "react", group: "code", token: "Rx" },
+  ".jsx": { kind: "react", group: "code", token: "Rx" },
+  ".html": { kind: "html", group: "docs", token: "HT" },
+  ".css": { kind: "css", group: "docs", token: "CS" },
+  ".scss": { kind: "scss", group: "docs", token: "SC" },
+  ".sass": { kind: "scss", group: "docs", token: "SC" },
+  ".json": { kind: "json", group: "data", token: "{}" },
+  ".jsonl": { kind: "json", group: "data", token: "{}" },
+  ".yaml": { kind: "yaml", group: "config", token: "YA" },
+  ".yml": { kind: "yaml", group: "config", token: "YA" },
+  ".toml": { kind: "toml", group: "config", token: "TO" },
+  ".xml": { kind: "xml", group: "config", token: "XM" },
+  ".sql": { kind: "sql", group: "data", token: "SQ" },
+  ".md": { kind: "markdown", group: "docs", token: "MD" },
+  ".txt": { kind: "text", group: "docs", token: "TX" },
+  ".sh": { kind: "shell", group: "exec", token: "SH" },
+  ".bash": { kind: "shell", group: "exec", token: "SH" },
+  ".zsh": { kind: "shell", group: "exec", token: "SH" },
+  ".fish": { kind: "shell", group: "exec", token: "SH" },
+  ".rs": { kind: "rust", group: "code", token: "Rs" },
+  ".go": { kind: "go", group: "code", token: "Go" },
+  ".java": { kind: "java", group: "code", token: "Ja" },
+  ".kt": { kind: "kotlin", group: "code", token: "Kt" },
+  ".swift": { kind: "swift", group: "code", token: "Sw" },
+  ".c": { kind: "c", group: "code", token: "C" },
+  ".h": { kind: "c", group: "code", token: "C" },
+  ".cc": { kind: "cpp", group: "code", token: "C+" },
+  ".cpp": { kind: "cpp", group: "code", token: "C+" },
+  ".hpp": { kind: "cpp", group: "code", token: "C+" },
+  ".rb": { kind: "ruby", group: "code", token: "Rb" },
+  ".php": { kind: "php", group: "code", token: "Ph" },
+  ".ex": { kind: "elixir", group: "code", token: "Ex" },
+  ".exs": { kind: "elixir", group: "code", token: "Ex" },
+  ".tf": { kind: "terraform", group: "config", token: "Tf" },
+  ".tfvars": { kind: "terraform", group: "config", token: "Tf" },
+  ".proto": { kind: "protobuf", group: "config", token: "Pb" },
+  ".ipynb": { kind: "notebook", group: "data", token: "NB" },
+  ".png": { kind: "image", group: "media", token: "IM" },
+  ".jpg": { kind: "image", group: "media", token: "IM" },
+  ".jpeg": { kind: "image", group: "media", token: "IM" },
+  ".gif": { kind: "image", group: "media", token: "IM" },
+  ".svg": { kind: "image", group: "media", token: "IM" },
+  ".mp3": { kind: "audio", group: "media", token: "AU" },
+  ".wav": { kind: "audio", group: "media", token: "AU" },
+  ".mp4": { kind: "video", group: "media", token: "VD" },
+  ".mov": { kind: "video", group: "media", token: "VD" },
+  ".zip": { kind: "archive", group: "archive", token: "AR" },
+  ".tar": { kind: "archive", group: "archive", token: "AR" },
+  ".gz": { kind: "archive", group: "archive", token: "AR" },
+  ".tgz": { kind: "archive", group: "archive", token: "AR" },
+  ".xz": { kind: "archive", group: "archive", token: "AR" },
+  ".pdf": { kind: "pdf", group: "docs", token: "PDF" },
+  ".csv": { kind: "spreadsheet", group: "data", token: "CV" },
+  ".tsv": { kind: "spreadsheet", group: "data", token: "TSV" },
+  ".xls": { kind: "spreadsheet", group: "data", token: "XL" },
+  ".xlsx": { kind: "spreadsheet", group: "data", token: "XL" },
+  ".bin": { kind: "binary", group: "binary", token: "BI" },
+  ".exe": { kind: "binary", group: "binary", token: "BI" },
+  ".log": { kind: "log", group: "log", token: "LG" },
+};
+
+function resolveFileVisual(node) {
+  if (node.type === "dir") {
+    return { kind: "directory", group: "directory", token: "DIR" };
   }
+  const name = (node.name || "").toLowerCase();
+  if (name.startsWith(".env")) {
+    return { kind: "env", group: "config", token: "EV" };
+  }
+  if (FILE_NAME_OVERRIDES[name]) {
+    return FILE_NAME_OVERRIDES[name];
+  }
+  const bareReadme = name.replace(/\.[^.]+$/, "");
+  if (FILE_NAME_OVERRIDES[bareReadme]) {
+    return FILE_NAME_OVERRIDES[bareReadme];
+  }
+  return FILE_EXTENSION_MAP[node.ext || ""] || { kind: "generic", group: "generic", token: "FI" };
+}
+
+function renderFileIcon(visual) {
+  return `<span class="file-icon file-icon-${escapeAttribute(visual.kind)}" aria-hidden="true">${escapeHtml(visual.token)}</span>`;
+}
+
+const JSON_NODE_ICON_MAP = {
+  object: "{}",
+  array: "[]",
+  string: "S",
+  number: "#",
+  boolean: "TF",
+  null: "∅",
+  bundle_summary: "BD",
+  submission_summary: "SU",
+  transcript_summary: "TR",
+  trajectory_metadata: "MD",
+  trajectory_final_output: "OUT",
+  trajectory_step: "ST",
+  trajectory_tool: "TL",
+  trajectory_tool_input: "IN",
+  trajectory_tool_output: "OU",
+  trajectory_event: "EV",
+};
+
+function renderJsonNodeIcon(node) {
+  const token = JSON_NODE_ICON_MAP[node.node_class] || JSON_NODE_ICON_MAP[node.value_type] || "•";
+  return `<span class="json-node-icon json-node-icon-${escapeAttribute(node.node_class || node.value_type || "string")}" aria-hidden="true">${escapeHtml(token)}</span>`;
 }
 
 function renderFailure(error) {

@@ -143,6 +143,123 @@ console.log(JSON.stringify({
     }
 
 
+def test_render_tree_node_uses_rich_file_icon_mapping():
+    """File-tree rows should emit mapped file-kind metadata and icon markup."""
+    result = run_app_js(
+        """
+vm.runInContext(`
+state.panes = [createPaneState("pane-1")];
+state.activePaneId = "pane-1";
+state.panes[0].path = "src/main.py";
+`, ctx);
+const html = ctx.renderTreeNode({
+  name: "main.py",
+  type: "file",
+  ext: ".py",
+  path: "src/main.py",
+  size: "1.2 KB",
+}, 0);
+console.log(JSON.stringify({
+  hasKind: html.includes('data-file-kind="python"'),
+  hasIcon: html.includes('file-icon'),
+  hasToken: html.includes('Py'),
+}));
+"""
+    )
+
+    assert result == {"hasKind": True, "hasIcon": True, "hasToken": True}
+
+
+def test_render_tree_node_falls_back_to_generic_icon_for_unknown_file():
+    """Unknown extensions should still get a generic file icon/category."""
+    result = run_app_js(
+        """
+const html = ctx.renderTreeNode({
+  name: "artifact.foo",
+  type: "file",
+  ext: ".foo",
+  path: "artifact.foo",
+  size: "3 B",
+}, 0);
+console.log(JSON.stringify({
+  hasGenericKind: html.includes('data-file-kind="generic"'),
+  hasGenericToken: html.includes('FI'),
+}));
+"""
+    )
+
+    assert result == {"hasGenericKind": True, "hasGenericToken": True}
+
+
+def test_render_json_node_uses_structured_icon_key_and_value_segments():
+    """JSON tree rows should render typed icons and separate key/value spans."""
+    result = run_app_js(
+        """
+const html = ctx.renderJsonNode({
+  id: "node-1",
+  path: "$.name",
+  display_key: "name",
+  display_value: '"skim"',
+  value_type: "string",
+  node_class: "string",
+  synthetic: false,
+  label: "name",
+  style: "string",
+  annotation: null,
+  children: [],
+}, 0, {
+  expandedJson: new Set(),
+  selectedJsonNodeId: "node-1",
+});
+console.log(JSON.stringify({
+  hasNodeClass: html.includes('data-node-class="string"'),
+  hasIcon: html.includes('json-node-icon'),
+  hasKey: html.includes('json-node-key'),
+  hasValue: html.includes('json-node-value'),
+  hasValueType: html.includes('json-string'),
+}));
+"""
+    )
+
+    assert result == {
+        "hasNodeClass": True,
+        "hasIcon": True,
+        "hasKey": True,
+        "hasValue": True,
+        "hasValueType": True,
+    }
+
+
+def test_render_json_node_uses_overlay_node_class_for_synthetic_nodes():
+    """Synthetic overlay nodes should render their override class instead of raw value type."""
+    result = run_app_js(
+        """
+const html = ctx.renderJsonNode({
+  id: "node-1",
+  path: "$.trajectory.metadata",
+  display_key: "Metadata",
+  display_value: null,
+  value_type: "object",
+  node_class: "trajectory_metadata",
+  synthetic: true,
+  label: "Metadata",
+  style: "metadata",
+  annotation: null,
+  children: [{ id: "child-1", path: "$.trajectory.metadata.model", children: [] }],
+}, 0, {
+  expandedJson: new Set(["$.trajectory.metadata"]),
+  selectedJsonNodeId: "node-1",
+});
+console.log(JSON.stringify({
+  hasOverlayClass: html.includes('data-node-class="trajectory_metadata"'),
+  hasOverlayToken: html.includes('MD'),
+}));
+"""
+    )
+
+    assert result == {"hasOverlayClass": True, "hasOverlayToken": True}
+
+
 def test_directory_row_click_toggles_without_triangle_target():
     """Clicking the directory row itself should expand or collapse that directory."""
     result = run_app_js(

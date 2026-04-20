@@ -186,6 +186,61 @@ def test_api_preview_keeps_wrapped_trajectory_in_json_inspector(tmp_path):
     assert child_labels == ["Metadata", "Final Output", "Step 1"]
 
 
+def test_json_inspector_nodes_include_display_metadata_for_raw_values(tmp_path):
+    """JSON tree nodes should expose structured display metadata for the browser tree."""
+    test_file = tmp_path / "plain.json"
+    test_file.write_text(
+        json.dumps(
+            {
+                "name": "skim",
+                "count": 3,
+                "ok": True,
+                "missing": None,
+                "items": [1, 2],
+            }
+        )
+    )
+
+    payload = serialize_preview(test_file, browse_root=tmp_path)
+    name_node = next(node for node in payload["tree"] if node["path"] == "$.name")
+    count_node = next(node for node in payload["tree"] if node["path"] == "$.count")
+    ok_node = next(node for node in payload["tree"] if node["path"] == "$.ok")
+    missing_node = next(node for node in payload["tree"] if node["path"] == "$.missing")
+    items_node = next(node for node in payload["tree"] if node["path"] == "$.items")
+
+    assert payload["kind"] == "json_inspector"
+    assert name_node["display_key"] == "name"
+    assert name_node["display_value"] == '"skim"'
+    assert name_node["value_type"] == "string"
+    assert name_node["node_class"] == "string"
+    assert name_node["synthetic"] is False
+    assert count_node["display_value"] == "3"
+    assert count_node["value_type"] == "number"
+    assert ok_node["display_value"] == "true"
+    assert ok_node["value_type"] == "boolean"
+    assert missing_node["display_value"] == "null"
+    assert missing_node["value_type"] == "null"
+    assert items_node["display_value"] == "[2]"
+    assert items_node["value_type"] == "array"
+
+
+def test_json_inspector_nodes_include_overlay_display_metadata(tmp_path):
+    """Synthetic overlay nodes should expose explicit node classes for icon rendering."""
+    test_file = tmp_path / "trajectory.json"
+    test_file.write_text(json.dumps({"trajectory": sample_trajectory()}))
+
+    payload = serialize_preview(test_file, browse_root=tmp_path)
+    metadata_node = next(node for node in payload["tree"] if node["label"] == "Metadata")
+    step_node = next(node for node in payload["tree"] if node["label"] == "Step 1")
+
+    assert metadata_node["synthetic"] is True
+    assert metadata_node["node_class"] == "trajectory_metadata"
+    assert metadata_node["display_key"] == "Metadata"
+    assert step_node["synthetic"] is True
+    assert step_node["node_class"] == "trajectory_step"
+    assert step_node["display_key"] == "Step 1"
+
+
 def test_api_preview_uses_specialized_payload_for_bare_trajectory(tmp_path):
     """Bare trajectory files should still use the dedicated trajectory preview."""
     test_file = tmp_path / "trajectory.json"
@@ -335,6 +390,22 @@ def test_stylesheet_increases_preview_readability_defaults(tmp_path):
     assert ".detail-panel,\n.step-detail" in css or ".detail-panel,\r\n.step-detail" in css
     assert ".tree-row" in css
     assert "padding: 9px 12px;" in css
+
+
+def test_stylesheet_defines_file_and_json_color_tokens(tmp_path):
+    """The stylesheet should include tree/icon color tokens for files and JSON nodes."""
+    with running_server(tmp_path) as base_url:
+        request = urllib.request.Request(base_url + "/styles.css")
+        with urllib.request.urlopen(request) as response:
+            css = response.read().decode()
+
+    assert "--file-kind-python" in css
+    assert "--file-kind-directory" in css
+    assert "--file-kind-archive" in css
+    assert "--json-type-string" in css
+    assert "--json-type-boolean" in css
+    assert ".file-icon" in css
+    assert ".json-node-icon" in css
 
 
 def test_real_output_json_stays_in_json_inspector_and_keeps_trajectory_branch():
