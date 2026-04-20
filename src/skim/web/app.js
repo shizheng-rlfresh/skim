@@ -2,6 +2,13 @@ const MAX_PANES = 6;
 const DEFAULT_SIDEBAR_WIDTH = 220;
 const MIN_SIDEBAR_WIDTH = 180;
 const MAX_SIDEBAR_VIEWPORT_RATIO = 0.45;
+const RESIZER_GUTTER = 8;
+const STACKED_BREAKPOINT = 900;
+const MIN_SPLIT_RATIO = 20;
+const MAX_SPLIT_RATIO = 80;
+const MIN_TRACK_WEIGHT = 0.45;
+const PANE_LAYOUT_STORAGE_PREFIX = "skim-pane-layout-";
+const SPLIT_RATIO_STORAGE_PREFIX = "skim-split-ratio-";
 
 const elements = {};
 
@@ -14,7 +21,9 @@ const state = {
   nextPaneNumber: 2,
   sidebarVisible: true,
   sidebarWidth: loadStoredSidebarWidth(),
-  sidebarResize: null,
+  jsonSplitRatio: loadStoredSplitRatio("json", 38),
+  trajectorySplitRatio: loadStoredSplitRatio("trajectory", 38),
+  activeResize: null,
   theme: loadStoredTheme(),
   palette: {
     open: false,
@@ -75,6 +84,7 @@ function bindElements() {
 function bindEvents() {
   elements.fileTree?.addEventListener("click", onTreeClick);
   elements.previewWork?.addEventListener("click", onWorkspaceClick);
+  elements.previewWork?.addEventListener("pointerdown", onPreviewPointerDown);
   elements.sidebarToggle?.addEventListener("click", toggleSidebar);
   elements.sidebarResizer?.addEventListener("pointerdown", beginSidebarResize);
   elements.splitPane?.addEventListener("click", splitActivePane);
@@ -98,8 +108,8 @@ function bindEvents() {
     }
   });
   document.addEventListener("pointermove", onGlobalPointerMove);
-  document.addEventListener("pointerup", endSidebarResize);
-  document.addEventListener("pointercancel", endSidebarResize);
+  document.addEventListener("pointerup", endActiveResize);
+  document.addEventListener("pointercancel", endActiveResize);
 }
 
 async function bootstrap() {
@@ -199,12 +209,13 @@ function renderWorkspace() {
     return;
   }
   const count = state.panes.length;
+  const layoutMode = paneLayoutMode(count);
   elements.workspace?.classList.toggle("sidebar-hidden", !state.sidebarVisible);
   elements.sidebarResizer?.classList.toggle("hidden", !canResizeSidebar());
-  elements.paneGrid.className = `pane-grid panes-${count}`;
-  elements.paneGrid.style.setProperty("--pane-count", String(Math.min(count, 3)));
+  elements.paneGrid.className = `pane-grid panes-${count} layout-${layoutMode}`;
   applySidebarWidth();
-  elements.paneGrid.innerHTML = state.panes.map(renderPaneShell).join("");
+  elements.paneGrid.innerHTML = renderPaneGridMarkup(state.panes);
+  applyPaneGridLayout();
 }
 
 function renderPaneShell(pane) {
@@ -233,6 +244,38 @@ function renderPaneShell(pane) {
       </div>
     </article>
   `;
+}
+
+function renderPaneGridMarkup(panes) {
+  const count = panes.length;
+  if (count <= 1) {
+    return panes.map(renderPaneShell).join("");
+  }
+  if (count <= 3) {
+    return renderPaneRowMarkup(panes, paneLayoutKey(count), paneLayoutKey(count));
+  }
+  const top = panes.slice(0, 3);
+  const bottom = panes.slice(3);
+  return `
+    ${renderPaneRowMarkup(top, "grid-2x3", "grid-2x3-top")}
+    <div class="split-resizer pane-row-resizer" data-layout-key="grid-2x3" data-resize-pane-row="0" aria-hidden="true"></div>
+    ${renderPaneRowMarkup(bottom, "grid-2x3", "grid-2x3-bottom")}
+  `;
+}
+
+function renderPaneRowMarkup(panes, layoutKey, rowKey) {
+  return `
+    <div class="pane-row" data-pane-row-key="${escapeAttribute(rowKey)}">
+      ${panes.map((pane, index) => `
+        ${renderPaneShell(pane)}
+        ${index < panes.length - 1 ? renderPaneColumnResizer(layoutKey, rowKey, index) : ""}
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderPaneColumnResizer(layoutKey, rowKey, index) {
+  return `<div class="split-resizer pane-col-resizer" data-layout-key="${escapeAttribute(layoutKey)}" data-row-key="${escapeAttribute(rowKey)}" data-resize-pane-col="${index}" aria-hidden="true"></div>`;
 }
 
 function renderPaneContent(pane) {
@@ -283,6 +326,10 @@ function renderStatusBar() {
 function toggleSidebar() {
   state.sidebarVisible = !state.sidebarVisible;
   renderWorkspace();
+}
+
+function isStackedLayout(viewportWidth = getViewportWidth()) {
+  return viewportWidth <= STACKED_BREAKPOINT;
 }
 
 function getViewportWidth() {
@@ -340,7 +387,15 @@ function setSidebarWidth(width, options = {}) {
 }
 
 function canResizeSidebar() {
-  return state.sidebarVisible;
+  return state.sidebarVisible && !isStackedLayout();
+}
+
+function canResizePaneLayout(viewportWidth = getViewportWidth()) {
+  return state.panes.length > 1 && !isStackedLayout(viewportWidth);
+}
+
+function canResizeSplitViews(viewportWidth = getViewportWidth()) {
+  return !isStackedLayout(viewportWidth);
 }
 
 function sidebarWidthFromClientX(clientX) {
@@ -352,27 +407,401 @@ function beginSidebarResize(event) {
   if (!canResizeSidebar()) {
     return false;
   }
-  state.sidebarResize = { pointerId: event.pointerId ?? null };
-  elements.appShell?.classList.add("sidebar-resizing");
+  return beginResize(
+    {
+      type: "sidebar",
+      pointerId: event.pointerId ?? null,
+    },
+    event,
+  );
+}
+
+function beginResize(payload, event) {
+  state.activeResize = payload;
+  elements.appShell?.classList.add("layout-resizing");
+  if (payload.type === "sidebar") {
+    elements.appShell?.classList.add("sidebar-resizing");
+  }
   event.preventDefault?.();
   return true;
 }
 
 function onGlobalPointerMove(event) {
-  if (!state.sidebarResize) {
+  if (!state.activeResize) {
     return;
   }
-  setSidebarWidth(sidebarWidthFromClientX(event.clientX), { persist: false });
+  switch (state.activeResize.type) {
+    case "sidebar":
+      setSidebarWidth(sidebarWidthFromClientX(event.clientX), { persist: false });
+      break;
+    case "split":
+      updateSplitRatioFromPointer(
+        state.activeResize.kind,
+        state.activeResize.element,
+        event.clientX,
+      );
+      break;
+    case "pane-col":
+      updatePaneColumnFromPointer(
+        state.activeResize.layoutKey,
+        state.activeResize.rowKey,
+        state.activeResize.index,
+        event.clientX,
+      );
+      break;
+    case "pane-row":
+      updatePaneRowFromPointer(
+        state.activeResize.layoutKey,
+        state.activeResize.index,
+        event.clientY,
+      );
+      break;
+    default:
+      break;
+  }
 }
 
-function endSidebarResize() {
-  if (!state.sidebarResize) {
+function endActiveResize() {
+  if (!state.activeResize) {
     return false;
   }
-  state.sidebarResize = null;
+  if (state.activeResize.type === "split") {
+    storeSplitRatio(state.activeResize.kind);
+  }
+  if (state.activeResize.type === "pane-col" || state.activeResize.type === "pane-row") {
+    storePaneLayout(state.activeResize.layoutKey);
+  }
+  state.activeResize = null;
+  elements.appShell?.classList.remove("layout-resizing");
   elements.appShell?.classList.remove("sidebar-resizing");
   storeSidebarWidth();
   return true;
+}
+
+function paneLayoutMode(count) {
+  if (count <= 1) {
+    return "single";
+  }
+  if (count <= 3) {
+    return "row";
+  }
+  return "grid";
+}
+
+function paneLayoutKey(count) {
+  if (count <= 1) {
+    return "single";
+  }
+  if (count <= 3) {
+    return `row-${count}`;
+  }
+  return "grid-2x3";
+}
+
+function defaultPaneLayout(layoutKey) {
+  if (layoutKey === "grid-2x3") {
+    return { cols: [1, 1, 1], rows: [1, 1] };
+  }
+  if (layoutKey.startsWith("row-")) {
+    const count = Number(layoutKey.split("-")[1] || 1);
+    return { cols: Array.from({ length: count }, () => 1) };
+  }
+  return { cols: [1] };
+}
+
+function normalizeTrackWeights(weights, count) {
+  if (!Array.isArray(weights) || weights.length !== count) {
+    return Array.from({ length: count }, () => 1);
+  }
+  const normalized = weights.map((weight) => {
+    const numeric = Number(weight);
+    return Number.isFinite(numeric) && numeric > 0 ? numeric : 1;
+  });
+  return normalized;
+}
+
+function loadStoredPaneLayout(layoutKey, fallback = defaultPaneLayout(layoutKey)) {
+  try {
+    const raw = globalThis.localStorage?.getItem(`${PANE_LAYOUT_STORAGE_PREFIX}${layoutKey}`);
+    if (!raw) {
+      return fallback;
+    }
+    const parsed = JSON.parse(raw);
+    return {
+      cols: normalizeTrackWeights(parsed.cols, fallback.cols.length),
+      rows: fallback.rows ? normalizeTrackWeights(parsed.rows, fallback.rows.length) : undefined,
+    };
+  } catch (_error) {
+    return fallback;
+  }
+}
+
+function setStoredPaneLayout(layoutKey, layout) {
+  try {
+    globalThis.localStorage?.setItem(
+      `${PANE_LAYOUT_STORAGE_PREFIX}${layoutKey}`,
+      JSON.stringify(layout),
+    );
+  } catch (_error) {
+    // Ignore storage failures in local-only environments.
+  }
+  return layout;
+}
+
+function storePaneLayout(layoutKey) {
+  return setStoredPaneLayout(layoutKey, currentPaneLayout(layoutKey));
+}
+
+function currentPaneLayout(layoutKey = paneLayoutKey(state.panes.length)) {
+  const fallback = defaultPaneLayout(layoutKey);
+  if (layoutKey === "grid-2x3") {
+    return {
+      cols: state.gridCols || loadStoredPaneLayout(layoutKey, fallback).cols,
+      rows: state.gridRows || loadStoredPaneLayout(layoutKey, fallback).rows,
+    };
+  }
+  return {
+    cols: state[layoutStateKey(layoutKey)] || loadStoredPaneLayout(layoutKey, fallback).cols,
+  };
+}
+
+function layoutStateKey(layoutKey) {
+  return `paneLayout_${layoutKey.replaceAll("-", "_")}`;
+}
+
+function ensurePaneLayoutState(layoutKey) {
+  const fallback = defaultPaneLayout(layoutKey);
+  const stored = loadStoredPaneLayout(layoutKey, fallback);
+  if (layoutKey === "grid-2x3") {
+    state.gridCols = stored.cols;
+    state.gridRows = stored.rows;
+    return stored;
+  }
+  state[layoutStateKey(layoutKey)] = stored.cols;
+  return stored;
+}
+
+function loadStoredSplitRatio(kind, defaultRatio) {
+  try {
+    const raw = globalThis.localStorage?.getItem(`${SPLIT_RATIO_STORAGE_PREFIX}${kind}`);
+    return clampSplitRatio(raw ? Number(raw) : defaultRatio);
+  } catch (_error) {
+    return clampSplitRatio(defaultRatio);
+  }
+}
+
+function setStoredSplitRatio(kind, ratio, options = {}) {
+  const clamped = clampSplitRatio(ratio);
+  state[splitStateKey(kind)] = clamped;
+  if (options.persist !== false) {
+    try {
+      globalThis.localStorage?.setItem(`${SPLIT_RATIO_STORAGE_PREFIX}${kind}`, String(clamped));
+    } catch (_error) {
+      // Ignore storage failures in local-only environments.
+    }
+  }
+  return clamped;
+}
+
+function storeSplitRatio(kind) {
+  return setStoredSplitRatio(kind, state[splitStateKey(kind)]);
+}
+
+function splitStateKey(kind) {
+  return `${kind}SplitRatio`;
+}
+
+function clampSplitRatio(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return 38;
+  }
+  return Math.min(MAX_SPLIT_RATIO, Math.max(MIN_SPLIT_RATIO, Math.round(numeric)));
+}
+
+function trackTemplate(weights) {
+  return weights
+    .map((weight) => `minmax(0, ${weight}fr)`)
+    .join(` ${RESIZER_GUTTER}px `);
+}
+
+function adjustTrackPair(weights, index, ratio) {
+  const next = [...weights];
+  const pairTotal = next[index] + next[index + 1];
+  const minWeight = Math.min(MIN_TRACK_WEIGHT, pairTotal / 2);
+  const clampedRatio = Math.min(1 - minWeight / pairTotal, Math.max(minWeight / pairTotal, ratio));
+  next[index] = pairTotal * clampedRatio;
+  next[index + 1] = pairTotal - next[index];
+  return next;
+}
+
+function applyPaneGridLayout() {
+  if (!elements.paneGrid) {
+    return;
+  }
+  const count = state.panes.length;
+  const layoutKey = paneLayoutKey(count);
+  const layout = ensurePaneLayoutState(layoutKey);
+  elements.paneGrid.classList.toggle("layout-grid", layoutKey === "grid-2x3");
+  elements.paneGrid.style.gridTemplateRows = "";
+  if (layoutKey === "grid-2x3") {
+    elements.paneGrid.style.gridTemplateRows = trackTemplate(layout.rows);
+    applyPaneRowTemplate("grid-2x3-top", layout.cols);
+    applyPaneRowTemplate("grid-2x3-bottom", layout.cols.slice(0, Math.max(0, count - 3)));
+    return;
+  }
+  applyPaneRowTemplate(layoutKey, layout.cols);
+}
+
+function applyPaneRowTemplate(rowKey, weights) {
+  if (!rowKey || !weights.length) {
+    return;
+  }
+  const row = elements.paneGrid?.querySelector(`[data-pane-row-key="${escapeSelectorValue(rowKey)}"]`);
+  if (!row) {
+    return;
+  }
+  row.style.gridTemplateColumns = trackTemplate(weights);
+}
+
+function updatePaneColumnFromPointer(layoutKey, rowKey, index, clientX) {
+  const row = elements.paneGrid?.querySelector(`[data-pane-row-key="${escapeSelectorValue(rowKey)}"]`);
+  if (!row) {
+    return;
+  }
+  const weights = rowWeightsForLayout(layoutKey, rowKey);
+  const contentWidth = Math.max(
+    1,
+    (row.getBoundingClientRect?.().width || row.clientWidth || 1) - RESIZER_GUTTER * (weights.length - 1),
+  );
+  const total = weights.reduce((sum, weight) => sum + weight, 0);
+  const before = weights.slice(0, index).reduce((sum, weight) => sum + weight, 0);
+  const pairTotal = weights[index] + weights[index + 1];
+  const left = row.getBoundingClientRect?.().left || 0;
+  const offset = clientX - left - (before / total) * contentWidth;
+  const ratio = offset / ((pairTotal / total) * contentWidth || 1);
+  const next = adjustTrackPair(weights, index, ratio);
+  setRowWeightsForLayout(layoutKey, rowKey, next);
+  applyPaneGridLayout();
+}
+
+function updatePaneRowFromPointer(layoutKey, index, clientY) {
+  if (layoutKey !== "grid-2x3" || !elements.paneGrid) {
+    return;
+  }
+  const weights = state.gridRows || ensurePaneLayoutState(layoutKey).rows;
+  const contentHeight = Math.max(
+    1,
+    (elements.paneGrid.getBoundingClientRect?.().height || elements.paneGrid.clientHeight || 1) -
+      RESIZER_GUTTER * (weights.length - 1),
+  );
+  const total = weights.reduce((sum, weight) => sum + weight, 0);
+  const before = weights.slice(0, index).reduce((sum, weight) => sum + weight, 0);
+  const pairTotal = weights[index] + weights[index + 1];
+  const top = elements.paneGrid.getBoundingClientRect?.().top || 0;
+  const offset = clientY - top - (before / total) * contentHeight;
+  const ratio = offset / ((pairTotal / total) * contentHeight || 1);
+  state.gridRows = adjustTrackPair(weights, index, ratio);
+  applyPaneGridLayout();
+}
+
+function rowWeightsForLayout(layoutKey, rowKey) {
+  if (layoutKey === "grid-2x3") {
+    const base = state.gridCols || ensurePaneLayoutState(layoutKey).cols;
+    const count = rowKey === "grid-2x3-top" ? 3 : Math.max(0, state.panes.length - 3);
+    return base.slice(0, count);
+  }
+  return state[layoutStateKey(layoutKey)] || ensurePaneLayoutState(layoutKey).cols;
+}
+
+function setRowWeightsForLayout(layoutKey, rowKey, weights) {
+  if (layoutKey === "grid-2x3") {
+    const next = [...(state.gridCols || ensurePaneLayoutState(layoutKey).cols)];
+    for (let index = 0; index < weights.length; index += 1) {
+      next[index] = weights[index];
+    }
+    state.gridCols = next;
+    return;
+  }
+  state[layoutStateKey(layoutKey)] = weights;
+}
+
+function updateSplitRatioFromPointer(kind, element, clientX) {
+  if (!element) {
+    return;
+  }
+  const rect = element.getBoundingClientRect?.();
+  const ratio = ((clientX - (rect?.left || 0)) / Math.max(1, rect?.width || 1)) * 100;
+  setStoredSplitRatio(kind, ratio, { persist: false });
+  applySplitLayout(kind);
+}
+
+function applySplitLayout(kind) {
+  const selector = kind === "json" ? "[data-json-shell]" : "[data-trajectory-shell]";
+  const ratio = state[splitStateKey(kind)];
+  elements.previewWork?.querySelectorAll(selector)?.forEach((shell) => {
+    shell.style.gridTemplateColumns = trackTemplate([ratio, 100 - ratio]);
+  });
+}
+
+function splitTemplate(kind) {
+  const ratio = state[splitStateKey(kind)];
+  return trackTemplate([ratio, 100 - ratio]);
+}
+
+function onPreviewPointerDown(event) {
+  const splitResizer = event.target.closest("[data-resize-split]");
+  if (splitResizer) {
+    if (!canResizeSplitViews()) {
+      return;
+    }
+    const kind = splitResizer.dataset.resizeSplit;
+    const element = splitResizer.closest(
+      kind === "json" ? "[data-json-shell]" : "[data-trajectory-shell]",
+    );
+    beginResize(
+      {
+        type: "split",
+        kind,
+        element,
+        pointerId: event.pointerId ?? null,
+      },
+      event,
+    );
+    return;
+  }
+  const paneColResizer = event.target.closest("[data-resize-pane-col]");
+  if (paneColResizer) {
+    if (!canResizePaneLayout()) {
+      return;
+    }
+    beginResize(
+      {
+        type: "pane-col",
+        layoutKey: paneColResizer.dataset.layoutKey,
+        rowKey: paneColResizer.dataset.rowKey,
+        index: Number(paneColResizer.dataset.resizePaneCol || 0),
+        pointerId: event.pointerId ?? null,
+      },
+      event,
+    );
+    return;
+  }
+  const paneRowResizer = event.target.closest("[data-resize-pane-row]");
+  if (paneRowResizer) {
+    if (!canResizePaneLayout()) {
+      return;
+    }
+    beginResize(
+      {
+        type: "pane-row",
+        layoutKey: paneRowResizer.dataset.layoutKey,
+        index: Number(paneRowResizer.dataset.resizePaneRow || 0),
+        pointerId: event.pointerId ?? null,
+      },
+      event,
+    );
+  }
 }
 
 function splitActivePane() {
@@ -447,6 +876,9 @@ function toggleDirectory(path) {
 }
 
 async function onWorkspaceClick(event) {
+  if (event.target.closest("[data-resize-split], [data-resize-pane-col], [data-resize-pane-row]")) {
+    return;
+  }
   const closeButton = event.target.closest("[data-close-pane]");
   if (closeButton) {
     closePane(closeButton.dataset.closePane);
@@ -637,8 +1069,9 @@ function renderJsonInspector(pane) {
   }
 
   return `
-    <div class="split-view" data-json-shell>
+    <div class="split-view" data-json-shell style="grid-template-columns:${escapeAttribute(splitTemplate("json"))}">
       <div class="pane-list" data-json-pane-list>${renderJsonPaneList(pane)}</div>
+      <div class="split-resizer" data-resize-split="json" aria-hidden="true"></div>
       <div class="detail-panel" data-json-detail>${renderJsonDetail(selected)}</div>
     </div>
   `;
@@ -774,10 +1207,11 @@ function renderTrajectoryPreview(pane) {
   }
 
   return `
-    <div class="split-view" data-trajectory-shell>
+    <div class="split-view" data-trajectory-shell style="grid-template-columns:${escapeAttribute(splitTemplate("trajectory"))}">
       <div class="pane-list" data-trajectory-list>
         ${renderTrajectoryStepList(pane.preview, selected)}
       </div>
+      <div class="split-resizer" data-resize-split="trajectory" aria-hidden="true"></div>
       <div class="step-detail" data-trajectory-detail>
         ${renderTrajectoryDetail(pane.preview, selected)}
       </div>
@@ -1312,18 +1746,24 @@ function renderPalette() {
     elements.paletteInput.value = state.palette.query;
   }
   elements.paletteResults.innerHTML = state.palette.matches.length
-    ? state.palette.matches.map((match, index) => `
-        <button
-          class="palette-row ${index === state.palette.selectedIndex ? "selected" : ""}"
-          type="button"
-          data-palette-path="${escapeAttribute(match.path)}"
-          data-palette-index="${index}"
-        >
-          <span>${escapeHtml(match.name)}</span>
-          <span class="palette-path">${escapeHtml(match.path)}</span>
-        </button>
-      `).join("")
+    ? state.palette.matches.map((match, index) => (
+        renderPaletteRow(match, index, index === state.palette.selectedIndex)
+      )).join("")
     : `<div class="preview-block"><div class="selection-subtitle">No matching files.</div></div>`;
+}
+
+function renderPaletteRow(match, index, selected) {
+  return `
+    <button
+      class="palette-row ${selected ? "selected" : ""}"
+      type="button"
+      data-palette-path="${escapeAttribute(match.path)}"
+      data-palette-index="${index}"
+    >
+      <span class="palette-name">${escapeHtml(match.name)}</span>
+      <span class="palette-path">${escapeHtml(match.path)}</span>
+    </button>
+  `;
 }
 
 function onKeyDown(event) {
@@ -1556,3 +1996,12 @@ globalThis.loadPreviewForPane = loadPreviewForPane;
 globalThis.loadStoredSidebarWidth = loadStoredSidebarWidth;
 globalThis.setSidebarWidth = setSidebarWidth;
 globalThis.canResizeSidebar = canResizeSidebar;
+globalThis.renderPaletteRow = renderPaletteRow;
+globalThis.loadStoredPaneLayout = loadStoredPaneLayout;
+globalThis.setStoredPaneLayout = setStoredPaneLayout;
+globalThis.loadStoredSplitRatio = loadStoredSplitRatio;
+globalThis.setStoredSplitRatio = setStoredSplitRatio;
+globalThis.trackTemplate = trackTemplate;
+globalThis.isStackedLayout = isStackedLayout;
+globalThis.canResizePaneLayout = canResizePaneLayout;
+globalThis.canResizeSplitViews = canResizeSplitViews;

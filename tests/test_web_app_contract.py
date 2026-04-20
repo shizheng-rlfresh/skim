@@ -115,6 +115,30 @@ console.log(JSON.stringify({
     assert result == {"hasSyntax": True, "hasJsonPre": False, "hasJsonKey": True}
 
 
+def test_render_palette_row_uses_explicit_name_and_path_classes():
+    """Palette rows should expose separate high-contrast name and muted path hooks."""
+    result = run_app_js(
+        """
+const html = ctx.renderPaletteRow(
+  { name: "server.py", path: "src/skim/server.py" },
+  0,
+  true,
+);
+console.log(JSON.stringify({
+  hasNameClass: html.includes('palette-name'),
+  hasPathClass: html.includes('palette-path'),
+  hasSelectedClass: html.includes('palette-row selected'),
+}));
+"""
+    )
+
+    assert result == {
+        "hasNameClass": True,
+        "hasPathClass": True,
+        "hasSelectedClass": True,
+    }
+
+
 def test_render_notebook_preview_renders_flat_cells_and_outputs():
     """Notebook previews should render cell blocks and inline outputs."""
     result = run_app_js(
@@ -334,6 +358,59 @@ console.log(JSON.stringify({
     assert result == {"hasAnnotatedRow": True, "hasMarker": True}
 
 
+def test_render_json_and_trajectory_previews_include_split_resizers():
+    """Split views should include draggable resizer gutters for both preview kinds."""
+    result = run_app_js(
+        """
+vm.runInContext(`
+state.panes = [createPaneState("pane-1")];
+state.activePaneId = "pane-1";
+state.panes[0].preview = {
+  kind: "json_inspector",
+  tree: [{
+    id: "node-1",
+    path: "$.task",
+    raw_path: ["task"],
+    label: "task",
+    display_key: "task",
+    display_value: "{1}",
+    value_type: "object",
+    node_class: "object",
+    style: "object",
+    type_name: "object",
+    annotation: null,
+    annotatable: true,
+    annotation_path: "$.task",
+    detail: { kind: "detail", blocks: [] },
+    children: [],
+  }],
+  initial_node_id: "node-1",
+};
+state.panes[0].selectedJsonNodeId = "node-1";
+state.jsonSplitRatio = 42;
+state.trajectorySplitRatio = 36;
+`, ctx);
+const jsonHtml = ctx.renderJsonInspector(vm.runInContext('state.panes[0]', ctx));
+const trajectoryHtml = ctx.renderTrajectoryPreview({
+  preview: {
+    header: "traj",
+    metadata_lines: [],
+    final_output: { kind: "text", value: "done" },
+    steps: [{ id: "step-1", title: "Step 1", summary: "summary", items: [] }],
+    initial_step_id: "step-1",
+  },
+  selectedStepId: "step-1",
+});
+console.log(JSON.stringify({
+  hasJsonResizer: jsonHtml.includes('data-resize-split="json"'),
+  hasTrajectoryResizer: trajectoryHtml.includes('data-resize-split="trajectory"'),
+}));
+"""
+    )
+
+    assert result == {"hasJsonResizer": True, "hasTrajectoryResizer": True}
+
+
 def test_directory_row_click_toggles_without_triangle_target():
     """Clicking the directory row itself should expand or collapse that directory."""
     result = run_app_js(
@@ -532,6 +609,33 @@ console.log(JSON.stringify({
     assert result == {"clampedMin": 180, "clampedMax": 540, "restored": 366}
 
 
+def test_pane_layout_and_split_ratio_helpers_persist_resizable_tracks():
+    """Pane-grid tracks and split ratios should persist and restore from local storage."""
+    result = run_app_js(
+        """
+ctx.setStoredPaneLayout("row-3", { cols: [2, 1, 1] });
+ctx.setStoredPaneLayout("grid-2x3", { cols: [2, 1, 1], rows: [3, 1] });
+ctx.setStoredSplitRatio("json", 44);
+ctx.setStoredSplitRatio("trajectory", 35);
+console.log(JSON.stringify({
+  rowLayout: ctx.loadStoredPaneLayout("row-3", { cols: [1, 1, 1] }),
+  gridLayout: ctx.loadStoredPaneLayout("grid-2x3", { cols: [1, 1, 1], rows: [1, 1] }),
+  jsonRatio: ctx.loadStoredSplitRatio("json", 38),
+  trajectoryRatio: ctx.loadStoredSplitRatio("trajectory", 38),
+  trackTemplate: ctx.trackTemplate([2, 1, 1]),
+}));
+"""
+    )
+
+    assert result == {
+        "rowLayout": {"cols": [2, 1, 1]},
+        "gridLayout": {"cols": [2, 1, 1], "rows": [3, 1]},
+        "jsonRatio": 44,
+        "trajectoryRatio": 35,
+        "trackTemplate": "minmax(0, 2fr) 8px minmax(0, 1fr) 8px minmax(0, 1fr)",
+    }
+
+
 def test_sidebar_resize_is_disabled_when_sidebar_is_hidden():
     """The resize handle should be inactive when the sidebar is hidden."""
     result = run_app_js(
@@ -544,3 +648,18 @@ console.log(JSON.stringify({
     )
 
     assert result == {"canResize": False}
+
+
+def test_non_sidebar_resize_helpers_disable_in_stacked_mode():
+    """Pane and split resizing should be disabled in stacked mobile layouts."""
+    result = run_app_js(
+        """
+console.log(JSON.stringify({
+  stacked: ctx.isStackedLayout(800),
+  canResizePanes: ctx.canResizePaneLayout(800),
+  canResizeSplits: ctx.canResizeSplitViews(800),
+}));
+"""
+    )
+
+    assert result == {"stacked": True, "canResizePanes": False, "canResizeSplits": False}

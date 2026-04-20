@@ -425,6 +425,21 @@ def test_stylesheet_defines_annotation_and_sidebar_resize_states(tmp_path):
     assert ".json-fallback-key" in css
 
 
+def test_stylesheet_defines_palette_and_split_resize_states(tmp_path):
+    """The stylesheet should include palette contrast hooks and shared split resizers."""
+    with running_server(tmp_path) as base_url:
+        request = urllib.request.Request(base_url + "/styles.css")
+        with urllib.request.urlopen(request) as response:
+            css = response.read().decode()
+
+    assert ".palette-name" in css
+    assert ".palette-path" in css
+    assert ".split-resizer" in css
+    assert ".pane-row" in css
+    assert ".pane-row-resizer" in css
+    assert ".pane-grid.layout-grid" in css
+
+
 def test_wrapped_output_json_stays_in_json_inspector_and_keeps_trajectory_branch(tmp_path):
     """Wrapped output artifacts should keep raw keys plus trajectory overlay children."""
     test_file = tmp_path / "output.json"
