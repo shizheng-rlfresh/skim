@@ -305,6 +305,38 @@ def test_stylesheet_bundles_font_face_and_light_theme_tokens(tmp_path):
     assert "--syn-keyword" in css
 
 
+def test_stylesheet_locks_preview_panes_to_the_viewport(tmp_path):
+    """The web shell should keep panes height-constrained and scrolling internally."""
+    with running_server(tmp_path) as base_url:
+        request = urllib.request.Request(base_url + "/styles.css")
+        with urllib.request.urlopen(request) as response:
+            css = response.read().decode()
+
+    assert ".app-shell" in css
+    assert "height: 100vh;" in css
+    assert ".workspace" in css
+    assert "overflow: hidden;" in css
+    assert ".preview-work" in css
+    assert ".pane-grid" in css
+    assert "grid-auto-rows: minmax(0, 1fr);" in css
+
+
+def test_stylesheet_increases_preview_readability_defaults(tmp_path):
+    """Preview content should use larger default type and more relaxed line spacing."""
+    with running_server(tmp_path) as base_url:
+        request = urllib.request.Request(base_url + "/styles.css")
+        with urllib.request.urlopen(request) as response:
+            css = response.read().decode()
+
+    assert ".pane-content" in css
+    assert "font-size: 15px;" in css
+    assert "line-height: 1.6;" in css
+    assert ".text-block" in css
+    assert ".detail-panel,\n.step-detail" in css or ".detail-panel,\r\n.step-detail" in css
+    assert ".tree-row" in css
+    assert "padding: 9px 12px;" in css
+
+
 def test_real_output_json_stays_in_json_inspector_and_keeps_trajectory_branch():
     """The repo's wrapped output artifact should keep the JSON-inspector tree shape."""
     repo_root = Path(__file__).resolve().parents[1]
