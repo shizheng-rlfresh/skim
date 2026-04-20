@@ -25,6 +25,7 @@ dev = [
 [project.scripts]
 skim = "skim:main"
 skim-dev = "skim:dev"
+skim-web = "skim.server:main"
 
 [tool.ruff]
 line-length = 100

@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>skim web</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app-shell">
+  <header class="topbar">
+    <div>
+      <div class="eyebrow">Local Review</div>
+      <h1>skim</h1>
+    </div>
+    <div class="topbar-meta">
+      <div class="meta-block">
+        <span class="meta-label">Browse Root</span>
+        <span class="meta-value" id="browse-root">Loading…</span>
+      </div>
+      <div class="meta-block">
+        <span class="meta-label">Current File</span>
+        <span class="meta-value" id="current-file">No file selected</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <aside class="sidebar">
+      <div class="panel-title">Explorer</div>
+      <div class="tree-root" id="file-tree"></div>
+    </aside>
+
+    <section class="preview-shell">
+      <div class="panel-title" id="preview-title">Preview</div>
+      <div class="preview-root" id="preview-root">
+        <div class="empty-state">
+          <div class="empty-mark">◇</div>
+          <p>Select a file to inspect it.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="modal-backdrop hidden" id="annotation-modal">
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="annotation-title">
+    <div class="modal-header">
+      <div>
+        <div class="eyebrow">Annotation</div>
+        <h2 id="annotation-title">Edit annotation</h2>
+      </div>
+      <button class="ghost-button" id="modal-close" type="button">Close</button>
+    </div>
+
+    <form class="modal-form" id="annotation-form">
+      <div class="meta-stack">
+        <div class="meta-block">
+          <span class="meta-label">File</span>
+          <span class="meta-value" id="modal-file"></span>
+        </div>
+        <div class="meta-block">
+          <span class="meta-label">Path</span>
+          <span class="meta-value" id="modal-path"></span>
+        </div>
+      </div>
+
+      <label class="field">
+        <span>Tags</span>
+        <input id="annotation-tags" name="tags" placeholder="important, follow-up">
+      </label>
+
+      <label class="field">
+        <span>Note</span>
+        <textarea id="annotation-note" name="note" rows="6" placeholder="Add a local review note"></textarea>
+      </label>
+
+      <div class="modal-actions">
+        <button class="ghost-button danger hidden" id="annotation-delete" type="button">Delete</button>
+        <div class="action-group">
+          <button class="ghost-button" id="annotation-cancel" type="button">Cancel</button>
+          <button class="solid-button" type="submit">Save</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="app.js" defer></script>
+</body>
+</html>
