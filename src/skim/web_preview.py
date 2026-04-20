@@ -244,9 +244,7 @@ def serialize_trajectory_preview(
                 result_event = interaction.result_event
                 call_path = event_paths.get(id(call_event.raw)) if call_event is not None else None
                 result_path = (
-                    event_paths.get(id(result_event.raw))
-                    if result_event is not None
-                    else None
+                    event_paths.get(id(result_event.raw)) if result_event is not None else None
                 )
                 parent_path = call_path or result_path or step_path
                 blocks.append(
@@ -485,9 +483,7 @@ class _JsonInspectorSerializer:
                     call_event = interaction.call_event
                     result_event = interaction.result_event
                     call_path = (
-                        event_paths.get(id(call_event.raw))
-                        if call_event is not None
-                        else None
+                        event_paths.get(id(call_event.raw)) if call_event is not None else None
                     )
                     result_path = (
                         event_paths.get(id(result_event.raw)) if result_event is not None else None

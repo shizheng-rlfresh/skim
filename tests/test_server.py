@@ -136,10 +136,7 @@ def test_api_preview_uses_specialized_payload_for_bare_trajectory(tmp_path):
     assert payload["kind"] == "trajectory"
     assert payload["steps"]
     tool_blocks = [
-        item
-        for step in payload["steps"]
-        for item in step["items"]
-        if item["kind"] == "tool"
+        item for step in payload["steps"] for item in step["items"] if item["kind"] == "tool"
     ]
     assert tool_blocks
     assert tool_blocks[0]["annotation_path"] == "$.steps[0].output[2]"
@@ -255,9 +252,7 @@ def test_real_submission_json_serializes_structured_detail_blocks():
     assert payload["kind"] == "json_inspector"
     assert export_node["detail"]["kind"] == "detail"
     section_titles = [
-        block["title"]
-        for block in export_node["detail"]["blocks"]
-        if block["kind"] == "section"
+        block["title"] for block in export_node["detail"]["blocks"] if block["kind"] == "section"
     ]
     assert "Prompt" in section_titles
     assert "Task Solution" in section_titles
