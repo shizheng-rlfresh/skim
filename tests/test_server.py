@@ -408,6 +408,23 @@ def test_stylesheet_defines_file_and_json_color_tokens(tmp_path):
     assert ".json-node-icon" in css
 
 
+def test_stylesheet_defines_annotation_and_sidebar_resize_states(tmp_path):
+    """The stylesheet should include stronger annotation states and resize-handle rules."""
+    with running_server(tmp_path) as base_url:
+        request = urllib.request.Request(base_url + "/styles.css")
+        with urllib.request.urlopen(request) as response:
+            css = response.read().decode()
+
+    assert ".annotate-button" in css
+    assert ".annotate-button-pending" in css
+    assert ".annotate-button-active" in css
+    assert ".json-tree-row-annotated" in css
+    assert ".annotation-glyph" in css
+    assert ".sidebar-resizer" in css
+    assert ".app-shell.sidebar-resizing" in css
+    assert ".json-fallback-key" in css
+
+
 def test_wrapped_output_json_stays_in_json_inspector_and_keeps_trajectory_branch(tmp_path):
     """Wrapped output artifacts should keep raw keys plus trajectory overlay children."""
     test_file = tmp_path / "output.json"

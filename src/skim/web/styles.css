@@ -153,6 +153,12 @@ button {
   overflow: hidden;
 }
 
+.app-shell.sidebar-resizing,
+.app-shell.sidebar-resizing * {
+  cursor: col-resize !important;
+  user-select: none;
+}
+
 .title-bar,
 .status-bar,
 .sidebar,
@@ -250,14 +256,14 @@ button {
   min-height: 0;
   height: 100%;
   display: grid;
-  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  grid-template-columns: var(--sidebar-width) 8px minmax(0, 1fr);
   gap: var(--pane-gap);
   padding: var(--pane-padding);
   overflow: hidden;
 }
 
 .workspace.sidebar-hidden {
-  grid-template-columns: 0 minmax(0, 1fr);
+  grid-template-columns: 0 0 minmax(0, 1fr);
 }
 
 .sidebar {
@@ -270,6 +276,27 @@ button {
 
 .workspace.sidebar-hidden .sidebar {
   display: none;
+}
+
+.sidebar-resizer {
+  min-height: 0;
+  border-radius: 999px;
+  background:
+    linear-gradient(
+      to right,
+      transparent 0,
+      transparent 2px,
+      color-mix(in srgb, var(--accent) 45%, var(--border)) 2px,
+      color-mix(in srgb, var(--accent) 45%, var(--border)) 6px,
+      transparent 6px,
+      transparent 100%
+    );
+  opacity: 0.6;
+  touch-action: none;
+}
+
+.sidebar-resizer:hover {
+  opacity: 1;
 }
 
 .sidebar-header,
@@ -577,12 +604,52 @@ button {
   border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
 }
 
+.annotate-button {
+  border-width: 1px;
+  font-weight: 600;
+}
+
+.annotate-button.annotate-button-pending {
+  background: color-mix(in srgb, var(--accent) 20%, var(--bg-surface));
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  color: color-mix(in srgb, var(--accent) 85%, white);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 15%, transparent);
+}
+
+.annotate-button.annotate-button-pending:hover {
+  background: color-mix(in srgb, var(--accent) 28%, var(--bg-hover));
+}
+
+.annotate-button.annotate-button-active {
+  background: color-mix(in srgb, var(--green) 22%, var(--bg-surface));
+  border-color: color-mix(in srgb, var(--green) 55%, var(--border));
+  color: color-mix(in srgb, var(--green) 78%, white);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--green) 14%, transparent);
+}
+
+.annotate-button.annotate-button-active:hover {
+  background: color-mix(in srgb, var(--green) 30%, var(--bg-hover));
+}
+
 .annotation-dot {
   width: 7px;
   height: 7px;
   flex: 0 0 auto;
   border-radius: 999px;
   background: var(--accent);
+}
+
+.annotation-marker {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 4px;
+}
+
+.annotation-glyph {
+  font-size: 11px;
+  line-height: 1;
+  color: color-mix(in srgb, var(--green) 80%, var(--accent));
 }
 
 .split-view {
@@ -594,6 +661,15 @@ button {
 
 .json-tree-row {
   grid-template-columns: 18px minmax(0, 1fr) auto;
+}
+
+.json-tree-row-annotated {
+  background: color-mix(in srgb, var(--green) 9%, var(--bg-surface));
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--green) 65%, var(--accent));
+}
+
+.tree-node.selected > .json-tree-row.json-tree-row-annotated {
+  background: color-mix(in srgb, var(--green) 12%, var(--bg-highlight));
 }
 
 .json-node-key {
@@ -674,6 +750,7 @@ button {
 
 .json-node-badge {
   text-transform: uppercase;
+  border-color: color-mix(in srgb, var(--json-type-synthetic) 20%, var(--border));
 }
 
 .pane-list {
@@ -766,6 +843,34 @@ button {
 .syntax-block {
   background: transparent;
   color: inherit;
+}
+
+.json-fallback-block {
+  color: var(--fg-primary);
+}
+
+.json-fallback-key {
+  color: var(--syn-key);
+}
+
+.json-fallback-string {
+  color: var(--syn-string);
+}
+
+.json-fallback-number {
+  color: var(--syn-number);
+}
+
+.json-fallback-boolean {
+  color: var(--json-type-boolean);
+}
+
+.json-fallback-null {
+  color: var(--json-type-null);
+}
+
+.json-fallback-punctuation {
+  color: var(--fg-muted);
 }
 
 .syntax-block .tok-k,
@@ -956,6 +1061,10 @@ td {
 
   .workspace.sidebar-hidden {
     grid-template-rows: minmax(0, 1fr);
+  }
+
+  .sidebar-resizer {
+    display: none;
   }
 
   .split-view,

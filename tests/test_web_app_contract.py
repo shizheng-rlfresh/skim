@@ -96,6 +96,25 @@ console.log(JSON.stringify({
     assert result == {"hasSyntax": True, "hasTextFallback": False}
 
 
+def test_render_detail_block_uses_syntax_markup_for_json_fallback():
+    """Raw JSON detail blocks should reuse syntax-style markup instead of plain pre blocks."""
+    result = run_app_js(
+        """
+const html = ctx.renderDetailBlock({
+  kind: "json",
+  value: { plan: { step: 1, ok: true } },
+});
+console.log(JSON.stringify({
+  hasSyntax: html.includes('syntax-block'),
+  hasJsonPre: html.includes('json-block'),
+  hasJsonKey: html.includes('json-fallback-key'),
+}));
+"""
+    )
+
+    assert result == {"hasSyntax": True, "hasJsonPre": False, "hasJsonKey": True}
+
+
 def test_render_notebook_preview_renders_flat_cells_and_outputs():
     """Notebook previews should render cell blocks and inline outputs."""
     result = run_app_js(
@@ -258,6 +277,61 @@ console.log(JSON.stringify({
     )
 
     assert result == {"hasOverlayClass": True, "hasOverlayToken": True}
+
+
+def test_render_annotate_button_uses_distinct_default_and_annotated_states():
+    """Annotate buttons should stand out and switch state after an annotation exists."""
+    result = run_app_js(
+        """
+const plain = ctx.renderAnnotateButton("$.task", null);
+const annotated = ctx.renderAnnotateButton("$.task", { tags: ["important"], note: "Keep" });
+console.log(JSON.stringify({
+  plainHasClass: plain.includes('annotate-button') && plain.includes('annotate-button-pending'),
+  plainLabel: plain.includes(">Annotate<"),
+  annotatedHasClass:
+    annotated.includes('annotate-button') &&
+    annotated.includes('annotate-button-active'),
+  annotatedLabel: annotated.includes(">Edit annotation<"),
+}));
+"""
+    )
+
+    assert result == {
+        "plainHasClass": True,
+        "plainLabel": True,
+        "annotatedHasClass": True,
+        "annotatedLabel": True,
+    }
+
+
+def test_render_json_node_marks_annotated_rows_more_obviously():
+    """Annotated JSON rows should emit a dedicated row state and stronger marker glyph."""
+    result = run_app_js(
+        """
+const html = ctx.renderJsonNode({
+  id: "node-1",
+  path: "$.name",
+  display_key: "name",
+  display_value: '"skim"',
+  value_type: "string",
+  node_class: "string",
+  synthetic: false,
+  label: "name",
+  style: "string",
+  annotation: { tags: ["important"], note: "watch this" },
+  children: [],
+}, 0, {
+  expandedJson: new Set(),
+  selectedJsonNodeId: "node-1",
+});
+console.log(JSON.stringify({
+  hasAnnotatedRow: html.includes('json-tree-row-annotated'),
+  hasMarker: html.includes('annotation-glyph'),
+}));
+"""
+    )
+
+    assert result == {"hasAnnotatedRow": True, "hasMarker": True}
 
 
 def test_directory_row_click_toggles_without_triangle_target():
@@ -435,3 +509,38 @@ console.log(JSON.stringify({
     )
 
     assert result == {"theme": "light", "storedTheme": "light"}
+
+
+def test_sidebar_width_helpers_clamp_store_and_restore_preference():
+    """Sidebar width should clamp to bounds and persist in local storage."""
+    result = run_app_js(
+        """
+vm.runInContext('state.sidebarWidth = 220; state.sidebarVisible = true;', ctx);
+ctx.setSidebarWidth(50, { viewportWidth: 1200 });
+const clampedMin = vm.runInContext('state.sidebarWidth', ctx);
+ctx.setSidebarWidth(900, { viewportWidth: 1200 });
+const clampedMax = vm.runInContext('state.sidebarWidth', ctx);
+ctx.localStorage.setItem("skim-sidebar-width", "366");
+console.log(JSON.stringify({
+  clampedMin,
+  clampedMax,
+  restored: ctx.loadStoredSidebarWidth(),
+}));
+"""
+    )
+
+    assert result == {"clampedMin": 180, "clampedMax": 540, "restored": 366}
+
+
+def test_sidebar_resize_is_disabled_when_sidebar_is_hidden():
+    """The resize handle should be inactive when the sidebar is hidden."""
+    result = run_app_js(
+        """
+vm.runInContext('state.sidebarVisible = false;', ctx);
+console.log(JSON.stringify({
+  canResize: ctx.canResizeSidebar(),
+}));
+"""
+    )
+
+    assert result == {"canResize": False}

@@ -1,4 +1,7 @@
 const MAX_PANES = 6;
+const DEFAULT_SIDEBAR_WIDTH = 220;
+const MIN_SIDEBAR_WIDTH = 180;
+const MAX_SIDEBAR_VIEWPORT_RATIO = 0.45;
 
 const elements = {};
 
@@ -10,6 +13,8 @@ const state = {
   activePaneId: "pane-1",
   nextPaneNumber: 2,
   sidebarVisible: true,
+  sidebarWidth: loadStoredSidebarWidth(),
+  sidebarResize: null,
   theme: loadStoredTheme(),
   palette: {
     open: false,
@@ -40,11 +45,13 @@ function createPaneState(id) {
 }
 
 function bindElements() {
+  elements.appShell = document.getElementById("app-shell");
   elements.browseRoot = document.getElementById("browse-root");
   elements.fileTree = document.getElementById("file-tree");
   elements.previewWork = document.getElementById("preview-work");
   elements.paneGrid = document.getElementById("pane-grid");
   elements.workspace = document.getElementById("workspace");
+  elements.sidebarResizer = document.getElementById("sidebar-resizer");
   elements.statusPaneCount = document.getElementById("status-pane-count");
   elements.statusActivePath = document.getElementById("status-active-path");
   elements.sidebarToggle = document.getElementById("sidebar-toggle");
@@ -69,6 +76,7 @@ function bindEvents() {
   elements.fileTree?.addEventListener("click", onTreeClick);
   elements.previewWork?.addEventListener("click", onWorkspaceClick);
   elements.sidebarToggle?.addEventListener("click", toggleSidebar);
+  elements.sidebarResizer?.addEventListener("pointerdown", beginSidebarResize);
   elements.splitPane?.addEventListener("click", splitActivePane);
   elements.themeToggle?.addEventListener("click", toggleTheme);
   elements.paletteToggle?.addEventListener("click", openPalette);
@@ -89,6 +97,9 @@ function bindEvents() {
       closeModal();
     }
   });
+  document.addEventListener("pointermove", onGlobalPointerMove);
+  document.addEventListener("pointerup", endSidebarResize);
+  document.addEventListener("pointercancel", endSidebarResize);
 }
 
 async function bootstrap() {
@@ -189,8 +200,10 @@ function renderWorkspace() {
   }
   const count = state.panes.length;
   elements.workspace?.classList.toggle("sidebar-hidden", !state.sidebarVisible);
+  elements.sidebarResizer?.classList.toggle("hidden", !canResizeSidebar());
   elements.paneGrid.className = `pane-grid panes-${count}`;
   elements.paneGrid.style.setProperty("--pane-count", String(Math.min(count, 3)));
+  applySidebarWidth();
   elements.paneGrid.innerHTML = state.panes.map(renderPaneShell).join("");
 }
 
@@ -270,6 +283,96 @@ function renderStatusBar() {
 function toggleSidebar() {
   state.sidebarVisible = !state.sidebarVisible;
   renderWorkspace();
+}
+
+function getViewportWidth() {
+  return (
+    globalThis.innerWidth ||
+    document.documentElement?.clientWidth ||
+    1280
+  );
+}
+
+function maxSidebarWidth(viewportWidth = getViewportWidth()) {
+  return Math.max(MIN_SIDEBAR_WIDTH, Math.floor(viewportWidth * MAX_SIDEBAR_VIEWPORT_RATIO));
+}
+
+function clampSidebarWidth(width, viewportWidth = getViewportWidth()) {
+  const numeric = Number(width);
+  if (!Number.isFinite(numeric)) {
+    return DEFAULT_SIDEBAR_WIDTH;
+  }
+  return Math.min(maxSidebarWidth(viewportWidth), Math.max(MIN_SIDEBAR_WIDTH, Math.round(numeric)));
+}
+
+function loadStoredSidebarWidth() {
+  try {
+    const raw = globalThis.localStorage?.getItem("skim-sidebar-width");
+    if (!raw) {
+      return DEFAULT_SIDEBAR_WIDTH;
+    }
+    return clampSidebarWidth(Number(raw));
+  } catch (_error) {
+    return DEFAULT_SIDEBAR_WIDTH;
+  }
+}
+
+function storeSidebarWidth() {
+  try {
+    globalThis.localStorage?.setItem("skim-sidebar-width", String(state.sidebarWidth));
+  } catch (_error) {
+    // Ignore storage failures in local-only environments.
+  }
+}
+
+function applySidebarWidth() {
+  elements.workspace?.style?.setProperty("--sidebar-width", `${state.sidebarWidth}px`);
+}
+
+function setSidebarWidth(width, options = {}) {
+  const viewportWidth = options.viewportWidth || getViewportWidth();
+  state.sidebarWidth = clampSidebarWidth(width, viewportWidth);
+  applySidebarWidth();
+  if (options.persist !== false) {
+    storeSidebarWidth();
+  }
+  return state.sidebarWidth;
+}
+
+function canResizeSidebar() {
+  return state.sidebarVisible;
+}
+
+function sidebarWidthFromClientX(clientX) {
+  const left = elements.workspace?.getBoundingClientRect?.().left || 0;
+  return clientX - left;
+}
+
+function beginSidebarResize(event) {
+  if (!canResizeSidebar()) {
+    return false;
+  }
+  state.sidebarResize = { pointerId: event.pointerId ?? null };
+  elements.appShell?.classList.add("sidebar-resizing");
+  event.preventDefault?.();
+  return true;
+}
+
+function onGlobalPointerMove(event) {
+  if (!state.sidebarResize) {
+    return;
+  }
+  setSidebarWidth(sidebarWidthFromClientX(event.clientX), { persist: false });
+}
+
+function endSidebarResize() {
+  if (!state.sidebarResize) {
+    return false;
+  }
+  state.sidebarResize = null;
+  elements.appShell?.classList.remove("sidebar-resizing");
+  storeSidebarWidth();
+  return true;
 }
 
 function splitActivePane() {
@@ -552,7 +655,10 @@ function renderJsonNode(node, depth, pane) {
   const toggle = node.children.length
     ? `<button class="tree-toggle" type="button" data-toggle-json="${escapeAttribute(node.path)}">${expanded ? "▾" : "▸"}</button>`
     : `<span class="tree-toggle"></span>`;
-  const marker = node.annotation ? `<span class="annotation-dot"></span>` : "";
+  const rowClass = node.annotation ? "json-tree-row-annotated" : "";
+  const marker = node.annotation
+    ? `<span class="annotation-marker"><span class="annotation-dot"></span><span class="annotation-glyph" aria-hidden="true">✦</span></span>`
+    : "";
   const key = node.display_key || node.label;
   const value = node.display_value;
   const icon = renderJsonNodeIcon(node);
@@ -561,7 +667,7 @@ function renderJsonNode(node, depth, pane) {
     : "";
   return `
     <div class="tree-node ${selected ? "selected" : ""}">
-      <div class="tree-row json-tree-row" data-json-node="${escapeAttribute(node.id)}" data-node-class="${escapeAttribute(node.node_class || "string")}" data-value-type="${escapeAttribute(node.value_type || "string")}" ${rowStyle}>
+      <div class="tree-row json-tree-row ${rowClass}" data-json-node="${escapeAttribute(node.id)}" data-node-class="${escapeAttribute(node.node_class || "string")}" data-value-type="${escapeAttribute(node.value_type || "string")}" ${rowStyle}>
         ${toggle}
         <span class="tree-label json-tree-label">${marker}${icon}<span class="json-node-key">${escapeHtml(key)}</span>${value ? `<span class="json-node-value json-${escapeAttribute(node.value_type || "string")}">${escapeHtml(value)}</span>` : ""}</span>
         <span class="file-size json-node-badge">${escapeHtml(node.style)}</span>
@@ -861,7 +967,8 @@ function renderAnnotateButton(path, annotation) {
   }
   const payload = annotation ? escapeAttribute(JSON.stringify(annotation)) : "";
   const label = annotation ? "Edit annotation" : "Annotate";
-  return `<button class="title-button" type="button" data-annotate="${escapeAttribute(path)}" data-annotation="${payload}">${label}</button>`;
+  const stateClass = annotation ? "annotate-button-active" : "annotate-button-pending";
+  return `<button class="title-button annotate-button ${stateClass}" type="button" data-annotate="${escapeAttribute(path)}" data-annotation="${payload}">${label}</button>`;
 }
 
 function renderAnnotationPanel(annotation, annotatable) {
@@ -941,7 +1048,7 @@ function renderDetailBlock(block) {
     case "code":
       return renderCodeBlock(block.value, block.language || "text");
     case "json":
-      return `<pre class="json-block">${escapeHtml(JSON.stringify(block.value, null, 2))}</pre>`;
+      return renderJsonFallbackBlock(block.value);
     case "text":
     default:
       return `<pre class="text-block">${escapeHtml(block.value || "")}</pre>`;
@@ -957,6 +1064,50 @@ function renderSyntaxBlock(render) {
     return render.html;
   }
   return renderCodeBlock(render?.value || "", render?.language || "text");
+}
+
+function renderJsonFallbackBlock(value) {
+  return `<pre class="syntax-block json-fallback-block"><code>${renderJsonFallbackValue(value, 0)}</code></pre>`;
+}
+
+function renderJsonFallbackValue(value, depth) {
+  if (Array.isArray(value)) {
+    if (!value.length) {
+      return "[]";
+    }
+    const indent = "  ".repeat(depth);
+    const childIndent = "  ".repeat(depth + 1);
+    const items = value
+      .map((item) => `${childIndent}${renderJsonFallbackValue(item, depth + 1)}`)
+      .join(",\n");
+    return `[\n${items}\n${indent}]`;
+  }
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value);
+    if (!entries.length) {
+      return "{}";
+    }
+    const indent = "  ".repeat(depth);
+    const childIndent = "  ".repeat(depth + 1);
+    const items = entries.map(([key, entryValue]) => (
+      `${childIndent}<span class="json-fallback-key">${escapeHtml(JSON.stringify(key))}</span>` +
+      `<span class="json-fallback-punctuation">: </span>${renderJsonFallbackValue(entryValue, depth + 1)}`
+    )).join(",\n");
+    return `{\n${items}\n${indent}}`;
+  }
+  if (typeof value === "string") {
+    return `<span class="json-fallback-string">${escapeHtml(JSON.stringify(value))}</span>`;
+  }
+  if (typeof value === "number") {
+    return `<span class="json-fallback-number">${escapeHtml(String(value))}</span>`;
+  }
+  if (typeof value === "boolean") {
+    return `<span class="json-fallback-boolean">${value ? "true" : "false"}</span>`;
+  }
+  if (value === null) {
+    return `<span class="json-fallback-null">null</span>`;
+  }
+  return escapeHtml(String(value));
 }
 
 function renderMarkdown(value) {
@@ -1402,3 +1553,6 @@ function escapeSelectorValue(value) {
 
 globalThis.createPaneState = createPaneState;
 globalThis.loadPreviewForPane = loadPreviewForPane;
+globalThis.loadStoredSidebarWidth = loadStoredSidebarWidth;
+globalThis.setSidebarWidth = setSidebarWidth;
+globalThis.canResizeSidebar = canResizeSidebar;
