@@ -35,7 +35,10 @@ uv run skim-web .
 ```
 
 The current implementation is Python-first and localhost-only, backed by typed
-preview payloads from `/api/preview`.
+preview payloads from `/api/preview`. The browser shell now includes multi-pane
+preview work, an active-pane file target, a command palette, local dark/light
+themes, bundled JetBrains Mono assets, and explicit notebook previews for
+`.ipynb` files.
 
 See the full target design spec here:
 

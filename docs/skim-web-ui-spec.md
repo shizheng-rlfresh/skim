@@ -178,6 +178,7 @@ Canonical file preview endpoint. Response `kind` is one of:
 - `text`
 - `markdown`
 - `csv`
+- `notebook`
 - `json_inspector`
 - `trajectory`
 - `too_large`
@@ -234,6 +235,57 @@ Canonical file preview endpoint. Response `kind` is one of:
   "parse_error": null,
   "truncated_rows": false,
   "truncated_columns": false
+}
+```
+
+#### `notebook`
+
+```json
+{
+  "kind": "notebook",
+  "name": "analysis.ipynb",
+  "path": "analysis.ipynb",
+  "language": "python",
+  "summary": {
+    "title": "Notebook Preview",
+    "cell_count": 2,
+    "nbformat": 4,
+    "nbformat_minor": 5
+  },
+  "cells": [
+    {
+      "id": "cell-1",
+      "kind": "markdown",
+      "title": "Markdown Cell 1",
+      "render": {
+        "kind": "markdown",
+        "value": "# Title\n..."
+      },
+      "outputs": []
+    },
+    {
+      "id": "cell-2",
+      "kind": "code",
+      "title": "Code Cell 2",
+      "render": {
+        "kind": "syntax",
+        "language": "python",
+        "line_numbers": true,
+        "value": "print('hi')\n",
+        "html": "<div class=\"syntax-block\">...</div>"
+      },
+      "outputs": [
+        {
+          "id": "cell-2-output-1",
+          "title": "Output 2.1",
+          "render": {
+            "kind": "text",
+            "value": "hi\n"
+          }
+        }
+      ]
+    }
+  ]
 }
 ```
 

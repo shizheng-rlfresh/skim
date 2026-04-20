@@ -105,6 +105,67 @@ def test_api_preview_falls_back_to_text_for_invalid_json(tmp_path):
     assert payload["content"] == "{not json"
 
 
+def test_api_preview_uses_explicit_notebook_payload(tmp_path):
+    """Notebook files should get a dedicated preview kind with flattened cells."""
+    test_file = tmp_path / "notebook.ipynb"
+    test_file.write_text(
+        json.dumps(
+            {
+                "cells": [
+                    {
+                        "cell_type": "markdown",
+                        "metadata": {},
+                        "source": ["# Title\n", "\n", "Notebook body\n"],
+                    },
+                    {
+                        "cell_type": "code",
+                        "metadata": {},
+                        "source": ["print('hi')\n"],
+                        "outputs": [
+                            {"output_type": "stream", "name": "stdout", "text": ["hi\n"]},
+                        ],
+                    },
+                ],
+                "metadata": {"language_info": {"name": "python"}},
+                "nbformat": 4,
+                "nbformat_minor": 5,
+            }
+        )
+    )
+
+    with running_server(tmp_path) as base_url:
+        status, payload = request_json(
+            base_url,
+            "/api/preview?path=" + urllib.parse.quote("notebook.ipynb"),
+        )
+
+    assert status == 200
+    assert payload["kind"] == "notebook"
+    assert payload["language"] == "python"
+    assert payload["summary"]["cell_count"] == 2
+    assert payload["cells"][0]["kind"] == "markdown"
+    assert payload["cells"][1]["kind"] == "code"
+    assert payload["cells"][1]["render"]["kind"] == "syntax"
+    assert payload["cells"][1]["outputs"][0]["render"]["kind"] == "text"
+
+
+def test_api_preview_invalid_notebook_falls_back_to_text(tmp_path):
+    """Broken notebook JSON should still degrade to a syntax-highlighted text preview."""
+    test_file = tmp_path / "broken.ipynb"
+    test_file.write_text("{not json")
+
+    with running_server(tmp_path) as base_url:
+        status, payload = request_json(
+            base_url,
+            "/api/preview?path=" + urllib.parse.quote("broken.ipynb"),
+        )
+
+    assert status == 200
+    assert payload["kind"] == "text"
+    assert payload["language"] == "json"
+    assert payload["render"]["kind"] == "syntax"
+
+
 def test_api_preview_keeps_wrapped_trajectory_in_json_inspector(tmp_path):
     """Wrapped local trajectories should stay in the unified JSON inspector."""
     test_file = tmp_path / "trajectory.json"
@@ -229,6 +290,19 @@ def test_stylesheet_includes_syntax_theme_classes(tmp_path):
 
     assert ".syntax-block" in css
     assert ".tok-k" in css
+
+
+def test_stylesheet_bundles_font_face_and_light_theme_tokens(tmp_path):
+    """The bundled stylesheet should ship local fonts and both shell themes."""
+    with running_server(tmp_path) as base_url:
+        request = urllib.request.Request(base_url + "/styles.css")
+        with urllib.request.urlopen(request) as response:
+            css = response.read().decode()
+
+    assert '@font-face' in css
+    assert 'JetBrains Mono' in css
+    assert ':root[data-theme="light"]' in css
+    assert "--syn-keyword" in css
 
 
 def test_real_output_json_stays_in_json_inspector_and_keeps_trajectory_branch():

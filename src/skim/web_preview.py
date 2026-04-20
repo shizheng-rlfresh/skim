@@ -28,6 +28,9 @@ from .preview import (
     NOTEBOOK_EXTENSIONS,
     SYNTAX_MAP,
     _clip_csv_cell,
+    _looks_like_notebook,
+    _notebook_language,
+    _notebook_text,
     _parse_csv,
 )
 from .trajectory import (
@@ -122,6 +125,13 @@ def serialize_preview(
             "content": content,
         }
 
+    if suffix in NOTEBOOK_EXTENSIONS:
+        return _serialize_notebook_file(
+            content,
+            source_path=resolved,
+            relative_path=relative_path,
+        )
+
     if suffix in JSON_EXTENSIONS:
         return _serialize_json_file(
             content,
@@ -184,6 +194,141 @@ def _serialize_json_file(
         annotation_store=store,
         relative_path=relative_path,
     )
+
+
+def _serialize_notebook_file(
+    content: str,
+    *,
+    source_path: Path,
+    relative_path: str,
+) -> dict[str, Any]:
+    try:
+        parsed = json.loads(content)
+    except json.JSONDecodeError:
+        return _text_payload(
+            source_path.name,
+            relative_path,
+            content,
+            language="json",
+        )
+
+    if not _looks_like_notebook(parsed):
+        return _text_payload(
+            source_path.name,
+            relative_path,
+            content,
+            language="json",
+        )
+
+    return _serialize_notebook_preview(
+        parsed,
+        name=source_path.name,
+        relative_path=relative_path,
+    )
+
+
+def _serialize_notebook_preview(
+    notebook: dict[str, Any],
+    *,
+    name: str,
+    relative_path: str,
+) -> dict[str, Any]:
+    cells = notebook.get("cells")
+    if not isinstance(cells, list):
+        cells = []
+    language = _notebook_language(notebook.get("metadata"))
+    nbformat = notebook.get("nbformat")
+    nbformat_minor = notebook.get("nbformat_minor")
+
+    serialized_cells = [
+        _serialize_notebook_cell(cell, index=index, language=language)
+        for index, cell in enumerate(cells, start=1)
+    ]
+
+    return {
+        "kind": "notebook",
+        "name": name,
+        "path": relative_path,
+        "language": language,
+        "summary": {
+            "title": "Notebook Preview",
+            "cell_count": len(cells),
+            "nbformat": nbformat,
+            "nbformat_minor": nbformat_minor,
+        },
+        "cells": serialized_cells,
+    }
+
+
+def _serialize_notebook_cell(cell: Any, *, index: int, language: str) -> dict[str, Any]:
+    if not isinstance(cell, dict):
+        return {
+            "id": f"cell-{index}",
+            "kind": "raw",
+            "title": f"Raw Cell {index}",
+            "render": {"kind": "text", "value": "Unsupported cell payload"},
+            "outputs": [],
+        }
+
+    cell_type = cell.get("cell_type")
+    if not isinstance(cell_type, str):
+        cell_type = "raw"
+    source = _notebook_text(cell.get("source"))
+    if cell_type == "markdown":
+        render = {"kind": "markdown", "value": source or "_Empty markdown cell_"}
+    elif cell_type == "code":
+        render = _syntax_payload(source, language=language, line_numbers=True)
+    else:
+        render = {"kind": "text", "value": source}
+
+    outputs = cell.get("outputs")
+    serialized_outputs = []
+    if cell_type == "code" and isinstance(outputs, list):
+        serialized_outputs = [
+            _serialize_notebook_output(output, cell_index=index, output_index=output_index)
+            for output_index, output in enumerate(outputs, start=1)
+        ]
+
+    return {
+        "id": f"cell-{index}",
+        "kind": cell_type,
+        "title": f"{cell_type.title()} Cell {index}",
+        "render": render,
+        "outputs": serialized_outputs,
+    }
+
+
+def _serialize_notebook_output(
+    output: Any,
+    *,
+    cell_index: int,
+    output_index: int,
+) -> dict[str, Any]:
+    return {
+        "id": f"cell-{cell_index}-output-{output_index}",
+        "title": f"Output {cell_index}.{output_index}",
+        "render": _render_notebook_output(output),
+    }
+
+
+def _render_notebook_output(output: Any) -> dict[str, Any]:
+    if not isinstance(output, dict):
+        return {"kind": "text", "value": str(output)}
+    if output.get("output_type") == "stream":
+        return {"kind": "text", "value": _notebook_text(output.get("text"))}
+    if output.get("output_type") in {"display_data", "execute_result"}:
+        data = output.get("data")
+        if isinstance(data, dict):
+            markdown = data.get("text/markdown")
+            if markdown is not None:
+                return {"kind": "markdown", "value": _notebook_text(markdown)}
+            plain = data.get("text/plain")
+            if plain is not None:
+                return {"kind": "text", "value": _notebook_text(plain)}
+    traceback = output.get("traceback")
+    if traceback is not None:
+        return _syntax_payload(_notebook_text(traceback), language="text", line_numbers=False)
+    return _syntax_payload(json.dumps(output, indent=2), language="json", line_numbers=False)
 
 
 def serialize_json_inspector_preview(
