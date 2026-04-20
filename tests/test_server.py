@@ -299,8 +299,8 @@ def test_stylesheet_bundles_font_face_and_light_theme_tokens(tmp_path):
         with urllib.request.urlopen(request) as response:
             css = response.read().decode()
 
-    assert '@font-face' in css
-    assert 'JetBrains Mono' in css
+    assert "@font-face" in css
+    assert "JetBrains Mono" in css
     assert ':root[data-theme="light"]' in css
     assert "--syn-keyword" in css
 
