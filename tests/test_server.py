@@ -469,6 +469,18 @@ def test_stylesheet_uses_stronger_outer_pane_frame_than_inner_cards(tmp_path):
     assert "border: 1px solid var(--border-subtle);" in css
 
 
+def test_stylesheet_keeps_modal_backdrop_above_pane_and_resizer_layers(tmp_path):
+    """The annotation modal should stack above pane frames and resize handles."""
+    with running_server(tmp_path) as base_url:
+        with urllib.request.urlopen(base_url + "/styles.css") as response:
+            css = response.read().decode()
+
+    assert ".split-resizer" in css
+    assert "z-index: 2;" in css
+    assert ".modal-backdrop" in css
+    assert "z-index: 20;" in css
+
+
 def test_status_bar_copy_and_typography_match_current_behavior(tmp_path):
     """The shell should only advertise working hints and use larger footer text."""
     with running_server(tmp_path) as base_url:
