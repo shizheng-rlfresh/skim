@@ -29,13 +29,19 @@ from .trajectory import (
     AnnotationStore,
     JsonInspectorItem,
     _bundle_summary,
+    _decode_nested_json,
     _decoded_tool_result,
+    _display_label,
     _event_payload,
     _event_text,
     _format_raw_path,
+    _guess_code_lexer,
+    _has_human_text,
     _hermes_summary,
     _interaction_payload,
     _interaction_status,
+    _is_empty_value,
+    _is_scalar_metadata,
     _json_tree_label,
     _json_type_name,
     _looks_like_bundle,
@@ -47,6 +53,8 @@ from .trajectory import (
     _metadata_header,
     _metadata_lines,
     _overlay_trajectory_target,
+    _promote_wrapper_value,
+    _section_collapsed,
     _status_value,
     _submission_summary_payload,
     _trajectory_event_paths,
@@ -151,16 +159,17 @@ def _serialize_json_file(
         )
 
     store = annotation_store or AnnotationStore(review_root)
-    trajectory_payload = serialize_trajectory_preview(
-        parsed,
-        source_path=source_path,
-        review_root=review_root,
-        annotation_store=store,
-    )
-    if trajectory_payload is not None:
-        trajectory_payload["name"] = source_path.name
-        trajectory_payload["path"] = relative_path
-        return trajectory_payload
+    if _is_bare_trajectory_object(parsed):
+        trajectory_payload = serialize_trajectory_preview(
+            parsed,
+            source_path=source_path,
+            review_root=review_root,
+            annotation_store=store,
+        )
+        if trajectory_payload is not None:
+            trajectory_payload["name"] = source_path.name
+            trajectory_payload["path"] = relative_path
+            return trajectory_payload
 
     return serialize_json_inspector_preview(
         parsed,
@@ -378,6 +387,7 @@ class _JsonInspectorSerializer:
             "type_name": _json_type_name(item.raw_value),
             "key": item.key,
             "children": children or [],
+            "detail": _detail_payload_for_item(item),
         }
         if item.synthetic:
             detail_value = item.detail if item.detail is not None else item.raw_value
@@ -426,7 +436,7 @@ class _JsonInspectorSerializer:
             parent_children.append(self._make_node(item))
             return
 
-        trajectory, base_path = _overlay_trajectory_target(self.data, value, raw_path)
+        trajectory, base_path = _web_overlay_trajectory_target(self.data, value, raw_path)
         if trajectory is not None:
             self._add_trajectory_overlay(parent_children, trajectory, base_path)
 
@@ -654,6 +664,187 @@ def _text_payload(
     }
 
 
+def _detail_payload_for_item(item: JsonInspectorItem) -> dict[str, Any]:
+    """Serialize one JSON-inspector detail pane using the TUI's heuristics."""
+    value = item.detail if item.synthetic and item.detail is not None else item.raw_value
+    if item.synthetic and isinstance(value, dict | list):
+        blocks = _serialize_structured_detail(value, nested=False)
+    elif item.key:
+        blocks = _serialize_keyed_value(item.key, value)
+    else:
+        blocks = _serialize_payload_detail(value)
+    return {"kind": "detail", "blocks": blocks}
+
+
+def _serialize_payload_detail(value: Any) -> list[dict[str, Any]]:
+    """Serialize an arbitrary payload into structured browser detail blocks."""
+    decoded = _decode_nested_json(value)
+    if isinstance(decoded, dict | list):
+        promoted = _promote_wrapper_value(decoded)
+        if promoted is not None:
+            return _serialize_structured_detail(promoted, nested=True)
+        if _has_human_text(decoded):
+            return _serialize_structured_detail(decoded, nested=True)
+        return [_json_detail_block(decoded)]
+    if decoded is None:
+        return [_text_detail_block("")]
+    return _serialize_string_detail(str(decoded))
+
+
+def _serialize_string_detail(value: str) -> list[dict[str, Any]]:
+    if not value:
+        return [_text_detail_block("")]
+
+    decoded = _try_decode_json(value)
+    if isinstance(decoded, dict | list):
+        promoted = _promote_wrapper_value(decoded)
+        if promoted is not None:
+            return _serialize_structured_detail(promoted, nested=True)
+        if _has_human_text(decoded):
+            return _serialize_structured_detail(decoded, nested=True)
+        return [_json_detail_block(decoded)]
+
+    if _looks_like_markdown(value):
+        return [{"kind": "markdown", "value": value}]
+    if _looks_like_preformatted_text(value):
+        return [{"kind": "code", "language": "text", "value": value}]
+    return [_text_detail_block(value)]
+
+
+def _serialize_structured_detail(
+    value: Any,
+    *,
+    nested: bool,
+) -> list[dict[str, Any]]:
+    if isinstance(value, dict):
+        return _serialize_dict_sections(value, nested=nested)
+    if isinstance(value, list):
+        return _serialize_list_sections(value, nested=nested)
+    return _serialize_payload_detail(value)
+
+
+def _serialize_dict_sections(
+    value: dict[str, Any],
+    *,
+    nested: bool,
+) -> list[dict[str, Any]]:
+    blocks: list[dict[str, Any]] = []
+    metadata: list[dict[str, str]] = []
+    if "value" in value and not _is_empty_value(_decode_nested_json(value["value"])):
+        blocks.extend(_serialize_payload_detail(_decode_nested_json(value["value"])))
+    for key, item in value.items():
+        if key == "value":
+            continue
+        decoded = _decode_nested_json(item)
+        if _is_empty_value(decoded):
+            continue
+        if _is_scalar_metadata(key, decoded):
+            metadata.append({"label": _display_label(key), "value": str(decoded)})
+            continue
+        collapsed = _section_collapsed(key, nested=nested)
+        blocks.append(
+            {
+                "kind": "section",
+                "title": _display_label(key),
+                "collapsed": collapsed,
+                "secondary": collapsed,
+                "blocks": _serialize_keyed_value(str(key), decoded),
+            }
+        )
+    if metadata:
+        blocks = [{"kind": "fields", "fields": metadata}] + blocks
+    if blocks:
+        return blocks
+    return [_json_detail_block(value)]
+
+
+def _serialize_list_sections(
+    value: list[Any],
+    *,
+    nested: bool,
+) -> list[dict[str, Any]]:
+    if not _has_human_text(value):
+        return [_json_detail_block(value)]
+
+    blocks: list[dict[str, Any]] = []
+    for index, item in enumerate(value, start=1):
+        decoded = _decode_nested_json(item)
+        if _is_empty_value(decoded):
+            continue
+        blocks.append(
+            {
+                "kind": "section",
+                "title": f"Item {index}",
+                "collapsed": nested,
+                "secondary": nested,
+                "blocks": _serialize_keyed_value("", decoded),
+            }
+        )
+    if blocks:
+        return blocks
+    return [_json_detail_block(value)]
+
+
+def _serialize_keyed_value(key: str, value: Any) -> list[dict[str, Any]]:
+    normalized_key = key.lower()
+    if isinstance(value, str):
+        return _serialize_keyed_string(normalized_key, value)
+    if isinstance(value, dict):
+        promoted = _promote_wrapper_value(value)
+        if promoted is not None:
+            return _serialize_structured_detail(promoted, nested=True)
+        if _has_human_text(value):
+            return _serialize_dict_sections(value, nested=True)
+        return [_json_detail_block(value)]
+    if isinstance(value, list):
+        if normalized_key == "pages":
+            return _serialize_pages(value)
+        if _has_human_text(value):
+            return _serialize_list_sections(value, nested=True)
+        return [_json_detail_block(value)]
+    return [_text_detail_block(str(value))]
+
+
+def _serialize_keyed_string(key: str, value: str) -> list[dict[str, Any]]:
+    decoded = _try_decode_json(value)
+    if isinstance(decoded, dict | list):
+        promoted = _promote_wrapper_value(decoded)
+        if promoted is not None:
+            return _serialize_structured_detail(promoted, nested=True)
+        if _has_human_text(decoded):
+            return _serialize_structured_detail(decoded, nested=True)
+        return [_json_detail_block(decoded)]
+    if key == "command":
+        return [{"kind": "code", "language": "bash", "value": value}]
+    if key == "code":
+        return [{"kind": "code", "language": _guess_code_lexer(value), "value": value}]
+    return _serialize_string_detail(value)
+
+
+def _serialize_pages(value: list[Any]) -> list[dict[str, Any]]:
+    blocks: list[dict[str, Any]] = []
+    for index, item in enumerate(value, start=1):
+        decoded = _decode_nested_json(item)
+        blocks.append(
+            {
+                "kind": "section",
+                "title": f"Page {index}",
+                "collapsed": True,
+                "secondary": True,
+                "blocks": _serialize_keyed_value("text", decoded),
+            }
+        )
+    return blocks or [_json_detail_block(value)]
+
+
+def _json_detail_block(value: Any) -> dict[str, Any]:
+    return {"kind": "json", "value": value}
+
+
+def _text_detail_block(value: str) -> dict[str, Any]:
+    return {"kind": "text", "value": value}
+
+
 def _render_value(value: Any, *, key: str = "") -> dict[str, Any]:
     decoded = _decode_json_value(value)
     if isinstance(decoded, dict | list):
@@ -734,3 +925,40 @@ def _relative_path(path: Path, root: Path) -> str:
         return path.relative_to(root).as_posix()
     except ValueError:
         return path.name
+
+
+def _is_bare_trajectory_object(data: Any) -> bool:
+    """Return whether the file itself is a bare trajectory object."""
+    trajectory = extract_trajectory(data)
+    return trajectory is not None and trajectory is data
+
+
+def _web_overlay_trajectory_target(
+    root_data: Any,
+    value: Any,
+    raw_path: tuple[str | int, ...],
+) -> tuple[dict[str, Any] | None, tuple[str | int, ...]]:
+    """Route trajectory overlays for the browser without hiding rich wrapper keys."""
+    if raw_path == ():
+        if _is_bare_trajectory_object(value):
+            return value, raw_path
+        if isinstance(root_data, dict) and _uses_root_wrapped_overlay(root_data):
+            wrapped = extract_trajectory(root_data)
+            if wrapped is not None:
+                return wrapped, ("trajectory",)
+        return None, raw_path
+
+    if raw_path == ("trajectory",) and isinstance(root_data, dict):
+        trajectory = extract_trajectory({"trajectory": value})
+        if trajectory is value and _is_bare_trajectory_object(value):
+            return value, raw_path
+        return None, raw_path
+
+    if _is_bare_trajectory_object(value):
+        return value, raw_path
+    return None, raw_path
+
+
+def _uses_root_wrapped_overlay(value: Any) -> bool:
+    """Return whether a wrapped trajectory should surface summary nodes at the root."""
+    return isinstance(value, dict) and set(value) == {"trajectory"}

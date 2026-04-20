@@ -359,6 +359,62 @@ button {
   padding: 14px;
 }
 
+.detail-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.detail-fields {
+  display: grid;
+  gap: 10px;
+}
+
+.detail-field {
+  display: grid;
+  gap: 4px;
+}
+
+.detail-field-label {
+  color: var(--accent-strong);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.detail-field-value {
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.detail-section {
+  border: 1px solid rgba(126, 200, 255, 0.08);
+  border-radius: 12px;
+  background: rgba(15, 21, 29, 0.92);
+  overflow: hidden;
+}
+
+.detail-section.secondary {
+  border-color: rgba(126, 200, 255, 0.05);
+}
+
+.detail-section summary {
+  padding: 14px;
+  list-style: none;
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 1rem;
+}
+
+.detail-section summary::-webkit-details-marker {
+  display: none;
+}
+
+.detail-section-body {
+  display: grid;
+  gap: 12px;
+  padding: 0 14px 14px;
+}
+
 .code-block,
 .json-block,
 .text-block {

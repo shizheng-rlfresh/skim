@@ -369,7 +369,6 @@ function renderJsonInspector(preview) {
 
   state.selectedJsonNodeId = selected.id;
   state.selectedJsonPath = selected.path;
-  const detailValue = selected.render || renderFromRaw(resolvePath(preview.root_data, selected.raw_path), selected.key);
 
   return `
     <div class="split-view">
@@ -382,7 +381,7 @@ function renderJsonInspector(preview) {
           ${selected.annotatable ? renderAnnotateButton(selected.annotation_path, selected.annotation) : ""}
         </div>
         ${renderAnnotationPanel(selected.annotation, selected.annotatable)}
-        ${renderRenderValue(detailValue)}
+        ${renderDetailPayload(selected.detail)}
       </div>
     </div>
   `;
@@ -567,20 +566,51 @@ function renderRenderValue(render) {
   }
 }
 
-function renderFromRaw(value, key = "") {
-  if (value === null || value === undefined) {
-    return { kind: "text", value: "" };
+function renderDetailPayload(detail) {
+  if (!detail || detail.kind !== "detail") {
+    return `<div class="preview-block"><div class="selection-subtitle">No detail available.</div></div>`;
   }
-  if (typeof value === "object") {
-    return { kind: "json", value };
+  const blocks = (detail.blocks || []).map(renderDetailBlock).join("");
+  return `<div class="detail-stack">${blocks || `<div class="preview-block"><div class="selection-subtitle">No detail available.</div></div>`}</div>`;
+}
+
+function renderDetailBlock(block) {
+  if (!block) {
+    return "";
   }
-  if (key.toLowerCase() === "command") {
-    return { kind: "code", language: "bash", value: String(value) };
+  switch (block.kind) {
+    case "fields":
+      return `
+        <div class="preview-block detail-fields">
+          ${(block.fields || []).map((field) => `
+            <div class="detail-field">
+              <span class="detail-field-label">${escapeHtml(field.label)}</span>
+              <span class="detail-field-value">${escapeHtml(field.value)}</span>
+            </div>
+          `).join("")}
+        </div>
+      `;
+    case "section": {
+      const open = block.collapsed ? "" : " open";
+      const sectionClass = block.secondary ? "detail-section secondary" : "detail-section";
+      const body = (block.blocks || []).map(renderDetailBlock).join("");
+      return `
+        <details class="${sectionClass}"${open}>
+          <summary>${escapeHtml(block.title || "Section")}</summary>
+          <div class="detail-section-body">${body}</div>
+        </details>
+      `;
+    }
+    case "markdown":
+      return `<div class="preview-block">${renderMarkdown(block.value)}</div>`;
+    case "code":
+      return renderCodeBlock(block.value, block.language || "text");
+    case "json":
+      return `<pre class="json-block">${escapeHtml(JSON.stringify(block.value, null, 2))}</pre>`;
+    case "text":
+    default:
+      return `<pre class="text-block">${escapeHtml(block.value || "")}</pre>`;
   }
-  if (key.toLowerCase() === "code") {
-    return { kind: "code", language: "text", value: String(value) };
-  }
-  return { kind: "text", value: String(value) };
 }
 
 function renderCodeBlock(value, language) {
@@ -609,17 +639,6 @@ function flattenNodes(nodes) {
     result.push(...flattenNodes(node.children || []));
   }
   return result;
-}
-
-function resolvePath(value, rawPath) {
-  let current = value;
-  for (const segment of rawPath || []) {
-    if (current === null || current === undefined) {
-      return undefined;
-    }
-    current = current[segment];
-  }
-  return current;
 }
 
 function decodeAnnotation(value) {
