@@ -184,7 +184,8 @@ button {
   border-top: 1px solid var(--border);
   border-bottom: 0;
   color: var(--fg-muted);
-  font-size: 11px;
+  font-size: 13px;
+  line-height: 1.4;
 }
 
 .status-left,
@@ -195,6 +196,11 @@ button {
   align-items: center;
   gap: 10px;
   min-width: 0;
+}
+
+.status-left,
+.status-right {
+  color: var(--fg-secondary);
 }
 
 .title-copy,
@@ -304,11 +310,14 @@ button {
 .split-resizer,
 .pane-row-resizer,
 .pane-col-resizer {
-  min-width: 0;
-  min-height: 0;
+  min-width: 12px;
+  min-height: 12px;
   border-radius: 999px;
   opacity: 0.7;
   touch-action: none;
+  pointer-events: auto;
+  position: relative;
+  z-index: 2;
 }
 
 .split-resizer,
@@ -325,6 +334,18 @@ button {
     );
 }
 
+.split-resizer,
+.pane-col-resizer,
+.sidebar-resizer {
+  cursor: col-resize;
+}
+
+.split-resizer,
+.pane-col-resizer {
+  width: 100%;
+  height: 100%;
+}
+
 .pane-row-resizer {
   background:
     linear-gradient(
@@ -336,6 +357,9 @@ button {
       transparent 6px,
       transparent 100%
     );
+  width: 100%;
+  height: 100%;
+  cursor: row-resize;
 }
 
 .split-resizer:hover,

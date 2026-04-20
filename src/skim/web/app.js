@@ -2,13 +2,15 @@ const MAX_PANES = 6;
 const DEFAULT_SIDEBAR_WIDTH = 220;
 const MIN_SIDEBAR_WIDTH = 180;
 const MAX_SIDEBAR_VIEWPORT_RATIO = 0.45;
-const RESIZER_GUTTER = 8;
+const RESIZER_GUTTER = 12;
 const STACKED_BREAKPOINT = 900;
 const MIN_SPLIT_RATIO = 20;
 const MAX_SPLIT_RATIO = 80;
 const MIN_TRACK_WEIGHT = 0.45;
 const PANE_LAYOUT_STORAGE_PREFIX = "skim-pane-layout-";
 const SPLIT_RATIO_STORAGE_PREFIX = "skim-split-ratio-";
+const DEFAULT_JSON_SPLIT_RATIO = loadStoredSplitRatio("json", 38);
+const DEFAULT_TRAJECTORY_SPLIT_RATIO = loadStoredSplitRatio("trajectory", 38);
 
 const elements = {};
 
@@ -21,8 +23,6 @@ const state = {
   nextPaneNumber: 2,
   sidebarVisible: true,
   sidebarWidth: loadStoredSidebarWidth(),
-  jsonSplitRatio: loadStoredSplitRatio("json", 38),
-  trajectorySplitRatio: loadStoredSplitRatio("trajectory", 38),
   activeResize: null,
   theme: loadStoredTheme(),
   palette: {
@@ -50,6 +50,8 @@ function createPaneState(id) {
     selectedJsonNodeId: null,
     selectedJsonPath: null,
     selectedStepId: null,
+    jsonSplitRatio: loadStoredSplitRatio("json", DEFAULT_JSON_SPLIT_RATIO, id),
+    trajectorySplitRatio: loadStoredSplitRatio("trajectory", DEFAULT_TRAJECTORY_SPLIT_RATIO, id),
   };
 }
 
@@ -437,6 +439,7 @@ function onGlobalPointerMove(event) {
     case "split":
       updateSplitRatioFromPointer(
         state.activeResize.kind,
+        state.activeResize.paneId,
         state.activeResize.element,
         event.clientX,
       );
@@ -466,7 +469,7 @@ function endActiveResize() {
     return false;
   }
   if (state.activeResize.type === "split") {
-    storeSplitRatio(state.activeResize.kind);
+    storeSplitRatio(state.activeResize.kind, paneById(state.activeResize.paneId));
   }
   if (state.activeResize.type === "pane-col" || state.activeResize.type === "pane-row") {
     storePaneLayout(state.activeResize.layoutKey);
@@ -581,10 +584,16 @@ function ensurePaneLayoutState(layoutKey) {
   return stored;
 }
 
-function loadStoredSplitRatio(kind, defaultRatio) {
+function loadStoredSplitRatio(kind, defaultRatio, paneId = null) {
   try {
-    const raw = globalThis.localStorage?.getItem(`${SPLIT_RATIO_STORAGE_PREFIX}${kind}`);
-    return clampSplitRatio(raw ? Number(raw) : defaultRatio);
+    if (paneId) {
+      const paneRaw = globalThis.localStorage?.getItem(splitRatioStorageKey(kind, paneId));
+      if (paneRaw != null) {
+        return clampSplitRatio(Number(paneRaw));
+      }
+    }
+    const raw = globalThis.localStorage?.getItem(splitRatioStorageKey(kind));
+    return clampSplitRatio(raw != null ? Number(raw) : defaultRatio);
   } catch (_error) {
     return clampSplitRatio(defaultRatio);
   }
@@ -592,10 +601,9 @@ function loadStoredSplitRatio(kind, defaultRatio) {
 
 function setStoredSplitRatio(kind, ratio, options = {}) {
   const clamped = clampSplitRatio(ratio);
-  state[splitStateKey(kind)] = clamped;
   if (options.persist !== false) {
     try {
-      globalThis.localStorage?.setItem(`${SPLIT_RATIO_STORAGE_PREFIX}${kind}`, String(clamped));
+      globalThis.localStorage?.setItem(splitRatioStorageKey(kind), String(clamped));
     } catch (_error) {
       // Ignore storage failures in local-only environments.
     }
@@ -603,12 +611,46 @@ function setStoredSplitRatio(kind, ratio, options = {}) {
   return clamped;
 }
 
-function storeSplitRatio(kind) {
-  return setStoredSplitRatio(kind, state[splitStateKey(kind)]);
+function splitRatioStorageKey(kind, paneId = null) {
+  return paneId
+    ? `${SPLIT_RATIO_STORAGE_PREFIX}${kind}-${paneId}`
+    : `${SPLIT_RATIO_STORAGE_PREFIX}${kind}`;
+}
+
+function storeSplitRatio(kind, pane = null) {
+  if (!pane) {
+    return setStoredSplitRatio(kind, defaultSplitRatio(kind));
+  }
+  return setPaneSplitRatio(pane, kind, pane[splitStateKey(kind)], { persist: true });
 }
 
 function splitStateKey(kind) {
   return `${kind}SplitRatio`;
+}
+
+function defaultSplitRatio(kind) {
+  return kind === "trajectory" ? DEFAULT_TRAJECTORY_SPLIT_RATIO : DEFAULT_JSON_SPLIT_RATIO;
+}
+
+function currentSplitRatio(pane, kind) {
+  const ratio = pane?.[splitStateKey(kind)];
+  return Number.isFinite(Number(ratio)) ? clampSplitRatio(ratio) : defaultSplitRatio(kind);
+}
+
+function setPaneSplitRatio(pane, kind, ratio, options = {}) {
+  if (!pane) {
+    return clampSplitRatio(ratio);
+  }
+  const clamped = clampSplitRatio(ratio);
+  pane[splitStateKey(kind)] = clamped;
+  if (options.persist !== false) {
+    try {
+      globalThis.localStorage?.setItem(splitRatioStorageKey(kind, pane.id), String(clamped));
+    } catch (_error) {
+      // Ignore storage failures in local-only environments.
+    }
+  }
+  return clamped;
 }
 
 function clampSplitRatio(value) {
@@ -726,26 +768,25 @@ function setRowWeightsForLayout(layoutKey, rowKey, weights) {
   state[layoutStateKey(layoutKey)] = weights;
 }
 
-function updateSplitRatioFromPointer(kind, element, clientX) {
-  if (!element) {
+function updateSplitRatioFromPointer(kind, paneId, element, clientX) {
+  const pane = paneById(paneId);
+  if (!element || !pane) {
     return;
   }
   const rect = element.getBoundingClientRect?.();
   const ratio = ((clientX - (rect?.left || 0)) / Math.max(1, rect?.width || 1)) * 100;
-  setStoredSplitRatio(kind, ratio, { persist: false });
-  applySplitLayout(kind);
+  const nextRatio = setPaneSplitRatio(pane, kind, ratio, { persist: false });
+  applySplitLayout(element, nextRatio);
 }
 
-function applySplitLayout(kind) {
-  const selector = kind === "json" ? "[data-json-shell]" : "[data-trajectory-shell]";
-  const ratio = state[splitStateKey(kind)];
-  elements.previewWork?.querySelectorAll(selector)?.forEach((shell) => {
-    shell.style.gridTemplateColumns = trackTemplate([ratio, 100 - ratio]);
-  });
+function applySplitLayout(element, ratio) {
+  if (!element) {
+    return;
+  }
+  element.style.gridTemplateColumns = splitTemplate(ratio);
 }
 
-function splitTemplate(kind) {
-  const ratio = state[splitStateKey(kind)];
+function splitTemplate(ratio) {
   return trackTemplate([ratio, 100 - ratio]);
 }
 
@@ -763,6 +804,7 @@ function onPreviewPointerDown(event) {
       {
         type: "split",
         kind,
+        paneId: splitResizer.closest("[data-pane-id]")?.dataset.paneId || state.activePaneId,
         element,
         pointerId: event.pointerId ?? null,
       },
@@ -955,6 +997,8 @@ async function loadPreviewForPane(path, paneId, options = {}) {
   try {
     pane.preview = await apiJson(`/api/preview?path=${encodeURIComponent(path)}`);
     pane.path = path;
+    pane.jsonSplitRatio = currentSplitRatio(pane, "json");
+    pane.trajectorySplitRatio = currentSplitRatio(pane, "trajectory");
     if (pane.preview.kind === "json_inspector") {
       initializeJsonState(pane, options.selectedJsonPath);
     } else {
@@ -1067,9 +1111,10 @@ function renderJsonInspector(pane) {
   if (!selected) {
     return `<div class="notice">Empty JSON payload.</div>`;
   }
+  const splitRatio = currentSplitRatio(pane, "json");
 
   return `
-    <div class="split-view" data-json-shell style="grid-template-columns:${escapeAttribute(splitTemplate("json"))}">
+    <div class="split-view" data-json-shell style="grid-template-columns:${escapeAttribute(splitTemplate(splitRatio))}">
       <div class="pane-list" data-json-pane-list>${renderJsonPaneList(pane)}</div>
       <div class="split-resizer" data-resize-split="json" aria-hidden="true"></div>
       <div class="detail-panel" data-json-detail>${renderJsonDetail(selected)}</div>
@@ -1194,6 +1239,7 @@ function updateJsonInspectorPreview(paneId = state.activePaneId) {
 
 function renderTrajectoryPreview(pane) {
   const selected = selectedTrajectoryStep(pane);
+  const splitRatio = currentSplitRatio(pane, "trajectory");
 
   if (!selected) {
     return `
@@ -1207,7 +1253,7 @@ function renderTrajectoryPreview(pane) {
   }
 
   return `
-    <div class="split-view" data-trajectory-shell style="grid-template-columns:${escapeAttribute(splitTemplate("trajectory"))}">
+    <div class="split-view" data-trajectory-shell style="grid-template-columns:${escapeAttribute(splitTemplate(splitRatio))}">
       <div class="pane-list" data-trajectory-list>
         ${renderTrajectoryStepList(pane.preview, selected)}
       </div>

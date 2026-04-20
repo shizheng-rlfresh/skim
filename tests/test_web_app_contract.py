@@ -387,11 +387,12 @@ state.panes[0].preview = {
   initial_node_id: "node-1",
 };
 state.panes[0].selectedJsonNodeId = "node-1";
-state.jsonSplitRatio = 42;
-state.trajectorySplitRatio = 36;
+state.panes[0].jsonSplitRatio = 42;
+state.panes[0].trajectorySplitRatio = 36;
 `, ctx);
 const jsonHtml = ctx.renderJsonInspector(vm.runInContext('state.panes[0]', ctx));
 const trajectoryHtml = ctx.renderTrajectoryPreview({
+  id: "pane-1",
   preview: {
     header: "traj",
     metadata_lines: [],
@@ -400,6 +401,7 @@ const trajectoryHtml = ctx.renderTrajectoryPreview({
     initial_step_id: "step-1",
   },
   selectedStepId: "step-1",
+  trajectorySplitRatio: 36,
 });
 console.log(JSON.stringify({
   hasJsonResizer: jsonHtml.includes('data-resize-split="json"'),
@@ -409,6 +411,86 @@ console.log(JSON.stringify({
     )
 
     assert result == {"hasJsonResizer": True, "hasTrajectoryResizer": True}
+
+
+def test_json_and_trajectory_split_ratios_are_pane_local():
+    """Each pane should render its own split ratio instead of sharing one global value."""
+    result = run_app_js(
+        """
+vm.runInContext(`
+state.panes = [createPaneState("pane-1"), createPaneState("pane-2")];
+state.panes[0].preview = {
+  kind: "json_inspector",
+  tree: [{
+    id: "node-1",
+    path: "$.task",
+    raw_path: ["task"],
+    label: "task",
+    display_key: "task",
+    display_value: "{1}",
+    value_type: "object",
+    node_class: "object",
+    style: "object",
+    type_name: "object",
+    annotation: null,
+    annotatable: true,
+    annotation_path: "$.task",
+    detail: { kind: "detail", blocks: [] },
+    children: [],
+  }],
+  initial_node_id: "node-1",
+};
+state.panes[1].preview = JSON.parse(JSON.stringify(state.panes[0].preview));
+state.panes[0].selectedJsonNodeId = "node-1";
+state.panes[1].selectedJsonNodeId = "node-1";
+state.panes[0].jsonSplitRatio = 31;
+state.panes[1].jsonSplitRatio = 64;
+state.panes[0].trajectorySplitRatio = 28;
+state.panes[1].trajectorySplitRatio = 59;
+`, ctx);
+const jsonA = ctx.renderJsonInspector(vm.runInContext('state.panes[0]', ctx));
+const jsonB = ctx.renderJsonInspector(vm.runInContext('state.panes[1]', ctx));
+const trajectoryA = ctx.renderTrajectoryPreview({
+  id: "pane-1",
+  preview: {
+    header: "traj",
+    metadata_lines: [],
+    final_output: { kind: "text", value: "done" },
+    steps: [{ id: "step-1", title: "Step 1", summary: "summary", items: [] }],
+    initial_step_id: "step-1",
+  },
+  selectedStepId: "step-1",
+  trajectorySplitRatio: 28,
+});
+const trajectoryB = ctx.renderTrajectoryPreview({
+  id: "pane-2",
+  preview: {
+    header: "traj",
+    metadata_lines: [],
+    final_output: { kind: "text", value: "done" },
+    steps: [{ id: "step-1", title: "Step 1", summary: "summary", items: [] }],
+    initial_step_id: "step-1",
+  },
+  selectedStepId: "step-1",
+  trajectorySplitRatio: 59,
+});
+console.log(JSON.stringify({
+  jsonAUsesOwnRatio: jsonA.includes('grid-template-columns:minmax(0, 31fr) 12px minmax(0, 69fr)'),
+  jsonBUsesOwnRatio: jsonB.includes('grid-template-columns:minmax(0, 64fr) 12px minmax(0, 36fr)'),
+  trajectoryAUsesOwnRatio:
+    trajectoryA.includes('grid-template-columns:minmax(0, 28fr) 12px minmax(0, 72fr)'),
+  trajectoryBUsesOwnRatio:
+    trajectoryB.includes('grid-template-columns:minmax(0, 59fr) 12px minmax(0, 41fr)'),
+}));
+"""
+    )
+
+    assert result == {
+        "jsonAUsesOwnRatio": True,
+        "jsonBUsesOwnRatio": True,
+        "trajectoryAUsesOwnRatio": True,
+        "trajectoryBUsesOwnRatio": True,
+    }
 
 
 def test_directory_row_click_toggles_without_triangle_target():
@@ -632,7 +714,7 @@ console.log(JSON.stringify({
         "gridLayout": {"cols": [2, 1, 1], "rows": [3, 1]},
         "jsonRatio": 44,
         "trajectoryRatio": 35,
-        "trackTemplate": "minmax(0, 2fr) 8px minmax(0, 1fr) 8px minmax(0, 1fr)",
+        "trackTemplate": "minmax(0, 2fr) 12px minmax(0, 1fr) 12px minmax(0, 1fr)",
     }
 
 

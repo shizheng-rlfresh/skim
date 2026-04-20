@@ -440,6 +440,21 @@ def test_stylesheet_defines_palette_and_split_resize_states(tmp_path):
     assert ".pane-grid.layout-grid" in css
 
 
+def test_status_bar_copy_and_typography_match_current_behavior(tmp_path):
+    """The shell should only advertise working hints and use larger footer text."""
+    with running_server(tmp_path) as base_url:
+        with urllib.request.urlopen(base_url + "/") as response:
+            html = response.read().decode()
+        with urllib.request.urlopen(base_url + "/styles.css") as response:
+            css = response.read().decode()
+
+    assert "Esc close" not in html
+    assert "⌘B sidebar" in html
+    assert "⌘K search" in html
+    assert ".status-bar" in css
+    assert "font-size: 13px;" in css
+
+
 def test_wrapped_output_json_stays_in_json_inspector_and_keeps_trajectory_branch(tmp_path):
     """Wrapped output artifacts should keep raw keys plus trajectory overlay children."""
     test_file = tmp_path / "output.json"
