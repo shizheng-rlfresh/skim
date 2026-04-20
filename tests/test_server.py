@@ -440,6 +440,18 @@ def test_stylesheet_defines_palette_and_split_resize_states(tmp_path):
     assert ".pane-grid.layout-grid" in css
 
 
+def test_stylesheet_uses_stronger_outer_pane_frame_than_inner_cards(tmp_path):
+    """Top-level pane shells should use a stronger border than inner preview cards."""
+    with running_server(tmp_path) as base_url:
+        with urllib.request.urlopen(base_url + "/styles.css") as response:
+            css = response.read().decode()
+
+    assert ".pane-shell" in css
+    assert "border: 1px solid var(--pane-frame-border);" in css
+    assert ".preview-card" in css
+    assert "border: 1px solid var(--border-subtle);" in css
+
+
 def test_status_bar_copy_and_typography_match_current_behavior(tmp_path):
     """The shell should only advertise working hints and use larger footer text."""
     with running_server(tmp_path) as base_url:

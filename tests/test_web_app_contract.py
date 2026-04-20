@@ -234,6 +234,56 @@ console.log(JSON.stringify({
     assert result == {"hasGenericKind": True, "hasGenericToken": True}
 
 
+def test_render_pane_shell_uses_human_readable_preview_labels():
+    """Pane headers should show user-facing type labels instead of raw preview kinds."""
+    result = run_app_js(
+        """
+const pythonHtml = ctx.renderPaneShell({
+  id: "pane-1",
+  path: "src/skim/server.py",
+  preview: {
+    kind: "text",
+    name: "server.py",
+    path: "src/skim/server.py",
+    language: "python",
+  },
+});
+const jsonHtml = ctx.renderPaneShell({
+  id: "pane-2",
+  path: "broken.json",
+  preview: {
+    kind: "text",
+    name: "broken.json",
+    path: "broken.json",
+    language: "json",
+  },
+});
+const inspectorHtml = ctx.renderPaneShell({
+  id: "pane-3",
+  path: "output.json",
+  preview: {
+    kind: "json_inspector",
+    name: "output.json",
+    path: "output.json",
+  },
+});
+console.log(JSON.stringify({
+  pythonLabel: pythonHtml.includes('<span class="pane-kind">Python</span>'),
+  jsonLabel: jsonHtml.includes('<span class="pane-kind">JSON</span>'),
+  inspectorLabel: inspectorHtml.includes('<span class="pane-kind">JSON</span>'),
+  rawTextMissing: !pythonHtml.includes('<span class="pane-kind">text</span>'),
+}));
+"""
+    )
+
+    assert result == {
+        "pythonLabel": True,
+        "jsonLabel": True,
+        "inspectorLabel": True,
+        "rawTextMissing": True,
+    }
+
+
 def test_render_json_node_uses_structured_icon_key_and_value_segments():
     """JSON tree rows should render typed icons and separate key/value spans."""
     result = run_app_js(
@@ -696,12 +746,20 @@ def test_pane_layout_and_split_ratio_helpers_persist_resizable_tracks():
     result = run_app_js(
         """
 ctx.setStoredPaneLayout("row-3", { cols: [2, 1, 1] });
-ctx.setStoredPaneLayout("grid-2x3", { cols: [2, 1, 1], rows: [3, 1] });
+ctx.setStoredPaneLayout("grid-2x3", {
+  topCols: [3, 1, 1],
+  bottomCols: [1, 2, 1],
+  rows: [3, 1],
+});
 ctx.setStoredSplitRatio("json", 44);
 ctx.setStoredSplitRatio("trajectory", 35);
 console.log(JSON.stringify({
   rowLayout: ctx.loadStoredPaneLayout("row-3", { cols: [1, 1, 1] }),
-  gridLayout: ctx.loadStoredPaneLayout("grid-2x3", { cols: [1, 1, 1], rows: [1, 1] }),
+  gridLayout: ctx.loadStoredPaneLayout("grid-2x3", {
+    topCols: [1, 1, 1],
+    bottomCols: [1, 1, 1],
+    rows: [1, 1],
+  }),
   jsonRatio: ctx.loadStoredSplitRatio("json", 38),
   trajectoryRatio: ctx.loadStoredSplitRatio("trajectory", 38),
   trackTemplate: ctx.trackTemplate([2, 1, 1]),
@@ -711,10 +769,59 @@ console.log(JSON.stringify({
 
     assert result == {
         "rowLayout": {"cols": [2, 1, 1]},
-        "gridLayout": {"cols": [2, 1, 1], "rows": [3, 1]},
+        "gridLayout": {"topCols": [3, 1, 1], "bottomCols": [1, 2, 1], "rows": [3, 1]},
         "jsonRatio": 44,
         "trajectoryRatio": 35,
         "trackTemplate": "minmax(0, 2fr) 12px minmax(0, 1fr) 12px minmax(0, 1fr)",
+    }
+
+
+def test_grid_2x3_row_column_updates_are_independent():
+    """Top and bottom 2x3 row column weights should resize independently."""
+    result = run_app_js(
+        """
+vm.runInContext(`
+state.panes = [
+  createPaneState("pane-1"),
+  createPaneState("pane-2"),
+  createPaneState("pane-3"),
+  createPaneState("pane-4"),
+  createPaneState("pane-5"),
+  createPaneState("pane-6"),
+];
+state.gridTopCols = [3, 1, 1];
+state.gridBottomCols = [1, 2, 1];
+state.gridRows = [2, 1];
+`, ctx);
+ctx.setRowWeightsForLayout("grid-2x3", "grid-2x3-top", [2, 2, 1]);
+const afterTopResize = {
+  top: ctx.rowWeightsForLayout("grid-2x3", "grid-2x3-top"),
+  bottom: ctx.rowWeightsForLayout("grid-2x3", "grid-2x3-bottom"),
+  layout: ctx.currentPaneLayout("grid-2x3"),
+};
+ctx.setRowWeightsForLayout("grid-2x3", "grid-2x3-bottom", [1, 1, 2]);
+console.log(JSON.stringify({
+  afterTopResize,
+  afterBottomResize: {
+    top: ctx.rowWeightsForLayout("grid-2x3", "grid-2x3-top"),
+    bottom: ctx.rowWeightsForLayout("grid-2x3", "grid-2x3-bottom"),
+    layout: ctx.currentPaneLayout("grid-2x3"),
+  },
+}));
+"""
+    )
+
+    assert result == {
+        "afterTopResize": {
+            "top": [2, 2, 1],
+            "bottom": [1, 2, 1],
+            "layout": {"topCols": [2, 2, 1], "bottomCols": [1, 2, 1], "rows": [2, 1]},
+        },
+        "afterBottomResize": {
+            "top": [2, 2, 1],
+            "bottom": [1, 1, 2],
+            "layout": {"topCols": [2, 2, 1], "bottomCols": [1, 1, 2], "rows": [2, 1]},
+        },
     }
 
 

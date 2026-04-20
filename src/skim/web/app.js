@@ -223,7 +223,7 @@ function renderWorkspace() {
 function renderPaneShell(pane) {
   const active = pane.id === state.activePaneId;
   const title = pane.preview?.name || "Preview";
-  const kind = pane.preview?.kind || "empty";
+  const kind = previewLabel(pane.preview);
   const path = pane.path || "No file selected";
   const closeButton = state.panes.length > 1
     ? `<button class="title-button" type="button" data-close-pane="${escapeAttribute(pane.id)}">×</button>`
@@ -246,6 +246,50 @@ function renderPaneShell(pane) {
       </div>
     </article>
   `;
+}
+
+function previewLabel(preview) {
+  if (!preview) {
+    return "Empty";
+  }
+  if (preview.kind === "text") {
+    return languageLabel(preview.language);
+  }
+  const kindLabels = {
+    markdown: "Markdown",
+    csv: "CSV",
+    notebook: "Notebook",
+    json_inspector: "JSON",
+    trajectory: "Trajectory",
+    too_large: "Too Large",
+    error: "Error",
+  };
+  return kindLabels[preview.kind] || languageLabel(preview.language);
+}
+
+function languageLabel(language) {
+  if (!language) {
+    return "Text";
+  }
+  const labels = {
+    python: "Python",
+    javascript: "JavaScript",
+    typescript: "TypeScript",
+    json: "JSON",
+    yaml: "YAML",
+    toml: "TOML",
+    html: "HTML",
+    css: "CSS",
+    sql: "SQL",
+    bash: "Shell",
+    shell: "Shell",
+    xml: "XML",
+    rust: "Rust",
+    go: "Go",
+    markdown: "Markdown",
+    text: "Text",
+  };
+  return labels[language] || language.charAt(0).toUpperCase() + language.slice(1);
 }
 
 function renderPaneGridMarkup(panes) {
@@ -503,7 +547,7 @@ function paneLayoutKey(count) {
 
 function defaultPaneLayout(layoutKey) {
   if (layoutKey === "grid-2x3") {
-    return { cols: [1, 1, 1], rows: [1, 1] };
+    return { topCols: [1, 1, 1], bottomCols: [1, 1, 1], rows: [1, 1] };
   }
   if (layoutKey.startsWith("row-")) {
     const count = Number(layoutKey.split("-")[1] || 1);
@@ -530,6 +574,20 @@ function loadStoredPaneLayout(layoutKey, fallback = defaultPaneLayout(layoutKey)
       return fallback;
     }
     const parsed = JSON.parse(raw);
+    if (layoutKey === "grid-2x3") {
+      const sharedCols = normalizeTrackWeights(parsed.cols, fallback.topCols.length);
+      return {
+        topCols: normalizeTrackWeights(
+          parsed.topCols || sharedCols,
+          fallback.topCols.length,
+        ),
+        bottomCols: normalizeTrackWeights(
+          parsed.bottomCols || sharedCols,
+          fallback.bottomCols.length,
+        ),
+        rows: normalizeTrackWeights(parsed.rows, fallback.rows.length),
+      };
+    }
     return {
       cols: normalizeTrackWeights(parsed.cols, fallback.cols.length),
       rows: fallback.rows ? normalizeTrackWeights(parsed.rows, fallback.rows.length) : undefined,
@@ -559,7 +617,8 @@ function currentPaneLayout(layoutKey = paneLayoutKey(state.panes.length)) {
   const fallback = defaultPaneLayout(layoutKey);
   if (layoutKey === "grid-2x3") {
     return {
-      cols: state.gridCols || loadStoredPaneLayout(layoutKey, fallback).cols,
+      topCols: state.gridTopCols || loadStoredPaneLayout(layoutKey, fallback).topCols,
+      bottomCols: state.gridBottomCols || loadStoredPaneLayout(layoutKey, fallback).bottomCols,
       rows: state.gridRows || loadStoredPaneLayout(layoutKey, fallback).rows,
     };
   }
@@ -576,12 +635,25 @@ function ensurePaneLayoutState(layoutKey) {
   const fallback = defaultPaneLayout(layoutKey);
   const stored = loadStoredPaneLayout(layoutKey, fallback);
   if (layoutKey === "grid-2x3") {
-    state.gridCols = stored.cols;
-    state.gridRows = stored.rows;
-    return stored;
+    if (!Array.isArray(state.gridTopCols)) {
+      state.gridTopCols = stored.topCols;
+    }
+    if (!Array.isArray(state.gridBottomCols)) {
+      state.gridBottomCols = stored.bottomCols;
+    }
+    if (!Array.isArray(state.gridRows)) {
+      state.gridRows = stored.rows;
+    }
+    return {
+      topCols: state.gridTopCols,
+      bottomCols: state.gridBottomCols,
+      rows: state.gridRows,
+    };
   }
-  state[layoutStateKey(layoutKey)] = stored.cols;
-  return stored;
+  if (!Array.isArray(state[layoutStateKey(layoutKey)])) {
+    state[layoutStateKey(layoutKey)] = stored.cols;
+  }
+  return { cols: state[layoutStateKey(layoutKey)] };
 }
 
 function loadStoredSplitRatio(kind, defaultRatio, paneId = null) {
@@ -688,11 +760,27 @@ function applyPaneGridLayout() {
   elements.paneGrid.style.gridTemplateRows = "";
   if (layoutKey === "grid-2x3") {
     elements.paneGrid.style.gridTemplateRows = trackTemplate(layout.rows);
-    applyPaneRowTemplate("grid-2x3-top", layout.cols);
-    applyPaneRowTemplate("grid-2x3-bottom", layout.cols.slice(0, Math.max(0, count - 3)));
+    applyPaneRowTemplate(
+      "grid-2x3-top",
+      layout.topCols.slice(0, gridRowPaneCount("grid-2x3-top")),
+    );
+    applyPaneRowTemplate(
+      "grid-2x3-bottom",
+      layout.bottomCols.slice(0, gridRowPaneCount("grid-2x3-bottom")),
+    );
     return;
   }
   applyPaneRowTemplate(layoutKey, layout.cols);
+}
+
+function gridRowPaneCount(rowKey) {
+  if (rowKey === "grid-2x3-top") {
+    return Math.min(3, state.panes.length);
+  }
+  if (rowKey === "grid-2x3-bottom") {
+    return Math.max(0, state.panes.length - 3);
+  }
+  return 0;
 }
 
 function applyPaneRowTemplate(rowKey, weights) {
@@ -749,20 +837,23 @@ function updatePaneRowFromPointer(layoutKey, index, clientY) {
 
 function rowWeightsForLayout(layoutKey, rowKey) {
   if (layoutKey === "grid-2x3") {
-    const base = state.gridCols || ensurePaneLayoutState(layoutKey).cols;
-    const count = rowKey === "grid-2x3-top" ? 3 : Math.max(0, state.panes.length - 3);
-    return base.slice(0, count);
+    const layout = ensurePaneLayoutState(layoutKey);
+    const count = gridRowPaneCount(rowKey);
+    if (rowKey === "grid-2x3-top") {
+      return (state.gridTopCols || layout.topCols).slice(0, count);
+    }
+    return (state.gridBottomCols || layout.bottomCols).slice(0, count);
   }
   return state[layoutStateKey(layoutKey)] || ensurePaneLayoutState(layoutKey).cols;
 }
 
 function setRowWeightsForLayout(layoutKey, rowKey, weights) {
   if (layoutKey === "grid-2x3") {
-    const next = [...(state.gridCols || ensurePaneLayoutState(layoutKey).cols)];
-    for (let index = 0; index < weights.length; index += 1) {
-      next[index] = weights[index];
+    if (rowKey === "grid-2x3-top") {
+      state.gridTopCols = [...weights];
+      return;
     }
-    state.gridCols = next;
+    state.gridBottomCols = [...weights];
     return;
   }
   state[layoutStateKey(layoutKey)] = weights;
