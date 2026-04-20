@@ -11,7 +11,7 @@ from functools import partial
 from http.server import HTTPServer
 from pathlib import Path
 
-from conftest import sample_trajectory
+from conftest import sample_hermes_transcript, sample_submission, sample_trajectory
 
 from skim.server import AnnotationStore, SkimHandler
 from skim.web_preview import serialize_preview
@@ -408,19 +408,28 @@ def test_stylesheet_defines_file_and_json_color_tokens(tmp_path):
     assert ".json-node-icon" in css
 
 
-def test_real_output_json_stays_in_json_inspector_and_keeps_trajectory_branch():
-    """The repo's wrapped output artifact should keep the JSON-inspector tree shape."""
-    repo_root = Path(__file__).resolve().parents[1]
-    payload = serialize_preview(
-        repo_root / "data" / "output.json",
-        browse_root=repo_root,
+def test_wrapped_output_json_stays_in_json_inspector_and_keeps_trajectory_branch(tmp_path):
+    """Wrapped output artifacts should keep raw keys plus trajectory overlay children."""
+    test_file = tmp_path / "output.json"
+    test_file.write_text(
+        json.dumps(
+            {
+                "task_id": "task-123",
+                "task": {"prompt": "Compare spray diary information."},
+                "task_path": "/app/tasks/task-123",
+                "trajectory": sample_trajectory(),
+            }
+        )
     )
 
+    payload = serialize_preview(test_file, browse_root=tmp_path)
+
     assert payload["kind"] == "json_inspector"
-    labels = [node["label"] for node in payload["tree"][:6]]
-    assert labels[0] == "Taskid f0cb3b77-768f-4fa1-a856-38904b44bef3"
+    labels = [node["label"] for node in payload["tree"][:4]]
+    assert labels[0] == "Task Id task-123"
     assert labels[1].startswith("Task {")
-    assert labels[2].startswith("Taskpath /app/tasks/f0cb3b77-768f-4fa1-a856-38904b44bef3")
+    assert labels[2] == "Task Path /app/tasks/task-123"
+    assert labels[3].startswith("Trajectory {")
     trajectory_node = next(node for node in payload["tree"] if node["path"] == "$.trajectory")
     assert [child["label"] for child in trajectory_node["children"][:3]] == [
         "Metadata",
@@ -429,12 +438,21 @@ def test_real_output_json_stays_in_json_inspector_and_keeps_trajectory_branch():
     ]
 
 
-def test_real_submission_json_serializes_structured_detail_blocks():
+def test_submission_json_serializes_structured_detail_blocks(tmp_path):
     """Human-facing JSON fields should serialize as structured detail, not one raw blob."""
-    repo_root = Path(__file__).resolve().parents[1]
+    submission = sample_submission()
+    submission["export_task_data_json"] = {
+        "prompt": "Compare spray diary information.",
+        "task_solution": "Chlorpyrifos appears slower to decay than expected.",
+        "agentic_grader_guidance": "Identify Chlorpyrifos.",
+        "review": {"summary": "Looks good."},
+    }
+    test_file = tmp_path / "submission.json"
+    test_file.write_text(json.dumps(submission))
+
     payload = serialize_preview(
-        repo_root / "data" / "Factors affecting WHPs - v2.json",
-        browse_root=repo_root,
+        test_file,
+        browse_root=tmp_path,
     )
 
     export_node = next(
@@ -443,12 +461,13 @@ def test_real_submission_json_serializes_structured_detail_blocks():
 
     assert payload["kind"] == "json_inspector"
     assert export_node["detail"]["kind"] == "detail"
-    section_titles = [
-        block["title"] for block in export_node["detail"]["blocks"] if block["kind"] == "section"
-    ]
-    assert "Prompt" in section_titles
-    assert "Task Solution" in section_titles
-    assert "Grader Guidance" in section_titles
+    fields_block = next(
+        block for block in export_node["detail"]["blocks"] if block["kind"] == "fields"
+    )
+    field_labels = [field["label"] for field in fields_block["fields"]]
+    assert "Prompt" in field_labels
+    assert "Task Solution" in field_labels
+    assert "Grader Guidance" in field_labels
 
 
 def test_json_detail_blocks_include_syntax_html_for_raw_objects(tmp_path):
@@ -468,13 +487,12 @@ def test_json_detail_blocks_include_syntax_html_for_raw_objects(tmp_path):
     assert "tok-nt" in syntax_block["html"] or "tok-n" in syntax_block["html"]
 
 
-def test_real_hermes_json_keeps_transcript_labels_and_structured_summary():
+def test_hermes_json_keeps_transcript_labels_and_structured_summary(tmp_path):
     """Hermes transcript artifacts should keep summary labels and structured detail."""
-    repo_root = Path(__file__).resolve().parents[1]
-    payload = serialize_preview(
-        repo_root / "data" / "hermes_trajectory.json",
-        browse_root=repo_root,
-    )
+    test_file = tmp_path / "hermes_trajectory.json"
+    test_file.write_text(json.dumps(sample_hermes_transcript()))
+
+    payload = serialize_preview(test_file, browse_root=tmp_path)
 
     summary_node = payload["tree"][0]
     conversations_node = next(
