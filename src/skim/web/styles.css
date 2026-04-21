@@ -429,25 +429,34 @@ button {
   color: var(--fg-secondary);
 }
 
-.triage-list {
+.triage-file-groups {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
 }
 
-.triage-row {
-  width: 100%;
+.triage-file-group {
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg-surface);
-  color: inherit;
-  text-align: left;
-  padding: 10px;
+  overflow: hidden;
 }
 
-.triage-row.selected {
-  border-color: var(--accent);
-  background: var(--bg-highlight);
+.triage-file-group-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-secondary);
+}
+
+.triage-file-group-meta {
+  display: flex;
+  gap: 10px;
+  color: var(--fg-secondary);
+  font-size: 13px;
 }
 
 .triage-row-head,
@@ -463,13 +472,36 @@ button {
   min-width: 0;
 }
 
-.triage-time,
+.triage-annotation-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.triage-annotation-row {
+  width: 100%;
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  padding: 10px;
+}
+
+.triage-annotation-row:first-child {
+  border-top: 0;
+}
+
+.triage-annotation-row.selected {
+  background: var(--bg-highlight);
+}
+
 .triage-target {
   color: var(--fg-secondary);
+  font-size: 13px;
 }
 
 .triage-note {
-  margin: 6px 0;
+  margin: 4px 0 0;
 }
 
 .triage-detail-stack {

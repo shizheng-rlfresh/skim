@@ -551,6 +551,22 @@ function triagePreviewKindOptions() {
   return Array.from(kinds).sort((left, right) => left.localeCompare(right));
 }
 
+function groupedTriageItems(items) {
+  const groups = new Map();
+  for (const item of items) {
+    if (!groups.has(item.file_path)) {
+      groups.set(item.file_path, []);
+    }
+    groups.get(item.file_path).push(item);
+  }
+  return Array.from(groups.entries()).map(([file_path, groupedItems]) => ({
+    file_path,
+    preview_kind: groupedItems[0]?.preview_kind || "",
+    updated_at: groupedItems[0]?.updated_at || "",
+    items: groupedItems,
+  }));
+}
+
 function renderTriageView() {
   const visible = visibleTriageItems();
   const selected = selectedTriageItem();
@@ -594,19 +610,30 @@ function renderTriageQueue(items) {
   if (!items.length) {
     return `<div class="empty-state"><div><div class="empty-mark">◇</div><div>No annotations match the current filters.</div></div></div>`;
   }
+  const groups = groupedTriageItems(items);
   return `
-    <div class="triage-list">
-      ${items.map((item) => `
-        <button class="triage-row ${item.annotation_id === state.triage.selectedAnnotationId ? "selected" : ""}" type="button" data-triage-select="${escapeAttribute(item.annotation_id)}" data-triage-open="${escapeAttribute(item.annotation_id)}">
-          <div class="triage-row-head">
-            <span class="badge">${escapeHtml(item.preview_kind)}</span>
-            <span class="triage-file">${escapeHtml(item.file_path)}</span>
-            <span class="triage-time">${escapeHtml(formatAnnotationTimestamp(item.updated_at))}</span>
+    <div class="triage-file-groups">
+      ${groups.map((group) => `
+        <section class="triage-file-group">
+          <div class="triage-file-group-header">
+            <div class="triage-row-head">
+              <span class="triage-file">${escapeHtml(group.file_path)}</span>
+              <span class="badge">${escapeHtml(group.preview_kind)}</span>
+            </div>
+            <div class="triage-file-group-meta">
+              <span>${escapeHtml(`${group.items.length} item${group.items.length === 1 ? "" : "s"}`)}</span>
+              <span>${escapeHtml(formatAnnotationTimestamp(group.updated_at))}</span>
+            </div>
           </div>
-          <div class="triage-target">${escapeHtml(item.target_label || "File")}</div>
-          <div class="triage-note">${escapeHtml(item.note_preview || "(empty)")}</div>
-          <div class="annotation-tags">${(item.tags || []).map((tag) => `<span class="annotation-tag">${escapeHtml(tag)}</span>`).join("")}</div>
-        </button>
+          <div class="triage-annotation-list">
+            ${group.items.map((item) => `
+              <button class="triage-annotation-row ${item.annotation_id === state.triage.selectedAnnotationId ? "selected" : ""}" type="button" data-triage-select="${escapeAttribute(item.annotation_id)}">
+                <div class="triage-target">${escapeHtml(item.target_label || "File")}</div>
+                <div class="triage-note">${escapeHtml(item.note_preview || "(empty)")}</div>
+              </button>
+            `).join("")}
+          </div>
+        </section>
       `).join("")}
     </div>
   `;
@@ -2810,3 +2837,4 @@ globalThis.isStackedLayout = isStackedLayout;
 globalThis.canResizePaneLayout = canResizePaneLayout;
 globalThis.canResizeSplitViews = canResizeSplitViews;
 globalThis.onWorkspaceClick = onWorkspaceClick;
+globalThis.groupedTriageItems = groupedTriageItems;

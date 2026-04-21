@@ -8,6 +8,7 @@ trajectory rendering internals, which live in dedicated modules.
 from __future__ import annotations
 
 import subprocess
+from collections import OrderedDict
 from pathlib import Path
 
 from textual.app import App, ComposeResult
@@ -15,7 +16,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.events import Key
 from textual.screen import ModalScreen
-from textual.widgets import Button, Header, Input, Static, TextArea
+from textual.widgets import Button, Input, Static, TextArea
 
 from .preview import PreviewPane
 from .review import FILE_ANNOTATION_KEY, AnnotationRecord, AnnotationStore
@@ -160,6 +161,13 @@ class SkimApp(App):
 
     TITLE = "skim"
     CSS = """
+    #app-titlebar {
+        dock: top;
+        height: 1;
+        background: $surface;
+        color: $text;
+        padding: 0 1;
+    }
     #outer {
         height: 1fr;
     }
@@ -338,6 +346,8 @@ class SkimApp(App):
         Binding("s", "enter_split", show=False),
         Binding("d", "close_pane", show=False),
         Binding("w", "cycle_pane", show=False),
+        Binding("t", "show_triage", show=False),
+        Binding("b", "show_browse", show=False),
     ]
 
     def __init__(self, path: str | Path = ".", *, triage: bool = False):
@@ -376,7 +386,7 @@ class SkimApp(App):
 
     def compose(self) -> ComposeResult:
         """Compose the directory tree and preview area."""
-        yield Header()
+        yield Static("", id="app-titlebar")
         with Horizontal(id="outer"):
             with Horizontal(id="browser-shell"):
                 yield DirectoryTree(str(self.browse_path))
@@ -447,10 +457,18 @@ class SkimApp(App):
             browser.add_class("hidden-view")
             triage.remove_class("hidden-view")
             self.file_tree_mode = False
+            self.query_one("#triage-queue", TriageQueue).focus(scroll_visible=False)
         else:
             triage.add_class("hidden-view")
             browser.remove_class("hidden-view")
+            self.exit_file_tree_mode()
+        self._update_titlebar()
         self._update_status_bar()
+
+    def _update_titlebar(self) -> None:
+        """Refresh the skim-owned title bar."""
+        mode_label = "Triage" if self.app_mode == "triage" else "Browse"
+        self.query_one("#app-titlebar", Static).update(f"skim [{mode_label}]")
 
     def _triage_filters(self) -> tuple[str, str, str]:
         """Return the active triage filter values."""
@@ -520,18 +538,33 @@ class SkimApp(App):
         detail = self.query_one("#triage-detail", TriageDetail)
         detail.update(self._triage_detail_text(selected))
 
+    def _group_triage_items(self, items):
+        """Group visible triage items by file while preserving newest-first file order."""
+        grouped: OrderedDict[str, list] = OrderedDict()
+        for item in items:
+            grouped.setdefault(item.file_path, []).append(item)
+        return list(grouped.items())
+
     def _triage_queue_text(self, items) -> str:
         """Return the rendered triage queue text."""
         if not items:
             return "No annotations match the current filters."
         lines: list[str] = []
-        for item in items:
-            marker = ">" if item.annotation_id == self.triage_selected_annotation_id else " "
-            tags = f" [{' '.join(item.tags)}]" if item.tags else ""
+        grouped_items = self._group_triage_items(items)
+        for index, (file_path, group_items) in enumerate(grouped_items):
+            latest = group_items[0]
+            annotation_count = len(group_items)
+            updated = latest.updated_at[:16].replace("T", " ")
             lines.append(
-                f"{marker} {item.preview_kind:<8} {item.file_path} :: {item.target_label}{tags}"
+                f"{file_path} [{latest.preview_kind}] {annotation_count} annotation"
+                f"{'s' if annotation_count != 1 else ''} · {updated}"
             )
-            lines.append(f"  {item.note_preview or '(empty)'}")
+            for item in group_items:
+                marker = ">" if item.annotation_id == self.triage_selected_annotation_id else " "
+                note_preview = item.note_preview or "(empty)"
+                lines.append(f"{marker} {item.target_label or 'File'} :: {note_preview}")
+            if index != len(grouped_items) - 1:
+                lines.append("")
         return "\n".join(lines)
 
     def _triage_detail_text(self, item) -> str:
@@ -739,6 +772,7 @@ class SkimApp(App):
         if self.app_mode == "triage":
             return (
                 " [bold]q[/] Quit  "
+                "[bold]b[/] Browse  "
                 "[bold]↑↓[/] Select  "
                 "[bold]/[/] Search  "
                 "[bold]Tab[/] Focus  "
@@ -750,6 +784,7 @@ class SkimApp(App):
         if self.file_tree_mode:
             return (
                 " [bold]q[/] Quit  "
+                "[bold]t[/] Triage  "
                 "[bold]↑↓[/] Move  "
                 "[bold]←→[/] Branch  "
                 "[bold]Esc[/] Back  "
@@ -759,6 +794,7 @@ class SkimApp(App):
             )
         return (
             " [bold]q[/] Quit  "
+            "[bold]t[/] Triage  "
             "[bold]↑↓[/] Scroll  "
             "[bold]PgUp/Dn[/] Page  "
             "[bold]f[/] Tree  "
@@ -804,6 +840,19 @@ class SkimApp(App):
         self.file_tree_mode = True
         self.query_one(DirectoryTree).focus(scroll_visible=False)
         self._update_status_bar()
+
+    def action_show_triage(self) -> None:
+        """Switch into the triage shell without losing browse pane state."""
+        if self._modal_is_active():
+            return
+        self._refresh_triage_view()
+        self._show_mode("triage")
+
+    def action_show_browse(self) -> None:
+        """Switch back into the browse shell."""
+        if self._modal_is_active():
+            return
+        self._show_mode("browse")
 
     def exit_file_tree_mode(self) -> None:
         """Leave file-tree focus mode and return to the active preview pane."""

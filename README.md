@@ -55,6 +55,8 @@ See the full target design spec here:
 | `Up/Down` or `j/k` | Scroll the active preview pane |
 | `PageUp/PageDown` | Page-scroll the active preview pane; in JSON inspector mode, scroll the detail panel |
 | `f` | Toggle file-tree mode |
+| `t` | Switch to triage mode |
+| `b` | Switch back to browse mode |
 | `Shift+Up/Down` | Move the file-tree cursor without leaving the active preview |
 | `Enter` | Open the current file-tree selection in the active pane |
 | `s` then arrow or `h/j/k/l` | Split in a direction |
@@ -126,8 +128,10 @@ overlay node maps to a raw node and falling back to `raw_path` otherwise.
 
 ## Workspace triage
 
-- `uv run skim . --triage` starts the TUI in a dedicated triage mode
+- `uv run skim . --triage` starts the TUI in triage mode
+- `t` and `b` switch between triage and browse in the same TUI session
 - the web UI exposes the same queue behind the `Browse | Triage` toggle
+- triage queues are grouped by file in both the TUI and web UI to reduce repeated metadata
 - triage rows are normalized in Python from `.skim/review.json`
 - non-JSON previews store file-level annotations under the reserved `@file` target key
 - the web UI exposes `/api/triage` and `/api/annotation-version` for queue data and refresh

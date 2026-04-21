@@ -608,6 +608,69 @@ console.log(JSON.stringify({
     }
 
 
+def test_render_triage_queue_groups_annotations_by_file():
+    """Triage queue markup should show one file header with nested annotation rows."""
+    result = run_app_js(
+        """
+vm.runInContext(`
+state.triage = {
+  items: [
+    {
+      annotation_id: "ann-1",
+      file_path: "output.json",
+      target_kind: "json_path",
+      target_label: "$.task",
+      target_path: "$.task",
+      preview_kind: "json",
+      tags: ["bug"],
+      note_preview: "task summary",
+      note_full: "task summary",
+      created_at: "2026-04-21T14:10:00Z",
+      updated_at: "2026-04-21T14:15:00Z",
+    },
+    {
+      annotation_id: "ann-2",
+      file_path: "output.json",
+      target_kind: "json_path",
+      target_label: "$.result",
+      target_path: "$.result",
+      preview_kind: "json",
+      tags: ["followup"],
+      note_preview: "result summary",
+      note_full: "result summary",
+      created_at: "2026-04-21T14:20:00Z",
+      updated_at: "2026-04-21T14:25:00Z",
+    },
+  ],
+  search: "",
+  selectedTag: "",
+  selectedPreviewKind: "",
+  selectedAnnotationId: "ann-2",
+  lastAnnotationVersion: "v1",
+};
+`, ctx);
+const html = ctx.renderTriageQueue(ctx.visibleTriageItems());
+console.log(JSON.stringify({
+  fileOccurrences: html.split("output.json").length - 1,
+  hasGroup: html.includes("triage-file-group"),
+  hasHeader: html.includes("triage-file-group-header"),
+  hasRow: html.includes("triage-annotation-row"),
+  hasTask: html.includes("$.task"),
+  hasResult: html.includes("$.result"),
+}));
+"""
+    )
+
+    assert result == {
+        "fileOccurrences": 1,
+        "hasGroup": True,
+        "hasHeader": True,
+        "hasRow": True,
+        "hasTask": True,
+        "hasResult": True,
+    }
+
+
 def test_render_json_node_uses_structured_icon_key_and_value_segments():
     """JSON tree rows should render typed icons and separate key/value spans."""
     result = run_app_js(
