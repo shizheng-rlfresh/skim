@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 from pathlib import Path
+
+import pytest
 
 APP_JS = Path(__file__).resolve().parents[1] / "src" / "skim" / "web" / "app.js"
 
 
 def run_app_js(script: str) -> dict:
     """Evaluate app.js in Node with a tiny DOM stub and return JSON output."""
+    if shutil.which("node") is None:
+        pytest.skip("node is required for browser-contract tests")
     harness = f"""
 const fs = require("fs");
 const vm = require("vm");
@@ -52,6 +57,14 @@ const ctx = context;
         text=True,
     )
     return json.loads(result.stdout)
+
+
+def test_run_app_js_skips_cleanly_when_node_is_unavailable(monkeypatch):
+    """Browser-contract tests should skip instead of failing when Node is absent."""
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+
+    with pytest.raises(pytest.skip.Exception, match="node is required"):
+        run_app_js("console.log(JSON.stringify({ ok: true }));")
 
 
 def test_render_text_preview_uses_python_highlighted_html():
@@ -568,6 +581,66 @@ console.log(JSON.stringify({
     )
 
     assert result == {"expanded": True, "treeRenders": 1}
+
+
+def test_render_tree_node_makes_directory_rows_keyboard_focusable():
+    """Directory rows should expose keyboard semantics for toggling."""
+    result = run_app_js(
+        """
+const html = ctx.renderTreeNode({
+  name: "src",
+  type: "dir",
+  path: "src",
+  children: [],
+}, 0);
+console.log(JSON.stringify({
+  hasRole: html.includes('role="button"'),
+  hasTabIndex: html.includes('tabindex="0"'),
+  hasExpanded: html.includes('aria-expanded="false"'),
+}));
+"""
+    )
+
+    assert result == {"hasRole": True, "hasTabIndex": True, "hasExpanded": True}
+
+
+def test_directory_row_keyboard_toggle_supports_enter_and_space():
+    """Pressing Enter or Space on a directory row should toggle that directory."""
+    result = run_app_js(
+        """
+vm.runInContext('state.expandedDirs = new Set(["."]);', ctx);
+let prevented = 0;
+let treeRenders = 0;
+ctx.renderTree = () => { treeRenders += 1; };
+ctx.onTreeKeyDown({
+  key: "Enter",
+  preventDefault() { prevented += 1; },
+  target: {
+    closest(selector) {
+      if (selector === "[data-dir-path]") return { dataset: { dirPath: "src" } };
+      return null;
+    },
+  },
+});
+ctx.onTreeKeyDown({
+  key: " ",
+  preventDefault() { prevented += 1; },
+  target: {
+    closest(selector) {
+      if (selector === "[data-dir-path]") return { dataset: { dirPath: "src" } };
+      return null;
+    },
+  },
+});
+console.log(JSON.stringify({
+  expanded: vm.runInContext('state.expandedDirs.has("src")', ctx),
+  prevented,
+  treeRenders,
+}));
+"""
+    )
+
+    assert result == {"expanded": False, "prevented": 2, "treeRenders": 2}
 
 
 def test_json_branch_row_click_toggles_and_selects_without_triangle_target():

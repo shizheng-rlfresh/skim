@@ -35,7 +35,7 @@ def build_tree(root: Path, rel: Path | None = None) -> dict[str, object]:
     if rel is None:
         rel = Path(".")
 
-    abs_path = (root / rel).resolve()
+    abs_path = root / rel
     name = abs_path.name or str(root)
     if abs_path.is_file():
         return {
@@ -56,6 +56,8 @@ def build_tree(root: Path, rel: Path | None = None) -> dict[str, object]:
         entries = []
 
     for entry in entries:
+        if entry.is_symlink():
+            continue
         if entry.name in SKIP_DIRS:
             continue
         if entry.name.startswith(".") and entry.name != ".skim":
@@ -172,9 +174,8 @@ class SkimHandler(SimpleHTTPRequestHandler):
         self._json_response({"ok": True})
 
     def do_OPTIONS(self) -> None:
-        """Return the CORS preflight response."""
+        """Return an empty same-origin-only preflight response."""
         self.send_response(204)
-        self._cors_headers()
         self.end_headers()
 
     def _serve_preview(self, query_string: dict[str, list[str]]) -> None:
@@ -228,7 +229,6 @@ class SkimHandler(SimpleHTTPRequestHandler):
         """Send one JSON response with the supplied status code."""
         payload = json.dumps(data).encode()
         self.send_response(status)
-        self._cors_headers()
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
@@ -237,12 +237,6 @@ class SkimHandler(SimpleHTTPRequestHandler):
     def _error(self, status: int, message: str) -> None:
         """Send a structured JSON error response."""
         self._json_response({"error": message}, status=status)
-
-    def _cors_headers(self) -> None:
-        """Write permissive localhost API headers."""
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
 
     def log_message(self, format: str, *args) -> None:
         """Log only 4xx and 5xx responses to keep local runs readable."""

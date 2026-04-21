@@ -85,6 +85,7 @@ function bindElements() {
 
 function bindEvents() {
   elements.fileTree?.addEventListener("click", onTreeClick);
+  elements.fileTree?.addEventListener("keydown", onTreeKeyDown);
   elements.previewWork?.addEventListener("click", onWorkspaceClick);
   elements.previewWork?.addEventListener("pointerdown", onPreviewPointerDown);
   elements.sidebarToggle?.addEventListener("click", toggleSidebar);
@@ -184,11 +185,11 @@ function renderTreeNode(node, depth) {
   const visual = resolveFileVisual(node);
   const icon = isDir ? (expanded ? "▾" : "▸") : "";
   const indent = `style="padding-left:${14 + depth * 16}px"`;
-  const labelAttrs = isDir
-    ? ` data-dir-path="${escapeAttribute(node.path)}"`
+  const behaviorAttrs = isDir
+    ? ` data-dir-path="${escapeAttribute(node.path)}" role="button" tabindex="0" aria-expanded="${expanded ? "true" : "false"}"`
     : ` data-file-path="${escapeAttribute(node.path)}"`;
   const toggle = isDir
-    ? `<button class="tree-toggle" type="button" data-toggle-dir="${escapeAttribute(node.path)}">${icon}</button>`
+    ? `<span class="tree-toggle" data-toggle-dir="${escapeAttribute(node.path)}" aria-hidden="true">${icon}</span>`
     : `<span class="tree-toggle"></span>`;
   const children = isDir && expanded
     ? `<div class="tree-children">${(node.children || []).map((child) => renderTreeNode(child, depth + 1)).join("")}</div>`
@@ -196,7 +197,7 @@ function renderTreeNode(node, depth) {
 
   return `
     <div class="tree-node ${selected ? "selected" : ""}">
-      <div class="tree-row" data-file-kind="${escapeAttribute(visual.kind)}" data-file-group="${escapeAttribute(visual.group)}" ${indent}${labelAttrs}>
+      <div class="tree-row" data-file-kind="${escapeAttribute(visual.kind)}" data-file-group="${escapeAttribute(visual.group)}" ${indent}${behaviorAttrs}>
         ${toggle}
         <span class="tree-label tree-file-label">${renderFileIcon(visual)}<span class="tree-name">${escapeHtml(node.name)}</span></span>
         <span class="file-size">${escapeHtml(node.size || "")}</span>
@@ -1006,6 +1007,18 @@ async function onTreeClick(event) {
     return;
   }
   await globalThis.loadPreviewForPane(target.dataset.filePath, state.activePaneId);
+}
+
+function onTreeKeyDown(event) {
+  if (event.key !== "Enter" && event.key !== " " && event.key !== "Spacebar") {
+    return;
+  }
+  const directory = event.target.closest("[data-dir-path]");
+  if (!directory) {
+    return;
+  }
+  event.preventDefault();
+  toggleDirectory(directory.dataset.dirPath);
 }
 
 function toggleDirectory(path) {

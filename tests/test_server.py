@@ -67,6 +67,26 @@ def request_json(
     return status, payload
 
 
+def request_json_with_headers(
+    base_url: str,
+    path: str,
+    *,
+    method: str = "GET",
+) -> tuple[int, dict, object]:
+    """Return the JSON response body plus response headers for one request."""
+    request = urllib.request.Request(base_url + path, method=method)
+    try:
+        with urllib.request.urlopen(request) as response:
+            status = response.status
+            payload = json.loads(response.read().decode())
+            headers = response.headers
+    except urllib.error.HTTPError as error:
+        status = error.code
+        payload = json.loads(error.read().decode())
+        headers = error.headers
+    return status, payload, headers
+
+
 def test_api_preview_returns_text_payload_for_plain_file(tmp_path):
     """The preview API should classify plain source files as text payloads."""
     test_file = tmp_path / "example.py"
@@ -87,6 +107,22 @@ def test_api_preview_returns_text_payload_for_plain_file(tmp_path):
     assert payload["render"]["language"] == "python"
     assert payload["render"]["line_numbers"] is True
     assert "tok-nb" in payload["render"]["html"] or "tok-n" in payload["render"]["html"]
+
+
+def test_api_preview_omits_wildcard_cors_headers(tmp_path):
+    """Local API responses should not be exposed cross-origin to arbitrary websites."""
+    test_file = tmp_path / "example.py"
+    test_file.write_text("print('hello')\n")
+
+    with running_server(tmp_path) as base_url:
+        status, payload, headers = request_json_with_headers(
+            base_url,
+            "/api/preview?path=" + urllib.parse.quote("example.py"),
+        )
+
+    assert status == 200
+    assert payload["kind"] == "text"
+    assert headers.get("Access-Control-Allow-Origin") is None
 
 
 def test_api_preview_falls_back_to_text_for_invalid_json(tmp_path):
@@ -294,6 +330,25 @@ def test_api_preview_rejects_paths_outside_browse_root(tmp_path):
 
     assert status == 403
     assert payload == {"error": "Forbidden"}
+
+
+def test_api_tree_skips_symlinks_that_escape_the_browse_root(tmp_path):
+    """The tree endpoint should not enumerate symlinks that point outside the browse root."""
+    inside_file = tmp_path / "inside.py"
+    inside_file.write_text("print('inside')\n")
+    outside_dir = tmp_path.parent / "outside-tree"
+    outside_dir.mkdir(exist_ok=True)
+    (outside_dir / "outside.py").write_text("print('outside')\n")
+    (tmp_path / "escape-link").symlink_to(outside_dir, target_is_directory=True)
+
+    with running_server(tmp_path) as base_url:
+        status, payload = request_json(base_url, "/api/tree")
+
+    assert status == 200
+    child_paths = [child["path"] for child in payload["children"]]
+    child_names = [child["name"] for child in payload["children"]]
+    assert "inside.py" in child_names
+    assert "escape-link" not in child_paths
 
 
 def test_api_annotations_round_trip_to_review_json(tmp_path):
@@ -513,6 +568,7 @@ def test_wrapped_output_json_stays_in_json_inspector_and_keeps_trajectory_branch
     payload = serialize_preview(test_file, browse_root=tmp_path)
 
     assert payload["kind"] == "json_inspector"
+    assert "root_data" not in payload
     labels = [node["label"] for node in payload["tree"][:4]]
     assert labels[0] == "Task Id task-123"
     assert labels[1].startswith("Task {")
@@ -598,3 +654,26 @@ def test_hermes_json_keeps_transcript_labels_and_structured_summary(tmp_path):
     assert "timestamp" in field_labels
     assert "conversations" in field_labels
     assert conversations_node["children"][0]["label"].startswith("[0] System")
+
+
+def test_trajectory_preview_omits_unused_raw_step_payloads(tmp_path):
+    """Trajectory previews should not duplicate raw step payloads the browser does not use."""
+    test_file = tmp_path / "trajectory.json"
+    test_file.write_text(json.dumps(sample_trajectory()))
+
+    payload = serialize_preview(test_file, browse_root=tmp_path)
+
+    assert payload["kind"] == "trajectory"
+    assert payload["steps"]
+    assert "raw_step" not in payload["steps"][0]
+
+
+def test_csv_preview_summary_uses_single_spacing(tmp_path):
+    """The CSV summary string should not include doubled spaces."""
+    test_file = tmp_path / "table.csv"
+    test_file.write_text("name,value\nskim,1\n")
+
+    payload = serialize_preview(test_file, browse_root=tmp_path)
+
+    assert payload["kind"] == "csv"
+    assert payload["summary"] == "CSV Preview 1 rows x 2 columns"

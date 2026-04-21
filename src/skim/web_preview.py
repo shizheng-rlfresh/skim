@@ -376,12 +376,6 @@ def serialize_trajectory_preview(
         return None
 
     step_events, step_items = normalize_step_overlay(resolved_trajectory)
-    raw_steps = (
-        resolved_trajectory.get("steps", [])
-        if isinstance(resolved_trajectory.get("steps"), list)
-        else []
-    )
-
     steps: list[dict[str, Any]] = []
     for step_index, (items, events) in enumerate(zip(step_items, step_events, strict=False)):
         step_path = base_path + ("steps", step_index)
@@ -469,7 +463,6 @@ def serialize_trajectory_preview(
                 "title": f"Step {step_index + 1}",
                 "path": _format_path(step_path),
                 "summary": f"{len(blocks)} item{'s' if len(blocks) != 1 else ''}",
-                "raw_step": raw_steps[step_index] if step_index < len(raw_steps) else None,
                 "items": blocks,
             }
         )
@@ -507,7 +500,6 @@ class _JsonInspectorSerializer:
         self._add_overlay_children(tree, self.data, ())
         self._add_raw_children(tree, self.data, ())
         return {
-            "root_data": self.data,
             "tree": tree,
             "initial_node_id": tree[0]["id"] if tree else None,
         }
@@ -796,7 +788,7 @@ def _serialize_csv_preview(content: str, *, name: str, relative_path: str) -> di
         "raw": content,
         "raw_render": _syntax_payload(content, language="csv", line_numbers=True),
         "parse_error": None,
-        "summary": f"CSV Preview  {len(body):,} rows x {len(header):,} columns",
+        "summary": f"CSV Preview {len(body):,} rows x {len(header):,} columns",
         "truncated_rows": len(body) > MAX_CSV_ROWS,
         "truncated_columns": len(header) > MAX_CSV_COLS,
     }
