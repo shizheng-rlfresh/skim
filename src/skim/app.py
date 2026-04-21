@@ -711,9 +711,7 @@ class SkimApp(App):
         except Exception:
             pane = None
         active_path = (
-            pane.current_path
-            if pane is not None
-            else self.pane_files.get(self.active_pane_id)
+            pane.current_path if pane is not None else self.pane_files.get(self.active_pane_id)
         )
         if (
             pane is not None
@@ -797,9 +795,7 @@ class SkimApp(App):
             return ()
         return self.review_store.annotations_for_path(active_pane.current_path, FILE_ANNOTATION_KEY)
 
-    def _selected_file_annotation(
-        self, pane: PreviewPane | None = None
-    ) -> AnnotationRecord | None:
+    def _selected_file_annotation(self, pane: PreviewPane | None = None) -> AnnotationRecord | None:
         """Return the selected file-level annotation for the active non-JSON pane."""
         active_pane = pane or self._active_file_annotation_pane()
         annotations = self._active_file_annotations(active_pane)
@@ -835,11 +831,7 @@ class SkimApp(App):
             return False
         selected_id = pane.selected_file_annotation_id(annotations)
         current = next(
-            (
-                index
-                for index, annotation in enumerate(annotations)
-                if annotation.id == selected_id
-            ),
+            (index for index, annotation in enumerate(annotations) if annotation.id == selected_id),
             0,
         )
         next_index = max(0, min(len(annotations) - 1, current + delta))
@@ -847,9 +839,7 @@ class SkimApp(App):
         pane.show_file(pane.current_path)
         return True
 
-    def _open_file_annotation_editor_for_active_pane_selection(
-        self, *, add_new: bool
-    ) -> bool:
+    def _open_file_annotation_editor_for_active_pane_selection(self, *, add_new: bool) -> bool:
         """Open the file-level annotation editor for the active non-JSON preview."""
         pane = self._active_file_annotation_pane()
         if pane is None or pane.current_path is None:

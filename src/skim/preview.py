@@ -212,9 +212,7 @@ class PreviewPane(DragScrollMixin, VerticalScroll, can_focus=True):
             return None
         return f"{self.current_path.resolve().as_posix()}::{FILE_ANNOTATION_KEY}"
 
-    def selected_file_annotation_id(
-        self, annotations: tuple[AnnotationRecord, ...]
-    ) -> str | None:
+    def selected_file_annotation_id(self, annotations: tuple[AnnotationRecord, ...]) -> str | None:
         """Return the selected file annotation id, defaulting to the newest."""
         key = self.file_annotation_selection_key()
         if key is None or not annotations:
