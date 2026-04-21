@@ -9,11 +9,11 @@ from pathlib import Path
 
 import pytest
 
-APP_JS = Path(__file__).resolve().parents[1] / "src" / "skim" / "web" / "app.js"
+APP_JS = Path(__file__).resolve().parents[1] / "src" / "skim" / "webui" / "static" / "app.js"
 
 
 def run_app_js(script: str) -> dict:
-    """Evaluate app.js in Node with a tiny DOM stub and return JSON output."""
+    """Evaluate the packaged browser compatibility script in Node and return JSON output."""
     if shutil.which("node") is None:
         pytest.skip("node is required for browser-contract tests")
     harness = f"""
@@ -29,6 +29,7 @@ const context = {{
   document: {{
     addEventListener() {{}},
     getElementById() {{ return null; }},
+    documentElement: {{ clientWidth: 1280, dataset: {{}} }},
   }},
   localStorage: {{
     _store: {{}},
