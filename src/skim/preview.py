@@ -260,9 +260,7 @@ def _csv_preview_widgets(content: str, rows: list[list[str]]) -> list[Widget]:
 
 def _xlsx_preview_widgets(workbook: XlsxPreviewData) -> list[Widget]:
     """Build the workbook preview widgets."""
-    widgets: list[Widget] = [
-        Static(_xlsx_summary_text(workbook), classes="xlsx-summary")
-    ]
+    widgets: list[Widget] = [Static(_xlsx_summary_text(workbook), classes="xlsx-summary")]
     for sheet in workbook.sheets:
         widgets.append(Static(_xlsx_sheet_summary_text(sheet), classes="xlsx-sheet-label"))
         if sheet.empty:
@@ -412,8 +410,7 @@ def _xlsx_sheet_preview_data(sheet: Any) -> XlsxSheetPreviewData:
         )
 
     display_header = [
-        _spreadsheet_column_label(index)
-        for index in range(1, min(max_columns, MAX_CSV_COLS) + 1)
+        _spreadsheet_column_label(index) for index in range(1, min(max_columns, MAX_CSV_COLS) + 1)
     ]
     if max_columns > MAX_CSV_COLS:
         display_header.append("...")
