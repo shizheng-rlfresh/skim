@@ -85,6 +85,59 @@ async def test_triage_enter_opens_selected_item_in_browse_mode(tmp_path):
         assert pane.current_path == tmp_path / "plain.json"
 
 
+async def test_triage_enter_preserves_selected_file_annotation(tmp_path):
+    """Opening a file-level triage item should keep that annotation selected in browse."""
+    review_file = tmp_path / ".skim" / "review.json"
+    review_file.parent.mkdir()
+    review_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "files": {
+                    "notes.md": {
+                        "annotations": {
+                            "@file": [
+                                {
+                                    "id": "older",
+                                    "created_at": "2026-04-21T14:00:00Z",
+                                    "updated_at": "2026-04-21T14:00:00Z",
+                                    "tags": ["older"],
+                                    "note": "older note",
+                                },
+                                {
+                                    "id": "newer",
+                                    "created_at": "2026-04-21T14:05:00Z",
+                                    "updated_at": "2026-04-21T14:05:00Z",
+                                    "tags": ["newer"],
+                                    "note": "newer note",
+                                },
+                            ]
+                        }
+                    }
+                },
+            }
+        )
+    )
+    (tmp_path / "notes.md").write_text("# Notes\n")
+    app = SkimApp(path=str(tmp_path), triage=True)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        assert app.triage_selected_annotation_id == "newer"
+
+        await pilot.press("down")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        annotations = app.review_store.annotations_for_path(tmp_path / "notes.md", "@file")
+        assert pane.current_path == tmp_path / "notes.md"
+        assert pane.selected_file_annotation_id(annotations) == "older"
+        assert "Note: older note" in _static_content(pane.query(Static).first()).plain
+
+
 async def test_triage_toggle_returns_to_selected_queue_item(tmp_path):
     """Returning to triage should preserve the queue selection from the prior open."""
     review_file = tmp_path / ".skim" / "review.json"

@@ -255,19 +255,27 @@ def _serialize_notebook_file(
     try:
         parsed = json.loads(content)
     except json.JSONDecodeError:
-        return _text_payload(
-            source_path.name,
-            relative_path,
-            content,
-            language="json",
+        return _with_file_annotation_payload(
+            _text_payload(
+                source_path.name,
+                relative_path,
+                content,
+                language="json",
+            ),
+            source_path=source_path,
+            annotation_store=annotation_store,
         )
 
     if not _looks_like_notebook(parsed):
-        return _text_payload(
-            source_path.name,
-            relative_path,
-            content,
-            language="json",
+        return _with_file_annotation_payload(
+            _text_payload(
+                source_path.name,
+                relative_path,
+                content,
+                language="json",
+            ),
+            source_path=source_path,
+            annotation_store=annotation_store,
         )
 
     return _serialize_notebook_preview(

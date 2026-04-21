@@ -684,10 +684,15 @@ async function openTriageItem(annotationId) {
   state.triage.selectedAnnotationId = item.annotation_id;
   state.mode = "browse";
   render();
+  const options = item.target_kind === "json_path"
+    ? { selectedJsonPath: item.target_path }
+    : item.target_kind === "file"
+      ? { selectedAnnotationPath: "@file", selectedAnnotationId: item.annotation_id }
+      : {};
   await loadPreviewForPane(
     item.file_path,
     state.activePaneId,
-    item.target_kind === "json_path" ? { selectedJsonPath: item.target_path } : {},
+    options,
   );
   return item;
 }
@@ -1574,6 +1579,9 @@ async function loadPreviewForPane(path, paneId, options = {}) {
       initializeWorkbookState(pane);
     } else {
       pane.selectedWorkbookSheetName = null;
+    }
+    if (options.selectedAnnotationPath && options.selectedAnnotationId) {
+      pane.selectedAnnotationIds[options.selectedAnnotationPath] = options.selectedAnnotationId;
     }
     renderTree();
     renderWorkspace();

@@ -220,6 +220,35 @@ def test_api_preview_invalid_notebook_falls_back_to_text(tmp_path):
     assert payload["render"]["kind"] == "syntax"
 
 
+def test_api_preview_invalid_notebook_keeps_file_annotation_payload(tmp_path):
+    """Broken notebook previews should still expose file-level annotation metadata."""
+    test_file = tmp_path / "broken.ipynb"
+    test_file.write_text("{not json")
+
+    with running_server(tmp_path) as base_url:
+        _, save_payload = request_json(
+            base_url,
+            "/api/annotations",
+            method="POST",
+            body={
+                "file": "broken.ipynb",
+                "path": FILE_ANNOTATION_KEY,
+                "tags": ["important"],
+                "note": "review the broken notebook",
+            },
+        )
+        status, payload = request_json(
+            base_url,
+            "/api/preview?path=" + urllib.parse.quote("broken.ipynb"),
+        )
+
+    assert status == 200
+    assert payload["kind"] == "text"
+    assert payload["annotation_path"] == FILE_ANNOTATION_KEY
+    assert payload["annotation_count"] == 1
+    assert payload["annotations"][0]["id"] == save_payload["annotation"]["id"]
+
+
 def test_api_preview_returns_xlsx_payload(tmp_path):
     """Workbook files should get a dedicated xlsx preview payload."""
     test_file = tmp_path / "workbook.xlsx"

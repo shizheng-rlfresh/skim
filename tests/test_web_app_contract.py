@@ -657,6 +657,103 @@ console.log(JSON.stringify({
     }
 
 
+def test_open_triage_item_routes_file_annotation_selection():
+    """Opening a file-level triage row should route the selected annotation id."""
+    result = run_app_js(
+        """
+vm.runInContext(`
+state.mode = "triage";
+state.panes = [createPaneState("pane-1")];
+state.activePaneId = "pane-1";
+state.triage = {
+  items: [{
+    annotation_id: "ann-file-older",
+    file_path: "docs/spec.md",
+    target_kind: "file",
+    target_label: "File",
+    target_path: null,
+    preview_kind: "markdown",
+    tags: ["important"],
+    note_preview: "older note",
+    note_full: "older note",
+    created_at: "2026-04-21T14:10:00Z",
+    updated_at: "2026-04-21T14:15:00Z",
+  }],
+  search: "",
+  selectedTag: "",
+  selectedPreviewKind: "",
+  selectedAnnotationId: "ann-file-older",
+  lastAnnotationVersion: "v1",
+};
+globalThis.__openCall = null;
+loadPreviewForPane = async function(path, paneId, options = {}) {
+  globalThis.__openCall = { path, paneId, options };
+  return { ok: true };
+};
+`, ctx);
+await ctx.openTriageItem("ann-file-older");
+console.log(JSON.stringify(vm.runInContext('globalThis.__openCall', ctx)));
+"""
+    )
+
+    assert result == {
+        "path": "docs/spec.md",
+        "paneId": "pane-1",
+        "options": {
+            "selectedAnnotationPath": "@file",
+            "selectedAnnotationId": "ann-file-older",
+        },
+    }
+
+
+def test_load_preview_for_pane_restores_selected_file_annotation_from_options():
+    """Preview loads should apply routed file-level annotation selection state."""
+    result = run_app_js(
+        """
+vm.runInContext(`
+state.panes = [createPaneState("pane-1")];
+state.activePaneId = "pane-1";
+apiJson = async function() {
+  return {
+    kind: "markdown",
+    name: "spec.md",
+    path: "docs/spec.md",
+    content: "# Spec",
+    annotation_path: "@file",
+    annotations: [
+      {
+        id: "newer",
+        tags: ["new"],
+        note: "newer",
+        created_at: "2026-04-21T14:10:00Z",
+        updated_at: "2026-04-21T14:10:00Z"
+      },
+      {
+        id: "older",
+        tags: ["old"],
+        note: "older",
+        created_at: "2026-04-21T14:00:00Z",
+        updated_at: "2026-04-21T14:00:00Z"
+      }
+    ],
+    annotation_count: 2,
+  };
+};
+renderTree = function() {};
+renderWorkspace = function() {};
+renderStatusBar = function() {};
+`, ctx);
+await ctx.loadPreviewForPane("docs/spec.md", "pane-1", {
+  selectedAnnotationPath: "@file",
+  selectedAnnotationId: "older",
+});
+console.log(JSON.stringify(vm.runInContext('state.panes[0].selectedAnnotationIds', ctx)));
+"""
+    )
+
+    assert result == {"@file": "older"}
+
+
 def test_render_triage_queue_groups_annotations_by_file():
     """Triage queue markup should show one file header with nested annotation rows."""
     result = run_app_js(

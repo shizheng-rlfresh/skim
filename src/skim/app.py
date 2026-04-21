@@ -642,6 +642,9 @@ class SkimApp(App):
                     viewer.select_annotation_path(target_path)
 
             pane.call_after_refresh(select_target)
+        elif item.target_kind == "file":
+            pane.set_selected_file_annotation_id(item.annotation_id)
+            pane.show_file(path)
         self._show_mode("browse")
         self.exit_file_tree_mode()
 
