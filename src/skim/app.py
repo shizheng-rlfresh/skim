@@ -75,8 +75,10 @@ class SkimApp(App):
         height: 1fr;
     }
     .annotation-status-panel {
-        height: 8;
+        width: 1fr;
+        height: auto;
         min-height: 8;
+        max-height: 1fr;
         border: round $panel-lighten-1;
         background: $surface-lighten-1;
         padding: 0 1;

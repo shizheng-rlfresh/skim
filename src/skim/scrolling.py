@@ -117,3 +117,16 @@ class FocusableDetailWrap(DragScrollMixin, VerticalScroll, can_focus=True):
     def _drag_scroll_requires_self_target(self) -> bool:
         """Only start drag-scroll from the detail container background."""
         return True
+
+
+class AnnotationStatusWrap(DragScrollMixin, VerticalScroll):
+    """Passive scroll container for JSON inspector annotation status content."""
+
+    def __init__(self, *children: Widget, **kwargs: Any) -> None:
+        """Initialize the annotation status wrapper."""
+        super().__init__(*children, **kwargs)
+        self._init_drag_scroll()
+
+    def _drag_scroll_requires_self_target(self) -> bool:
+        """Only start drag-scroll from the annotation container background."""
+        return True

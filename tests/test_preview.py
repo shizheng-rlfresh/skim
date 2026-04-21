@@ -707,6 +707,51 @@ async def test_json_inspector_annotation_panel_lists_newest_first(tmp_path):
         assert annotation.index("newer note") < annotation.index("older note")
 
 
+async def test_json_inspector_annotation_panel_expands_for_long_annotation_lists(tmp_path):
+    """Long annotation lists should not stay clipped to the old fixed-height TUI panel."""
+    test_file = tmp_path / "plain.json"
+    test_file.write_text(json.dumps({"hello": "world"}))
+    annotations = []
+    for index in range(12):
+        annotations.append(
+            {
+                "id": f"annotation-{index}",
+                "created_at": f"2026-04-20T10:{index:02d}:00Z",
+                "updated_at": f"2026-04-20T11:{index:02d}:00Z",
+                "tags": [f"tag-{index}"],
+                "note": f"note {index}",
+            }
+        )
+    review_file = tmp_path / ".skim" / "review.json"
+    review_file.parent.mkdir()
+    review_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "files": {
+                    "plain.json": {
+                        "annotations": {
+                            "$.hello": annotations,
+                        }
+                    }
+                },
+            }
+        )
+    )
+
+    widgets = render_file(test_file, browse_root=tmp_path)
+    inspector = widgets[0]
+    assert isinstance(inspector, JsonInspector)
+
+    app = SkimApp(path=str(tmp_path))
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        await pane.mount(inspector)
+        await pilot.pause()
+
+        assert inspector._annotation_wrap.size.height > 6
+
+
 def test_trajectory_json_inspector_uses_one_overlay_normalization_pass(tmp_path, monkeypatch):
     """Opening trajectory JSON should normalize overlay data through one shared pass."""
     test_file = tmp_path / "trajectory.json"

@@ -25,7 +25,7 @@ from textual.widget import Widget
 from textual.widgets import Button, Collapsible, Input, Markdown, Static, TextArea
 from textual.widgets import Tree as TextualTree
 
-from .scrolling import DragTree, FocusableDetailWrap
+from .scrolling import AnnotationStatusWrap, DragTree, FocusableDetailWrap
 
 HUMAN_TEXT_KEYS = {
     "arguments",
@@ -1580,7 +1580,7 @@ class JsonInspector(Vertical):
             self._current_item = first_item
             initial_detail_widgets = self._detail_widgets_for_item(first_item)
             initial_annotation_widgets = self._annotation_widgets_for_item(first_item)
-        self._annotation_wrap = Vertical(
+        self._annotation_wrap = AnnotationStatusWrap(
             *initial_annotation_widgets,
             classes="annotation-status-panel",
         )
