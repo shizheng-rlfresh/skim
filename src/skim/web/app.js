@@ -260,6 +260,7 @@ function previewLabel(preview) {
   const kindLabels = {
     markdown: "Markdown",
     csv: "CSV",
+    xlsx: "Excel",
     notebook: "Notebook",
     json_inspector: "JSON",
     trajectory: "Trajectory",
@@ -345,6 +346,8 @@ function renderPaneContent(pane) {
       return renderMarkdownPreview(pane.preview);
     case "csv":
       return renderCsvPreview(pane.preview);
+    case "xlsx":
+      return renderXlsxPreview(pane.preview);
     case "json_inspector":
       return renderJsonInspector(pane);
     case "trajectory":
@@ -1235,6 +1238,57 @@ function renderCsvPreview(preview) {
         <summary>Raw CSV</summary>
         ${renderRenderValue(preview.raw_render || { kind: "text", value: preview.raw })}
       </details>
+    </div>
+  `;
+}
+
+function renderXlsxPreview(preview) {
+  const sheets = (preview.sheets || []).map((sheet) => {
+    const table = sheet.columns.length
+      ? `
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>${sheet.columns.map((column) => `<th>${escapeHtml(column)}</th>`).join("")}</tr>
+            </thead>
+            <tbody>
+              ${sheet.rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")}
+            </tbody>
+          </table>
+        </div>
+      `
+      : `<p class="selection-subtitle">Empty sheet.</p>`;
+
+    const truncation = [
+      sheet.truncated_rows ? "rows truncated" : "",
+      sheet.truncated_columns ? "columns truncated" : "",
+    ].filter(Boolean).join(" · ");
+    const counts = sheet.empty
+      ? "0 rows · 0 columns"
+      : `${sheet.row_count} rows · ${sheet.column_count} columns`;
+
+    return `
+      <section class="preview-card">
+        <div class="detail-meta">
+          <span class="badge">${escapeHtml(sheet.name)}</span>
+          <span class="badge">${escapeHtml(counts)}</span>
+          ${truncation ? `<span class="badge">${escapeHtml(truncation)}</span>` : ""}
+        </div>
+        <div class="preview-block">${table}</div>
+      </section>
+    `;
+  }).join("");
+
+  return `
+    <div class="notebook-stack">
+      <div class="preview-card">
+        <div class="detail-meta">
+          <span class="path-pill">${escapeHtml(preview.path)}</span>
+          <span class="badge">${escapeHtml(preview.summary?.title || "Workbook Preview")}</span>
+          <span class="badge">${escapeHtml(`${preview.summary?.sheet_count ?? (preview.sheets || []).length} sheets`)}</span>
+        </div>
+      </div>
+      ${sheets || `<div class="preview-card"><div class="selection-subtitle">Empty workbook.</div></div>`}
     </div>
   `;
 }

@@ -199,6 +199,62 @@ console.log(JSON.stringify({
     }
 
 
+def test_render_xlsx_preview_renders_workbook_summary_and_sheet_tables():
+    """Workbook previews should render a summary and one table section per sheet."""
+    result = run_app_js(
+        """
+const html = ctx.renderXlsxPreview({
+  path: "workbook.xlsx",
+  summary: { sheet_count: 2 },
+  sheets: [
+    {
+      name: "Summary",
+      columns: ["name", "value"],
+      rows: [["apple", "4"]],
+      empty: false,
+      truncated_rows: false,
+      truncated_columns: false,
+    },
+    {
+      name: "Empty",
+      columns: [],
+      rows: [],
+      empty: true,
+      truncated_rows: false,
+      truncated_columns: false,
+    },
+  ],
+});
+console.log(JSON.stringify({
+  hasSummary: html.includes("Workbook Preview"),
+  hasSheetTitle: html.includes("Summary"),
+  hasTable: html.includes("<table>"),
+  hasEmptySheet: html.includes("Empty sheet"),
+}));
+"""
+    )
+
+    assert result == {
+        "hasSummary": True,
+        "hasSheetTitle": True,
+        "hasTable": True,
+        "hasEmptySheet": True,
+    }
+
+
+def test_preview_label_maps_xlsx_to_excel():
+    """Workbook payloads should expose a user-facing Excel label in pane headers."""
+    result = run_app_js(
+        """
+console.log(JSON.stringify({
+  label: ctx.previewLabel({ kind: "xlsx", path: "workbook.xlsx" }),
+}));
+"""
+    )
+
+    assert result == {"label": "Excel"}
+
+
 def test_render_tree_node_uses_rich_file_icon_mapping():
     """File-tree rows should emit mapped file-kind metadata and icon markup."""
     result = run_app_js(

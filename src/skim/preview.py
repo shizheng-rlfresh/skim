@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import csv
 import json
+from dataclasses import dataclass
 from io import StringIO
 from pathlib import Path
 from typing import Any
@@ -47,11 +48,34 @@ SYNTAX_MAP = {
 MARKDOWN_EXTENSIONS = {".md", ".markdown", ".mdown"}
 JSON_EXTENSIONS = {".json"}
 NOTEBOOK_EXTENSIONS = {".ipynb"}
+XLSX_EXTENSIONS = {".xlsx"}
 MAX_FILE_SIZE = 1_000_000
 MAX_JSON_FILE_SIZE = 10_000_000
 MAX_CSV_ROWS = 20
 MAX_CSV_COLS = 8
 MAX_CSV_CELL_WIDTH = 24
+
+
+@dataclass(frozen=True)
+class XlsxSheetPreviewData:
+    """Display-ready preview metadata for one workbook sheet."""
+
+    name: str
+    columns: list[str]
+    rows: list[list[str]]
+    row_count: int
+    column_count: int
+    truncated_rows: bool
+    truncated_columns: bool
+    empty: bool
+
+
+@dataclass(frozen=True)
+class XlsxPreviewData:
+    """Display-ready preview metadata for one workbook."""
+
+    name: str
+    sheets: list[XlsxSheetPreviewData]
 
 
 class CsvPreview(Vertical):
@@ -68,6 +92,19 @@ class CsvPreview(Vertical):
 
     def compose(self) -> ComposeResult:
         """Compose the CSV preview widgets."""
+        yield from self._widgets
+
+
+class XlsxPreview(Vertical):
+    """Workbook preview with one capped table per sheet."""
+
+    def __init__(self, workbook: XlsxPreviewData) -> None:
+        """Initialize the workbook preview from shared parsed workbook data."""
+        super().__init__(classes="xlsx-preview")
+        self._widgets = _xlsx_preview_widgets(workbook)
+
+    def compose(self) -> ComposeResult:
+        """Compose the workbook preview widgets."""
         yield from self._widgets
 
 
@@ -143,6 +180,9 @@ def render_file(path: Path, *, browse_root: Path | None = None) -> list[Widget]:
     if size > max_size:
         return [Static(Text(f"{path.name} is too large ({size:,} bytes)", style="red"))]
 
+    if suffix in XLSX_EXTENSIONS:
+        return _xlsx_widgets_for_file(path)
+
     try:
         content = path.read_text(errors="replace")
     except Exception as error:
@@ -181,6 +221,15 @@ def render_file(path: Path, *, browse_root: Path | None = None) -> list[Widget]:
     return [Static(Text(content))]
 
 
+def _xlsx_widgets_for_file(path: Path) -> list[Widget]:
+    """Return workbook preview widgets for one `.xlsx` file."""
+    try:
+        workbook = _load_xlsx_preview(path)
+    except Exception as error:
+        return [Static(Text(f"Could not open {path.name}: {error}", style="red"))]
+    return [XlsxPreview(workbook)]
+
+
 def _parse_csv(content: str) -> list[list[str]] | str:
     """Parse CSV content into rows, returning an error message on failure."""
     try:
@@ -207,6 +256,22 @@ def _csv_preview_widgets(content: str, rows: list[list[str]]) -> list[Widget]:
         Static(table, classes="csv-table"),
         _raw_csv_section(content),
     ]
+
+
+def _xlsx_preview_widgets(workbook: XlsxPreviewData) -> list[Widget]:
+    """Build the workbook preview widgets."""
+    widgets: list[Widget] = [
+        Static(_xlsx_summary_text(workbook), classes="xlsx-summary")
+    ]
+    for sheet in workbook.sheets:
+        widgets.append(Static(_xlsx_sheet_summary_text(sheet), classes="xlsx-sheet-label"))
+        if sheet.empty:
+            widgets.append(Static(Text("Empty sheet", style="dim italic")))
+            continue
+        widgets.append(Static(_xlsx_table(sheet.columns, sheet.rows), classes="xlsx-table"))
+    if len(workbook.sheets) == 0:
+        widgets.append(Static(Text("Empty workbook", style="dim italic")))
+    return widgets
 
 
 def _csv_parse_error_widgets(content: str, error: str) -> list[Widget]:
@@ -238,6 +303,33 @@ def _csv_summary_text(header: list[str], body: list[list[str]]) -> Text:
     return text
 
 
+def _xlsx_summary_text(workbook: XlsxPreviewData) -> Text:
+    """Return a short summary for the workbook preview."""
+    text = Text()
+    text.append("Workbook Preview", style="bold")
+    text.append(f"  {len(workbook.sheets):,} sheets", style="dim")
+    text.append(f"  {workbook.name}", style="dim")
+    return text
+
+
+def _xlsx_sheet_summary_text(sheet: XlsxSheetPreviewData) -> Text:
+    """Return a short summary for one sheet preview."""
+    text = Text()
+    text.append(sheet.name, style="bold")
+    if sheet.empty:
+        text.append("  empty", style="dim")
+        return text
+    text.append(f"  {sheet.row_count:,} rows x {sheet.column_count:,} columns", style="dim")
+    notices = []
+    if sheet.truncated_rows:
+        notices.append(f"showing first {MAX_CSV_ROWS} rows")
+    if sheet.truncated_columns:
+        notices.append(f"showing first {MAX_CSV_COLS} columns")
+    if notices:
+        text.append(f"  {'; '.join(notices)}", style="yellow")
+    return text
+
+
 def _csv_table(header: list[str], rows: list[list[str]]) -> Table:
     """Return a capped rich table for a CSV preview."""
     display_header = header[:MAX_CSV_COLS]
@@ -260,12 +352,96 @@ def _csv_table(header: list[str], rows: list[list[str]]) -> Table:
     return table
 
 
+def _xlsx_table(header: list[str], rows: list[list[str]]) -> Table:
+    """Return a table for one workbook sheet preview."""
+    table = Table(expand=True)
+    for column in header:
+        table.add_column(column or " ", overflow="fold")
+    for row in rows:
+        table.add_row(*row)
+    return table
+
+
 def _clip_csv_cell(value: str) -> str:
     """Clip one CSV cell to a conservative width for TUI readability."""
     value = " ".join(value.splitlines())
     if len(value) <= MAX_CSV_CELL_WIDTH:
         return value
     return value[: MAX_CSV_CELL_WIDTH - 1].rstrip() + "…"
+
+
+def _load_xlsx_preview(path: Path) -> XlsxPreviewData:
+    """Load one workbook into display-ready preview data."""
+    from openpyxl import load_workbook
+
+    workbook = load_workbook(path, read_only=True, data_only=True)
+    try:
+        sheets = [_xlsx_sheet_preview_data(sheet) for sheet in workbook.worksheets]
+    finally:
+        workbook.close()
+    return XlsxPreviewData(name=path.name, sheets=sheets)
+
+
+def _xlsx_sheet_preview_data(sheet: Any) -> XlsxSheetPreviewData:
+    """Return display-ready preview data for one worksheet."""
+    sampled_rows: list[list[str]] = []
+    non_empty_rows = 0
+    max_columns = 0
+
+    for row in sheet.iter_rows(values_only=True):
+        values = [_xlsx_cell_text(value) for value in row]
+        while values and values[-1] == "":
+            values.pop()
+        if not values:
+            continue
+        non_empty_rows += 1
+        max_columns = max(max_columns, len(values))
+        if len(sampled_rows) < MAX_CSV_ROWS + 1:
+            sampled_rows.append(values)
+
+    if non_empty_rows == 0:
+        return XlsxSheetPreviewData(
+            name=str(sheet.title),
+            columns=[],
+            rows=[],
+            row_count=0,
+            column_count=0,
+            truncated_rows=False,
+            truncated_columns=False,
+            empty=True,
+        )
+
+    header_values = sampled_rows[0] + [""] * max(0, max_columns - len(sampled_rows[0]))
+    display_header = [_clip_csv_cell(value) for value in header_values[:MAX_CSV_COLS]]
+    if max_columns > MAX_CSV_COLS:
+        display_header.append("...")
+
+    display_rows: list[list[str]] = []
+    visible_columns = min(max_columns, MAX_CSV_COLS)
+    for row in sampled_rows[1 : MAX_CSV_ROWS + 1]:
+        padded = row + [""] * max(0, max_columns - len(row))
+        display_row = [_clip_csv_cell(padded[index]) for index in range(visible_columns)]
+        if max_columns > MAX_CSV_COLS:
+            display_row.append(_clip_csv_cell(" | ".join(padded[MAX_CSV_COLS:])))
+        display_rows.append(display_row)
+
+    return XlsxSheetPreviewData(
+        name=str(sheet.title),
+        columns=display_header,
+        rows=display_rows,
+        row_count=max(non_empty_rows - 1, 0),
+        column_count=max_columns,
+        truncated_rows=max(non_empty_rows - 1, 0) > MAX_CSV_ROWS,
+        truncated_columns=max_columns > MAX_CSV_COLS,
+        empty=False,
+    )
+
+
+def _xlsx_cell_text(value: Any) -> str:
+    """Normalize one workbook cell value for preview display."""
+    if value is None:
+        return ""
+    return str(value)
 
 
 def _raw_csv_section(content: str, *, collapsed: bool = True) -> Collapsible:

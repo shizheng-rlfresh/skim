@@ -11,7 +11,7 @@ from functools import partial
 from http.server import HTTPServer
 from pathlib import Path
 
-from conftest import sample_hermes_transcript, sample_submission, sample_trajectory
+from conftest import sample_hermes_transcript, sample_submission, sample_trajectory, write_test_xlsx
 
 from skim.preview import MAX_FILE_SIZE
 from skim.server import AnnotationStore, SkimHandler
@@ -217,6 +217,45 @@ def test_api_preview_invalid_notebook_falls_back_to_text(tmp_path):
     assert payload["kind"] == "text"
     assert payload["language"] == "json"
     assert payload["render"]["kind"] == "syntax"
+
+
+def test_api_preview_returns_xlsx_payload(tmp_path):
+    """Workbook files should get a dedicated xlsx preview payload."""
+    test_file = tmp_path / "workbook.xlsx"
+    write_test_xlsx(
+        test_file,
+        [
+            ("Summary", [["name", "value"], ["apple", 4], ["orange", 7]]),
+            ("Empty", []),
+        ],
+    )
+
+    with running_server(tmp_path) as base_url:
+        status, payload = request_json(
+            base_url,
+            "/api/preview?path=" + urllib.parse.quote("workbook.xlsx"),
+        )
+
+    assert status == 200
+    assert payload["kind"] == "xlsx"
+    assert payload["path"] == "workbook.xlsx"
+    assert payload["summary"]["sheet_count"] == 2
+    assert payload["sheets"][0]["name"] == "Summary"
+    assert payload["sheets"][0]["columns"] == ["name", "value"]
+    assert payload["sheets"][0]["rows"] == [["apple", "4"], ["orange", "7"]]
+    assert payload["sheets"][1]["name"] == "Empty"
+    assert payload["sheets"][1]["empty"] is True
+
+
+def test_api_preview_returns_error_for_invalid_xlsx(tmp_path):
+    """Unreadable workbooks should surface an explicit error payload."""
+    test_file = tmp_path / "broken.xlsx"
+    test_file.write_bytes(b"not a workbook")
+
+    payload = serialize_preview(test_file, browse_root=tmp_path)
+
+    assert payload["kind"] == "error"
+    assert "Could not open broken.xlsx" in payload["message"]
 
 
 def test_api_preview_keeps_wrapped_trajectory_in_json_inspector(tmp_path):
