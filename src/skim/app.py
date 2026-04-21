@@ -492,11 +492,7 @@ class SkimApp(App):
         """Return the selected triage row, defaulting to the first visible item."""
         visible = self._visible_triage_items()
         selected = next(
-            (
-                item
-                for item in visible
-                if item.annotation_id == self.triage_selected_annotation_id
-            ),
+            (item for item in visible if item.annotation_id == self.triage_selected_annotation_id),
             visible[0] if visible else None,
         )
         self.triage_selected_annotation_id = (
@@ -596,10 +592,12 @@ class SkimApp(App):
         self.pane_files[self.active_pane_id] = path
         if item.target_kind == "json_path":
             target_path = item.target_path or ""
+
             def select_target() -> None:
                 viewer = pane.active_json_navigator()
                 if isinstance(viewer, JsonInspector):
                     viewer.select_annotation_path(target_path)
+
             pane.call_after_refresh(select_target)
         self._show_mode("browse")
         self.exit_file_tree_mode()

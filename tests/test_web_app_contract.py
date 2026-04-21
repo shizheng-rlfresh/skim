@@ -497,7 +497,7 @@ console.log(JSON.stringify({
     annotatedHtml.includes(">Edit annotation<"),
 }));
 """
-        )
+    )
 
     assert result == {"plainHasAnnotate": True, "annotatedHasEdit": True}
 

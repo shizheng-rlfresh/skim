@@ -1426,10 +1426,7 @@ async def test_non_json_file_annotation_modal_saves_file_level_annotation(tmp_pa
 
         payload = json.loads((tmp_path / ".skim" / "review.json").read_text())
         saved = payload["files"]["note.md"]["annotations"][FILE_ANNOTATION_KEY]
-        pane_text = "\n".join(
-            str(_static_content(widget))
-            for widget in pane.query(Static)
-        )
+        pane_text = "\n".join(str(_static_content(widget)) for widget in pane.query(Static))
         assert len(saved) == 1
         assert saved[0]["tags"] == ["important"]
         assert saved[0]["note"] == "Review the whole file."
