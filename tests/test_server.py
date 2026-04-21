@@ -352,7 +352,7 @@ def test_api_tree_skips_symlinks_that_escape_the_browse_root(tmp_path):
 
 
 def test_api_annotations_round_trip_to_review_json(tmp_path):
-    """Saving and deleting annotations should preserve skim's review.json contract."""
+    """Saving and deleting annotations should preserve skim's list-shaped review.json contract."""
     test_file = tmp_path / "plain.json"
     test_file.write_text(json.dumps({"hello": "world"}))
 
@@ -377,22 +377,104 @@ def test_api_annotations_round_trip_to_review_json(tmp_path):
             base_url,
             "/api/annotations",
             method="DELETE",
-            body={"file": "plain.json", "path": "$.hello"},
+            body={
+                "file": "plain.json",
+                "path": "$.hello",
+                "annotation_id": save_payload["annotation"]["id"],
+            },
         )
         _, after_delete = request_json(base_url, "/api/annotations")
 
     assert save_status == 200
-    assert save_payload == {"ok": True}
+    assert save_payload["ok"] is True
     assert get_status == 200
-    assert stored["files"]["plain.json"]["annotations"]["$.hello"] == {
-        "tags": ["important"],
-        "note": "keep this",
-    }
+    saved = stored["files"]["plain.json"]["annotations"]["$.hello"]
+    assert len(saved) == 1
+    assert saved[0]["id"] == save_payload["annotation"]["id"]
+    assert saved[0]["tags"] == ["important"]
+    assert saved[0]["note"] == "keep this"
     hello_node = next(node for node in preview["tree"] if node["path"] == "$.hello")
-    assert hello_node["annotation"] == {"tags": ["important"], "note": "keep this"}
+    assert hello_node["annotation_count"] == 1
+    assert hello_node["annotations"][0]["id"] == save_payload["annotation"]["id"]
     assert delete_status == 200
     assert delete_payload == {"ok": True}
     assert after_delete["files"]["plain.json"]["annotations"] == {}
+
+
+def test_api_annotations_support_multi_entry_round_trip(tmp_path):
+    """The annotation API should create, update, and delete one entry by id."""
+    test_file = tmp_path / "plain.json"
+    test_file.write_text(json.dumps({"hello": "world"}))
+
+    with running_server(tmp_path) as base_url:
+        _, first = request_json(
+            base_url,
+            "/api/annotations",
+            method="POST",
+            body={
+                "file": "plain.json",
+                "path": "$.hello",
+                "tags": ["important"],
+                "note": "first",
+            },
+        )
+        _, second = request_json(
+            base_url,
+            "/api/annotations",
+            method="POST",
+            body={
+                "file": "plain.json",
+                "path": "$.hello",
+                "tags": ["followup"],
+                "note": "second",
+            },
+        )
+        _, updated = request_json(
+            base_url,
+            "/api/annotations",
+            method="POST",
+            body={
+                "file": "plain.json",
+                "path": "$.hello",
+                "annotation_id": second["annotation"]["id"],
+                "tags": ["followup", "confirmed"],
+                "note": "second updated",
+            },
+        )
+        _, preview = request_json(
+            base_url,
+            "/api/preview?path=" + urllib.parse.quote("plain.json"),
+        )
+        _, stored = request_json(base_url, "/api/annotations")
+        delete_status, delete_payload = request_json(
+            base_url,
+            "/api/annotations",
+            method="DELETE",
+            body={
+                "file": "plain.json",
+                "path": "$.hello",
+                "annotation_id": second["annotation"]["id"],
+            },
+        )
+        _, after_delete = request_json(base_url, "/api/annotations")
+
+    assert first["ok"] is True
+    assert second["ok"] is True
+    assert updated["annotation"]["id"] == second["annotation"]["id"]
+    assert updated["annotation"]["note"] == "second updated"
+    saved = stored["files"]["plain.json"]["annotations"]["$.hello"]
+    assert len(saved) == 2
+    assert saved[0]["id"] == second["annotation"]["id"]
+    hello_node = next(node for node in preview["tree"] if node["path"] == "$.hello")
+    assert hello_node["annotation_count"] == 2
+    assert [entry["id"] for entry in hello_node["annotations"]] == [
+        second["annotation"]["id"],
+        first["annotation"]["id"],
+    ]
+    assert delete_status == 200
+    assert delete_payload == {"ok": True}
+    remaining = after_delete["files"]["plain.json"]["annotations"]["$.hello"]
+    assert [entry["id"] for entry in remaining] == [first["annotation"]["id"]]
 
 
 def test_root_serves_local_static_shell_without_cdn_dependencies(tmp_path):
