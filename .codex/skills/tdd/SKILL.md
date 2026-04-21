@@ -28,9 +28,10 @@ Skip this skill when:
 1. Use Python 3.12+ and `uv`.
 2. Put runtime code in `src/skim/`.
 3. Put tests in `tests/` using `test_*.py`.
-4. Run:
+4. Run local verification in this order:
+   - `uv run ruff format .`
+   - `uv run ruff check .`
    - `uv run pytest -v`
-   - `uv run ruff check src/ tests/`
 5. Use deterministic, local-only tests. Do not rely on network or remote artifacts.
 6. For Textual behavior, prefer app-level tests that exercise routing, pane state, and key interactions.
 7. If async Textual tests fail because the pytest async harness is incomplete, repair the harness first and then continue the red-green loop.
@@ -57,10 +58,12 @@ Skip this skill when:
 
 1. Refactor naming/structure only after tests are green.
 2. Keep changes small and re-run tests frequently.
-3. Re-run full suite for confidence:
+3. Before final verification, apply repo-wide formatting:
+   - `uv run ruff format .`
+4. Re-run full suite for confidence:
    - `uv run pytest -v`
-4. Ensure lint still passes:
-   - `uv run ruff check src/ tests/`
+5. Ensure lint still passes:
+   - `uv run ruff check .`
 
 ## Test Scope Rules
 
@@ -75,9 +78,10 @@ Skip this skill when:
 Before finishing:
 1. At least one failing test was observed before implementation.
 2. New/updated behavior is covered by tests.
-3. All relevant tests pass.
+3. Ruff formatting has been applied with `uv run ruff format .`.
 4. Ruff check passes.
-5. Notes include what behavior changed and why.
+5. All relevant tests pass.
+6. Notes include what behavior changed and why.
 
 ## Common Commands
 
@@ -85,11 +89,13 @@ Before finishing:
    - `uv run pytest tests/test_<name>.py`
 2. Run one test:
    - `uv run pytest tests/test_<name>.py -k <test_case>`
-3. Run all tests:
+3. Format the repo:
+   - `uv run ruff format .`
+4. Run all tests:
    - `uv run pytest -v`
-4. Lint:
-   - `uv run ruff check src/ tests/`
-5. Run the app in dev mode when manual UI checking is needed:
+5. Lint:
+   - `uv run ruff check .`
+6. Run the app in dev mode when manual UI checking is needed:
    - `uv run skim-dev`
 
 ## Output Expectations
@@ -97,4 +103,4 @@ Before finishing:
 When this skill is used, outputs should include:
 1. The failing test that drove the change.
 2. The minimal implementation change summary.
-3. Evidence that tests and lint pass (or explicit blockers).
+3. Evidence that formatting, tests, and lint pass (or explicit blockers).

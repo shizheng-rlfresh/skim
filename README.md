@@ -27,6 +27,16 @@ uv run skim-dev          # launch Textual dev mode
 uv run skim-web .        # run the localhost web UI
 ```
 
+## Local Verification
+
+Before commit or push, run local verification in this order so it matches CI:
+
+```bash
+uv run ruff format .
+uv run ruff check .
+uv run pytest -v
+```
+
 ## Web UI
 
 The repo also includes a localhost browser UI:

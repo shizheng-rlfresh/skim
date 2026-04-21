@@ -30,8 +30,14 @@ Do not use this skill when:
    - Commit only the active ticket or review slice.
    - Do not bundle unrelated files.
 2. Verify readiness.
+   - Run `uv run ruff format .` before lint, tests, commit, or push.
    - Run the touched-area tests first.
    - Run broader required checks only when the slice warrants it.
+   - At minimum, finish with:
+     `uv run ruff format .`
+     `uv run ruff check .`
+     `uv run pytest -v`
+   - Apply the same sequence before pushing more commits to an already open PR.
    - Do not commit with known red-phase failures in the slice.
 3. Review the diff.
    - Inspect `git status --short`.
