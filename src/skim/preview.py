@@ -408,14 +408,10 @@ def _xlsx_sheet_preview_data(sheet: Any) -> XlsxSheetPreviewData:
             sampled_rows.append(values)
 
     row_count = (
-        declared_row_count
-        if declared_row_count > MAX_CSV_ROWS + 1
-        else sampled_non_empty_rows
+        declared_row_count if declared_row_count > MAX_CSV_ROWS + 1 else sampled_non_empty_rows
     )
     column_count = (
-        declared_column_count
-        if declared_column_count > MAX_CSV_COLS + 1
-        else sampled_max_columns
+        declared_column_count if declared_column_count > MAX_CSV_COLS + 1 else sampled_max_columns
     )
 
     if row_count == 0 or column_count == 0:
@@ -431,8 +427,7 @@ def _xlsx_sheet_preview_data(sheet: Any) -> XlsxSheetPreviewData:
         )
 
     display_header = [
-        _spreadsheet_column_label(index)
-        for index in range(1, min(column_count, MAX_CSV_COLS) + 1)
+        _spreadsheet_column_label(index) for index in range(1, min(column_count, MAX_CSV_COLS) + 1)
     ]
     if column_count > MAX_CSV_COLS:
         display_header.append("...")
