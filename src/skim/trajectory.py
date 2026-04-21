@@ -10,10 +10,8 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
 from rich.syntax import Syntax
 from rich.text import Text
@@ -25,6 +23,7 @@ from textual.widget import Widget
 from textual.widgets import Button, Collapsible, Input, Markdown, Static, TextArea
 from textual.widgets import Tree as TextualTree
 
+from .review import AnnotationRecord, AnnotationStore
 from .scrolling import AnnotationStatusWrap, DragTree, FocusableDetailWrap
 
 HUMAN_TEXT_KEYS = {
@@ -99,17 +98,6 @@ class TrajectoryTreeItem:
 
 
 @dataclass(frozen=True)
-class AnnotationRecord:
-    """Persisted annotation for one JSON node."""
-
-    id: str
-    created_at: str
-    updated_at: str
-    tags: tuple[str, ...]
-    note: str
-
-
-@dataclass(frozen=True)
 class AnnotationEditorResult:
     """Dismiss payload from the annotation editor modal."""
 
@@ -117,237 +105,6 @@ class AnnotationEditorResult:
     annotation_id: str | None = None
     tags: tuple[str, ...] = ()
     note: str = ""
-
-
-class AnnotationStore:
-    """Local JSON-backed annotation storage rooted at the current browse path."""
-
-    def __init__(self, review_root: Path) -> None:
-        """Initialize the annotation store for one browse root."""
-        self.review_root = review_root.resolve()
-        self.path = self.review_root / ".skim" / "review.json"
-        self._payload = self._load()
-        self._file_annotations: dict[str, dict[str, tuple[AnnotationRecord, ...]]] = {}
-
-    def annotations_for_file(self, source_path: Path) -> dict[str, tuple[AnnotationRecord, ...]]:
-        """Return stored annotations for one source file."""
-        relative_path = self.relative_file_path(source_path)
-        cached = self._file_annotations.get(relative_path)
-        if cached is None:
-            cached = self._build_annotations_for_relative_path(relative_path)
-            self._file_annotations[relative_path] = cached
-        return cached
-
-    def annotations_for_path(self, source_path: Path, path: str) -> tuple[AnnotationRecord, ...]:
-        """Return all annotations by file-relative JSON path, newest first."""
-        return self.annotations_for_file(source_path).get(path, ())
-
-    def get_annotation(self, source_path: Path, path: str) -> AnnotationRecord | None:
-        """Return the newest annotation by file-relative JSON path."""
-        records = self.annotations_for_path(source_path, path)
-        return records[0] if records else None
-
-    def add_annotation(
-        self,
-        source_path: Path,
-        path: str,
-        *,
-        tags: tuple[str, ...],
-        note: str,
-    ) -> AnnotationRecord:
-        """Append one annotation entry for a path and persist it."""
-        record = AnnotationRecord(
-            id=str(uuid4()),
-            created_at=_annotation_timestamp(),
-            updated_at=_annotation_timestamp(),
-            tags=_normalize_annotation_tags(tags),
-            note=note,
-        )
-        relative_path, annotations = self._persisted_annotations_for_file(source_path)
-        existing = annotations.get(path, [])
-        normalized = self._normalize_annotation_entries(existing)
-        updated = _sort_annotation_records([*normalized, record])
-        annotations[path] = [_annotation_payload(entry) for entry in updated]
-        self.annotations_for_file(source_path)[path] = tuple(updated)
-        self._save()
-        return record
-
-    def update_annotation(
-        self,
-        source_path: Path,
-        path: str,
-        annotation_id: str,
-        *,
-        tags: tuple[str, ...],
-        note: str,
-    ) -> AnnotationRecord | None:
-        """Update one persisted annotation entry by id."""
-        relative_path, annotations = self._persisted_annotations_for_file(source_path)
-        existing = self._normalize_annotation_entries(annotations.get(path, []))
-        updated_record: AnnotationRecord | None = None
-        updated_entries: list[AnnotationRecord] = []
-        for record in existing:
-            if record.id == annotation_id:
-                updated_record = AnnotationRecord(
-                    id=record.id,
-                    created_at=record.created_at,
-                    updated_at=_annotation_timestamp(),
-                    tags=_normalize_annotation_tags(tags),
-                    note=note,
-                )
-                updated_entries.append(updated_record)
-            else:
-                updated_entries.append(record)
-        if updated_record is None:
-            return None
-        sorted_entries = _sort_annotation_records(updated_entries)
-        annotations[path] = [_annotation_payload(entry) for entry in sorted_entries]
-        self.annotations_for_file(source_path)[path] = tuple(sorted_entries)
-        self._save()
-        return updated_record
-
-    def set_annotation(
-        self,
-        source_path: Path,
-        path: str,
-        *,
-        tags: tuple[str, ...],
-        note: str,
-    ) -> None:
-        """Store one single-entry annotation, replacing existing entries for compatibility."""
-        record = AnnotationRecord(
-            id=str(uuid4()),
-            created_at=_annotation_timestamp(),
-            updated_at=_annotation_timestamp(),
-            tags=_normalize_annotation_tags(tags),
-            note=note,
-        )
-        _, annotations = self._persisted_annotations_for_file(source_path)
-        annotations[path] = [_annotation_payload(record)]
-        self.annotations_for_file(source_path)[path] = (record,)
-        self._save()
-
-    def delete_annotation(
-        self,
-        source_path: Path,
-        path: str,
-        annotation_id: str | None = None,
-    ) -> None:
-        """Delete one annotation entry by id, or all entries when no id is supplied."""
-        _, annotations = self._persisted_annotations_for_file(source_path)
-        if annotation_id is None:
-            annotations.pop(path, None)
-            self.annotations_for_file(source_path).pop(path, None)
-            self._save()
-            return
-        existing = self._normalize_annotation_entries(annotations.get(path, []))
-        remaining = [record for record in existing if record.id != annotation_id]
-        if remaining:
-            sorted_entries = _sort_annotation_records(remaining)
-            annotations[path] = [_annotation_payload(entry) for entry in sorted_entries]
-            self.annotations_for_file(source_path)[path] = tuple(sorted_entries)
-        else:
-            annotations.pop(path, None)
-            self.annotations_for_file(source_path).pop(path, None)
-        self._save()
-
-    def relative_file_path(self, source_path: Path) -> str:
-        """Return the normalized file key used in persisted review data."""
-        resolved = source_path.resolve()
-        try:
-            return resolved.relative_to(self.review_root).as_posix()
-        except ValueError:
-            return resolved.name
-
-    def _load(self) -> dict[str, Any]:
-        """Load the persisted annotation payload with safe fallbacks."""
-        if not self.path.is_file():
-            return {"version": 1, "files": {}}
-        try:
-            payload = json.loads(self.path.read_text())
-        except (OSError, json.JSONDecodeError):
-            return {"version": 1, "files": {}}
-        if not isinstance(payload, dict):
-            return {"version": 1, "files": {}}
-        payload.setdefault("version", 1)
-        payload.setdefault("files", {})
-        files = payload.get("files", {})
-        if isinstance(files, dict):
-            for file_entry in files.values():
-                if not isinstance(file_entry, dict):
-                    continue
-                annotations = file_entry.get("annotations")
-                if not isinstance(annotations, dict):
-                    file_entry["annotations"] = {}
-                    continue
-                normalized_annotations: dict[str, list[dict[str, Any]]] = {}
-                for path, entry in annotations.items():
-                    if not isinstance(path, str):
-                        continue
-                    records = self._normalize_annotation_entries(entry)
-                    normalized_annotations[path] = [
-                        _annotation_payload(record) for record in records
-                    ]
-                file_entry["annotations"] = normalized_annotations
-        return payload
-
-    def _build_annotations_for_relative_path(
-        self,
-        relative_path: str,
-    ) -> dict[str, tuple[AnnotationRecord, ...]]:
-        """Normalize stored annotations for one file path."""
-        files = self._payload.get("files", {})
-        file_entry = files.get(relative_path, {})
-        annotations = file_entry.get("annotations", {})
-        result: dict[str, tuple[AnnotationRecord, ...]] = {}
-        for path, payload in annotations.items():
-            if not isinstance(path, str):
-                continue
-            records = self._normalize_annotation_entries(payload)
-            if records:
-                result[path] = tuple(records)
-        return result
-
-    def _persisted_annotations_for_file(
-        self,
-        source_path: Path,
-    ) -> tuple[str, dict[str, Any]]:
-        """Return the persisted file key and mutable annotation payload for one source."""
-        relative_path = self.relative_file_path(source_path)
-        files = self._payload.setdefault("files", {})
-        file_entry = files.setdefault(relative_path, {"annotations": {}})
-        annotations = file_entry.setdefault("annotations", {})
-        return relative_path, annotations
-
-    def _normalize_annotation_entries(self, payload: Any) -> list[AnnotationRecord]:
-        """Normalize legacy or list-shaped annotation payloads into sorted records."""
-        entries = payload if isinstance(payload, list) else [payload]
-        records: list[AnnotationRecord] = []
-        for entry in entries:
-            if not isinstance(entry, dict):
-                continue
-            tags = entry.get("tags", [])
-            note = entry.get("note", "")
-            if not isinstance(tags, list) or not isinstance(note, str):
-                continue
-            created_at = str(entry.get("created_at") or _annotation_timestamp())
-            updated_at = str(entry.get("updated_at") or created_at)
-            record_id = str(entry.get("id") or uuid4())
-            records.append(
-                AnnotationRecord(
-                    id=record_id,
-                    created_at=created_at,
-                    updated_at=updated_at,
-                    tags=_normalize_annotation_tags(tags),
-                    note=note,
-                )
-            )
-        return _sort_annotation_records(records)
-
-    def _save(self) -> None:
-        """Write the annotation payload to disk."""
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(self._payload, indent=2, sort_keys=True))
 
 
 class AnnotationEditor(ModalScreen[AnnotationEditorResult | None]):
@@ -1660,6 +1417,20 @@ class JsonInspector(Vertical):
             self._mount_annotation_panel(self._current_item)
         self._update_footer()
 
+    def select_annotation_path(self, path: str) -> bool:
+        """Move the tree selection to one persisted annotation path, if present."""
+        for node in _walk_tree_nodes(self._tree.root):
+            item = node.data
+            if not isinstance(item, JsonInspectorItem):
+                continue
+            if self._annotation_key(item) != path:
+                continue
+            self._tree.move_cursor(node, animate=False)
+            self._show_detail(item)
+            self.focus_tree_mode()
+            return True
+        return False
+
     def focus_detail_mode(self) -> None:
         """Keep compatibility with callers that expect a detail-focus method."""
         self.focus_annotation_mode()
@@ -2366,20 +2137,6 @@ def _annotation_payload(record: AnnotationRecord) -> dict[str, Any]:
         "tags": list(record.tags),
         "note": record.note,
     }
-
-
-def _annotation_timestamp() -> str:
-    """Return a stable UTC timestamp string for annotation metadata."""
-    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
-
-
-def _sort_annotation_records(records: list[AnnotationRecord]) -> list[AnnotationRecord]:
-    """Return records ordered newest-first by updated timestamp."""
-    return sorted(
-        records,
-        key=lambda record: (record.updated_at, record.created_at, record.id),
-        reverse=True,
-    )
 
 
 def _json_type_name(value: Any) -> str:

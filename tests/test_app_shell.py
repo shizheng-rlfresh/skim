@@ -21,6 +21,420 @@ async def test_app_launches():
         assert app.grid == [["pane-0"]]
 
 
+async def test_app_launches_in_triage_mode():
+    """The triage flag should start skim in the dedicated triage view."""
+    app = SkimApp(path=".", triage=True)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        assert app.app_mode == "triage"
+        assert app.query_one("#triage-queue", Static).has_focus
+
+
+async def test_app_uses_custom_titlebar_instead_of_textual_header():
+    """The app should use skim-owned chrome instead of Textual's settings header."""
+    app = SkimApp(path=".")
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        assert len(app.query("Header")) == 0
+        titlebar = app.query_one("#app-titlebar", Static)
+        content = _static_content(titlebar)
+        assert isinstance(content, str)
+        assert "skim" in content
+        assert "Browse" in content
+
+
+async def test_triage_enter_opens_selected_item_in_browse_mode(tmp_path):
+    """Enter in triage mode should open the selected file back into browse."""
+    review_file = tmp_path / ".skim" / "review.json"
+    review_file.parent.mkdir()
+    review_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "files": {
+                    "plain.json": {
+                        "annotations": {
+                            "$.hello": [
+                                {
+                                    "id": "ann-1",
+                                    "created_at": "2026-04-21T14:00:00Z",
+                                    "updated_at": "2026-04-21T14:05:00Z",
+                                    "tags": ["important"],
+                                    "note": "keep this",
+                                }
+                            ]
+                        }
+                    }
+                },
+            }
+        )
+    )
+    (tmp_path / "plain.json").write_text(json.dumps({"hello": "world"}))
+    app = SkimApp(path=str(tmp_path), triage=True)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        assert app.app_mode == "browse"
+        assert pane.current_path == tmp_path / "plain.json"
+
+
+async def test_triage_enter_preserves_selected_file_annotation(tmp_path):
+    """Opening a file-level triage item should keep that annotation selected in browse."""
+    review_file = tmp_path / ".skim" / "review.json"
+    review_file.parent.mkdir()
+    review_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "files": {
+                    "notes.md": {
+                        "annotations": {
+                            "@file": [
+                                {
+                                    "id": "older",
+                                    "created_at": "2026-04-21T14:00:00Z",
+                                    "updated_at": "2026-04-21T14:00:00Z",
+                                    "tags": ["older"],
+                                    "note": "older note",
+                                },
+                                {
+                                    "id": "newer",
+                                    "created_at": "2026-04-21T14:05:00Z",
+                                    "updated_at": "2026-04-21T14:05:00Z",
+                                    "tags": ["newer"],
+                                    "note": "newer note",
+                                },
+                            ]
+                        }
+                    }
+                },
+            }
+        )
+    )
+    (tmp_path / "notes.md").write_text("# Notes\n")
+    app = SkimApp(path=str(tmp_path), triage=True)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        assert app.triage_selected_annotation_id == "newer"
+
+        await pilot.press("down")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        annotations = app.review_store.annotations_for_path(tmp_path / "notes.md", "@file")
+        assert pane.current_path == tmp_path / "notes.md"
+        assert pane.selected_file_annotation_id(annotations) == "older"
+        assert "Note: older note" in _static_content(pane.query(Static).first()).plain
+
+
+async def test_triage_toggle_returns_to_selected_queue_item(tmp_path):
+    """Returning to triage should preserve the queue selection from the prior open."""
+    review_file = tmp_path / ".skim" / "review.json"
+    review_file.parent.mkdir()
+    review_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "files": {
+                    "docs/spec.md": {
+                        "annotations": {
+                            "@file": [
+                                {
+                                    "id": "ann-file",
+                                    "created_at": "2026-04-21T14:00:00Z",
+                                    "updated_at": "2026-04-21T14:05:00Z",
+                                    "tags": ["important"],
+                                    "note": "rollout wording",
+                                }
+                            ]
+                        }
+                    }
+                },
+            }
+        )
+    )
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "spec.md").write_text("# Spec\n")
+    app = SkimApp(path=str(tmp_path), triage=True)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert app.app_mode == "browse"
+
+        await pilot.press("t")
+        await pilot.pause()
+
+        queue = app.query_one("#triage-queue", Static)
+        content = _static_content(queue)
+        assert app.app_mode == "triage"
+        assert "ann-file" not in content
+        assert "docs/spec.md" in content
+        assert "> File" in content
+        assert app.triage_selected_annotation_id == "ann-file"
+
+
+async def test_browse_shortcut_restores_browser_without_resetting_active_pane(tmp_path):
+    """Switching through triage should preserve the current browse pane content."""
+    test_file = tmp_path / "hello.txt"
+    test_file.write_text("hello world")
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        pane.show_file(test_file)
+        await pilot.pause()
+
+        await pilot.press("t")
+        await pilot.pause()
+        assert app.app_mode == "triage"
+
+        await pilot.press("b")
+        await pilot.pause()
+
+        assert app.app_mode == "browse"
+        assert pane.current_path == test_file
+
+
+async def test_triage_queue_groups_annotations_by_file(tmp_path):
+    """The TUI triage queue should group visible annotations under one file header."""
+    review_file = tmp_path / ".skim" / "review.json"
+    review_file.parent.mkdir()
+    review_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "files": {
+                    "output.json": {
+                        "annotations": {
+                            "$.task": [
+                                {
+                                    "id": "ann-task",
+                                    "created_at": "2026-04-21T14:10:00Z",
+                                    "updated_at": "2026-04-21T14:15:00Z",
+                                    "tags": ["bug"],
+                                    "note": "task summary",
+                                }
+                            ],
+                            "$.result": [
+                                {
+                                    "id": "ann-result",
+                                    "created_at": "2026-04-21T14:20:00Z",
+                                    "updated_at": "2026-04-21T14:25:00Z",
+                                    "tags": ["followup"],
+                                    "note": "result summary",
+                                }
+                            ],
+                        }
+                    }
+                },
+            }
+        )
+    )
+    (tmp_path / "output.json").write_text(json.dumps({"task": "x", "result": "y"}))
+    app = SkimApp(path=str(tmp_path), triage=True)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        queue = app.query_one("#triage-queue", Static)
+        content = _static_content(queue)
+
+        assert content.count("output.json") == 1
+        assert "$.task" in content
+        assert "$.result" in content
+        assert "task summary" in content
+        assert "result summary" in content
+
+
+async def test_triage_down_moves_selection_exactly_one_item(tmp_path):
+    """One down-arrow press in triage should advance by exactly one annotation."""
+    review_file = tmp_path / ".skim" / "review.json"
+    review_file.parent.mkdir()
+    review_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "files": {
+                    "output.json": {
+                        "annotations": {
+                            "$.task": [
+                                {
+                                    "id": "ann-task",
+                                    "created_at": "2026-04-21T14:10:00Z",
+                                    "updated_at": "2026-04-21T14:15:00Z",
+                                    "tags": ["bug"],
+                                    "note": "task summary",
+                                }
+                            ],
+                            "$.result": [
+                                {
+                                    "id": "ann-result",
+                                    "created_at": "2026-04-21T14:20:00Z",
+                                    "updated_at": "2026-04-21T14:25:00Z",
+                                    "tags": ["followup"],
+                                    "note": "result summary",
+                                }
+                            ],
+                            "$.other": [
+                                {
+                                    "id": "ann-other",
+                                    "created_at": "2026-04-21T14:30:00Z",
+                                    "updated_at": "2026-04-21T14:35:00Z",
+                                    "tags": ["later"],
+                                    "note": "other summary",
+                                }
+                            ],
+                        }
+                    }
+                },
+            }
+        )
+    )
+    (tmp_path / "output.json").write_text(json.dumps({"task": "x", "result": "y", "other": "z"}))
+    app = SkimApp(path=str(tmp_path), triage=True)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        assert app.triage_selected_annotation_id == "ann-other"
+
+        await pilot.press("down")
+        await pilot.pause()
+
+        assert app.triage_selected_annotation_id == "ann-result"
+
+
+async def test_triage_selection_follows_grouped_render_order_across_files(tmp_path):
+    """Triage movement should follow the grouped queue order, not the flat payload order."""
+    review_file = tmp_path / ".skim" / "review.json"
+    review_file.parent.mkdir()
+    review_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "files": {
+                    "a.md": {
+                        "annotations": {
+                            "@file": [
+                                {
+                                    "id": "a-newer",
+                                    "created_at": "2026-04-21T14:40:00Z",
+                                    "updated_at": "2026-04-21T14:40:00Z",
+                                    "tags": ["one"],
+                                    "note": "a newer",
+                                },
+                                {
+                                    "id": "a-older",
+                                    "created_at": "2026-04-21T14:10:00Z",
+                                    "updated_at": "2026-04-21T14:10:00Z",
+                                    "tags": ["two"],
+                                    "note": "a older",
+                                },
+                            ]
+                        }
+                    },
+                    "b.md": {
+                        "annotations": {
+                            "@file": [
+                                {
+                                    "id": "b-newer",
+                                    "created_at": "2026-04-21T14:30:00Z",
+                                    "updated_at": "2026-04-21T14:30:00Z",
+                                    "tags": ["three"],
+                                    "note": "b newer",
+                                },
+                                {
+                                    "id": "b-older",
+                                    "created_at": "2026-04-21T14:20:00Z",
+                                    "updated_at": "2026-04-21T14:20:00Z",
+                                    "tags": ["four"],
+                                    "note": "b older",
+                                },
+                            ]
+                        }
+                    },
+                },
+            }
+        )
+    )
+    (tmp_path / "a.md").write_text("# A\n")
+    (tmp_path / "b.md").write_text("# B\n")
+    app = SkimApp(path=str(tmp_path), triage=True)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        assert app.triage_selected_annotation_id == "a-newer"
+
+        await pilot.press("down")
+        await pilot.pause()
+        assert app.triage_selected_annotation_id == "a-older"
+
+        await pilot.press("down")
+        await pilot.pause()
+        assert app.triage_selected_annotation_id == "b-newer"
+
+
+async def test_triage_does_not_enter_split_mode(tmp_path):
+    """Split mode should stay disabled while the triage shell is active."""
+    review_file = tmp_path / ".skim" / "review.json"
+    review_file.parent.mkdir()
+    review_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "files": {
+                    "notes.md": {
+                        "annotations": {
+                            "@file": [
+                                {
+                                    "id": "ann-file",
+                                    "created_at": "2026-04-21T14:00:00Z",
+                                    "updated_at": "2026-04-21T14:05:00Z",
+                                    "tags": ["important"],
+                                    "note": "rollout wording",
+                                }
+                            ]
+                        }
+                    }
+                },
+            }
+        )
+    )
+    (tmp_path / "notes.md").write_text("# Notes\n")
+    app = SkimApp(path=str(tmp_path), triage=True)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        await pilot.press("s")
+        await pilot.pause()
+
+        assert not app.split_mode
+        assert app._total_panes() == 1
+
+        await pilot.press("right")
+        await pilot.pause()
+
+        assert not app.split_mode
+        assert app._total_panes() == 1
+
+
 async def test_split_right():
     """Pressing s then right creates a second pane."""
     app = SkimApp(path=".")

@@ -456,6 +456,367 @@ console.log(JSON.stringify({
     }
 
 
+def test_render_pane_shell_includes_file_annotation_actions_for_non_json_previews():
+    """Non-JSON pane headers should expose file-level annotate/edit affordances."""
+    result = run_app_js(
+        """
+const plainHtml = ctx.renderPaneShell({
+  id: "pane-1",
+  path: "docs/spec.md",
+  preview: {
+    kind: "markdown",
+    name: "spec.md",
+    path: "docs/spec.md",
+    annotation_path: "@file",
+    annotations: [],
+    annotation_count: 0,
+  },
+});
+const annotatedHtml = ctx.renderPaneShell({
+  id: "pane-1",
+  path: "docs/spec.md",
+  preview: {
+    kind: "markdown",
+    name: "spec.md",
+    path: "docs/spec.md",
+    annotation_path: "@file",
+    annotations: [{
+      id: "ann-1",
+      created_at: "2026-04-21T14:00:00Z",
+      updated_at: "2026-04-21T14:05:00Z",
+      tags: ["important"],
+      note: "review",
+    }],
+    annotation_count: 1,
+  },
+});
+console.log(JSON.stringify({
+  plainHasAnnotate: plainHtml.includes('data-annotate="@file"') && plainHtml.includes(">Annotate<"),
+  annotatedHasEdit:
+    annotatedHtml.includes('data-annotation-id="ann-1"') &&
+    annotatedHtml.includes(">Edit annotation<"),
+}));
+"""
+    )
+
+    assert result == {"plainHasAnnotate": True, "annotatedHasEdit": True}
+
+
+def test_non_json_previews_render_file_annotation_panel_with_multiple_entries():
+    """Non-JSON previews should render the shared annotation panel for @file."""
+    result = run_app_js(
+        """
+const pane = ctx.createPaneState("pane-1");
+pane.path = "docs/spec.md";
+pane.preview = {
+  kind: "markdown",
+  name: "spec.md",
+  path: "docs/spec.md",
+  content: "# Spec",
+  annotation_path: "@file",
+  annotations: [
+    {
+      id: "newer",
+      created_at: "2026-04-20T11:00:00Z",
+      updated_at: "2026-04-20T11:30:00Z",
+      tags: ["bug"],
+      note: "newer file note",
+    },
+    {
+      id: "older",
+      created_at: "2026-04-20T10:00:00Z",
+      updated_at: "2026-04-20T10:00:00Z",
+      tags: ["evidence"],
+      note: "older file note",
+    },
+  ],
+  annotation_count: 2,
+};
+pane.selectedAnnotationIds = { "@file": "older" };
+const html = ctx.renderMarkdownPreview(pane);
+console.log(JSON.stringify({
+  hasPanel: html.includes('annotation-panel'),
+  hasCount: html.includes('2 annotations'),
+  hasOlderSelected: html.includes('annotation-entry selected'),
+  hasOlderNote: html.includes('older file note'),
+}));
+"""
+    )
+
+    assert result == {
+        "hasPanel": True,
+        "hasCount": True,
+        "hasOlderSelected": True,
+        "hasOlderNote": True,
+    }
+
+
+def test_triage_visible_items_filter_and_selection_are_client_side():
+    """Triage filtering should stay client-side over search, tag, and file-type state."""
+    result = run_app_js(
+        """
+vm.runInContext(`
+state.triage = {
+  items: [
+    {
+      annotation_id: "ann-1",
+      file_path: "docs/spec.md",
+      target_kind: "file",
+      target_label: "File",
+      target_path: null,
+      preview_kind: "markdown",
+      tags: ["important"],
+      note_preview: "rollout wording",
+      note_full: "rollout wording",
+      created_at: "2026-04-21T14:00:00Z",
+      updated_at: "2026-04-21T14:05:00Z",
+    },
+    {
+      annotation_id: "ann-2",
+      file_path: "output.json",
+      target_kind: "json_path",
+      target_label: "$.task",
+      target_path: "$.task",
+      preview_kind: "json",
+      tags: ["bug"],
+      note_preview: "task summary",
+      note_full: "task summary",
+      created_at: "2026-04-21T14:10:00Z",
+      updated_at: "2026-04-21T14:15:00Z",
+    },
+  ],
+  search: "rollout",
+  selectedTag: "important",
+  selectedPreviewKind: "markdown",
+  selectedAnnotationId: "ann-1",
+  lastAnnotationVersion: "v1",
+};
+`, ctx);
+const visible = ctx.visibleTriageItems();
+console.log(JSON.stringify({
+  ids: visible.map((item) => item.annotation_id),
+  selected: ctx.selectedTriageItem()?.annotation_id || null,
+}));
+"""
+    )
+
+    assert result == {"ids": ["ann-1"], "selected": "ann-1"}
+
+
+def test_open_triage_item_switches_back_to_browse_and_routes_target():
+    """Opening a triage row should restore browse mode and route the selected target."""
+    result = run_app_js(
+        """
+vm.runInContext(`
+state.mode = "triage";
+state.panes = [createPaneState("pane-1")];
+state.activePaneId = "pane-1";
+state.triage = {
+  items: [{
+    annotation_id: "ann-1",
+    file_path: "output.json",
+    target_kind: "json_path",
+    target_label: "$.task",
+    target_path: "$.task",
+    preview_kind: "json",
+    tags: ["bug"],
+    note_preview: "task summary",
+    note_full: "task summary",
+    created_at: "2026-04-21T14:10:00Z",
+    updated_at: "2026-04-21T14:15:00Z",
+  }],
+  search: "",
+  selectedTag: "",
+  selectedPreviewKind: "",
+  selectedAnnotationId: "ann-1",
+  lastAnnotationVersion: "v1",
+};
+globalThis.__openCall = null;
+loadPreviewForPane = async function(path, paneId, options = {}) {
+  globalThis.__openCall = { path, paneId, options };
+  return { ok: true };
+};
+`, ctx);
+await ctx.openTriageItem("ann-1");
+console.log(JSON.stringify({
+  mode: vm.runInContext('state.mode', ctx),
+  selected: vm.runInContext('state.triage.selectedAnnotationId', ctx),
+  openCall: vm.runInContext('globalThis.__openCall', ctx),
+}));
+"""
+    )
+
+    assert result == {
+        "mode": "browse",
+        "selected": "ann-1",
+        "openCall": {
+            "path": "output.json",
+            "paneId": "pane-1",
+            "options": {"selectedJsonPath": "$.task"},
+        },
+    }
+
+
+def test_open_triage_item_routes_file_annotation_selection():
+    """Opening a file-level triage row should route the selected annotation id."""
+    result = run_app_js(
+        """
+vm.runInContext(`
+state.mode = "triage";
+state.panes = [createPaneState("pane-1")];
+state.activePaneId = "pane-1";
+state.triage = {
+  items: [{
+    annotation_id: "ann-file-older",
+    file_path: "docs/spec.md",
+    target_kind: "file",
+    target_label: "File",
+    target_path: null,
+    preview_kind: "markdown",
+    tags: ["important"],
+    note_preview: "older note",
+    note_full: "older note",
+    created_at: "2026-04-21T14:10:00Z",
+    updated_at: "2026-04-21T14:15:00Z",
+  }],
+  search: "",
+  selectedTag: "",
+  selectedPreviewKind: "",
+  selectedAnnotationId: "ann-file-older",
+  lastAnnotationVersion: "v1",
+};
+globalThis.__openCall = null;
+loadPreviewForPane = async function(path, paneId, options = {}) {
+  globalThis.__openCall = { path, paneId, options };
+  return { ok: true };
+};
+`, ctx);
+await ctx.openTriageItem("ann-file-older");
+console.log(JSON.stringify(vm.runInContext('globalThis.__openCall', ctx)));
+"""
+    )
+
+    assert result == {
+        "path": "docs/spec.md",
+        "paneId": "pane-1",
+        "options": {
+            "selectedAnnotationPath": "@file",
+            "selectedAnnotationId": "ann-file-older",
+        },
+    }
+
+
+def test_load_preview_for_pane_restores_selected_file_annotation_from_options():
+    """Preview loads should apply routed file-level annotation selection state."""
+    result = run_app_js(
+        """
+vm.runInContext(`
+state.panes = [createPaneState("pane-1")];
+state.activePaneId = "pane-1";
+apiJson = async function() {
+  return {
+    kind: "markdown",
+    name: "spec.md",
+    path: "docs/spec.md",
+    content: "# Spec",
+    annotation_path: "@file",
+    annotations: [
+      {
+        id: "newer",
+        tags: ["new"],
+        note: "newer",
+        created_at: "2026-04-21T14:10:00Z",
+        updated_at: "2026-04-21T14:10:00Z"
+      },
+      {
+        id: "older",
+        tags: ["old"],
+        note: "older",
+        created_at: "2026-04-21T14:00:00Z",
+        updated_at: "2026-04-21T14:00:00Z"
+      }
+    ],
+    annotation_count: 2,
+  };
+};
+renderTree = function() {};
+renderWorkspace = function() {};
+renderStatusBar = function() {};
+`, ctx);
+await ctx.loadPreviewForPane("docs/spec.md", "pane-1", {
+  selectedAnnotationPath: "@file",
+  selectedAnnotationId: "older",
+});
+console.log(JSON.stringify(vm.runInContext('state.panes[0].selectedAnnotationIds', ctx)));
+"""
+    )
+
+    assert result == {"@file": "older"}
+
+
+def test_render_triage_queue_groups_annotations_by_file():
+    """Triage queue markup should show one file header with nested annotation rows."""
+    result = run_app_js(
+        """
+vm.runInContext(`
+state.triage = {
+  items: [
+    {
+      annotation_id: "ann-1",
+      file_path: "output.json",
+      target_kind: "json_path",
+      target_label: "$.task",
+      target_path: "$.task",
+      preview_kind: "json",
+      tags: ["bug"],
+      note_preview: "task summary",
+      note_full: "task summary",
+      created_at: "2026-04-21T14:10:00Z",
+      updated_at: "2026-04-21T14:15:00Z",
+    },
+    {
+      annotation_id: "ann-2",
+      file_path: "output.json",
+      target_kind: "json_path",
+      target_label: "$.result",
+      target_path: "$.result",
+      preview_kind: "json",
+      tags: ["followup"],
+      note_preview: "result summary",
+      note_full: "result summary",
+      created_at: "2026-04-21T14:20:00Z",
+      updated_at: "2026-04-21T14:25:00Z",
+    },
+  ],
+  search: "",
+  selectedTag: "",
+  selectedPreviewKind: "",
+  selectedAnnotationId: "ann-2",
+  lastAnnotationVersion: "v1",
+};
+`, ctx);
+const html = ctx.renderTriageQueue(ctx.visibleTriageItems());
+console.log(JSON.stringify({
+  fileOccurrences: html.split("output.json").length - 1,
+  hasGroup: html.includes("triage-file-group"),
+  hasHeader: html.includes("triage-file-group-header"),
+  hasRow: html.includes("triage-annotation-row"),
+  hasTask: html.includes("$.task"),
+  hasResult: html.includes("$.result"),
+}));
+"""
+    )
+
+    assert result == {
+        "fileOccurrences": 1,
+        "hasGroup": True,
+        "hasHeader": True,
+        "hasRow": True,
+        "hasTask": True,
+        "hasResult": True,
+    }
+
+
 def test_render_json_node_uses_structured_icon_key_and_value_segments():
     """JSON tree rows should render typed icons and separate key/value spans."""
     result = run_app_js(
@@ -910,6 +1271,26 @@ console.log(JSON.stringify({
         "activePaneId": "pane-6",
         "paneIds": ["pane-1", "pane-2", "pane-3", "pane-4", "pane-5", "pane-6"],
     }
+
+
+def test_split_active_pane_is_inert_in_triage_mode():
+    """Web triage mode should not allow pane splitting."""
+    result = run_app_js(
+        """
+vm.runInContext(`
+state.mode = "triage";
+state.panes = [createPaneState("pane-1")];
+state.activePaneId = "pane-1";
+`, ctx);
+ctx.splitActivePane();
+console.log(JSON.stringify({
+  paneCount: vm.runInContext('state.panes.length', ctx),
+  activePaneId: vm.runInContext('state.activePaneId', ctx),
+}));
+"""
+    )
+
+    assert result == {"paneCount": 1, "activePaneId": "pane-1"}
 
 
 def test_tree_click_opens_file_in_the_active_pane():

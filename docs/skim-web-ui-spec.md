@@ -117,6 +117,8 @@ Multi-pane target:
 
 - `/api/tree` returns the browse tree
 - `/api/preview?path=<rel>` returns typed preview payloads
+- `/api/triage` returns normalized workspace annotation rows
+- `/api/annotation-version` returns the current review-version token
 - `/api/annotations` persists local review annotations under
   `<browse-root>/.skim/review.json`
 - Python owns preview routing, syntax HTML generation, and structured detail payloads
@@ -410,15 +412,35 @@ Step / item fields:
   "files": {
     "data/output.json": {
       "annotations": {
-        "$.trajectory.steps[0].output[3]": {
-          "tags": ["important"],
-          "note": "check this"
-        }
+        "$.trajectory.steps[0].output[3]": [
+          {
+            "id": "ann-json",
+            "created_at": "2026-04-21T14:00:00.000000Z",
+            "updated_at": "2026-04-21T14:05:00.000000Z",
+            "tags": ["important"],
+            "note": "check this"
+          }
+        ]
+      }
+    },
+    "docs/spec.md": {
+      "annotations": {
+        "@file": [
+          {
+            "id": "ann-file",
+            "created_at": "2026-04-21T14:10:00.000000Z",
+            "updated_at": "2026-04-21T14:15:00.000000Z",
+            "tags": ["follow-up"],
+            "note": "Review the whole file."
+          }
+        ]
       }
     }
   }
 }
 ```
+
+The reserved `@file` key stores file-level annotations for non-JSON previews.
 
 ### `POST /api/annotations`
 
@@ -430,6 +452,17 @@ Request:
   "path": "$.trajectory.steps[0].output[3]",
   "tags": ["important"],
   "note": "check this"
+}
+```
+
+File-level example:
+
+```json
+{
+  "file": "docs/spec.md",
+  "path": "@file",
+  "tags": ["follow-up"],
+  "note": "Review the whole file."
 }
 ```
 
@@ -461,6 +494,37 @@ Failure rules:
 - missing file → error
 - path outside browse root → forbidden
 - malformed request body → error
+
+### `GET /api/annotation-version`
+
+```json
+{
+  "annotation_version": "1761087327123456789:214"
+}
+```
+
+### `GET /api/triage`
+
+```json
+{
+  "annotation_version": "1761087327123456789:214",
+  "items": [
+    {
+      "annotation_id": "ann-file",
+      "file_path": "docs/spec.md",
+      "target_kind": "file",
+      "target_label": "File",
+      "target_path": null,
+      "preview_kind": "markdown",
+      "tags": ["follow-up"],
+      "note_preview": "Review the whole file.",
+      "note_full": "Review the whole file.",
+      "created_at": "2026-04-21T14:10:00.000000Z",
+      "updated_at": "2026-04-21T14:15:00.000000Z"
+    }
+  ]
+}
+```
 
 ---
 
