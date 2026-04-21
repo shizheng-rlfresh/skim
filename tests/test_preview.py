@@ -19,6 +19,7 @@ from conftest import (
     sample_hermes_transcript,
     sample_submission,
     sample_trajectory,
+    write_test_xlsx,
 )
 from rich.syntax import Syntax
 from rich.text import Text
@@ -26,7 +27,7 @@ from textual.widgets import Collapsible, Input, Markdown, Static, TextArea, Tree
 
 import skim.trajectory as trajectory_module
 from skim import JsonInspector, PreviewPane, SkimApp, render_file
-from skim.preview import CsvPreview
+from skim.preview import CsvPreview, XlsxPreview, _xlsx_sheet_preview_data
 from skim.scrolling import FocusableDetailWrap
 from skim.trajectory import AnnotationStore
 
@@ -201,6 +202,128 @@ def test_csv_preview_caps_wide_and_long_content(tmp_path):
     first_cell = table.columns[0]._cells[0]
     assert first_cell.endswith("…")
     assert len(first_cell) == 24
+
+
+def test_xlsx_uses_specialized_preview(tmp_path):
+    """XLSX files should use the specialized workbook preview widget."""
+    test_file = tmp_path / "workbook.xlsx"
+    write_test_xlsx(
+        test_file,
+        [
+            ("Summary", [["name", "value"], ["apple", 4], ["orange", 7]]),
+            ("Empty", []),
+        ],
+    )
+
+    widgets = render_file(test_file)
+
+    assert len(widgets) == 1
+    assert isinstance(widgets[0], XlsxPreview)
+
+
+def test_xlsx_preview_shows_workbook_summary_and_sheet_sections(tmp_path):
+    """Workbook previews should render sheet sections in workbook order."""
+    test_file = tmp_path / "workbook.xlsx"
+    write_test_xlsx(
+        test_file,
+        [
+            ("Summary", [["apple", 4], ["orange", 7]]),
+            ("Details", [["alpha", 9], ["beta", 3]]),
+            ("Empty", []),
+        ],
+    )
+
+    widgets = render_file(test_file)
+
+    preview = widgets[0]
+    assert isinstance(preview, XlsxPreview)
+    assert "Workbook Preview" in _static_content(preview._widgets[0]).plain
+    assert "3 sheets" in _static_content(preview._widgets[0]).plain
+    assert "Summary" in _static_content(preview._widgets[1]).plain
+    assert "2 rows x 2 columns" in _static_content(preview._widgets[1]).plain
+    summary_table = _static_content(preview._widgets[2])
+    assert summary_table.columns[0].header == "A"
+    assert summary_table.columns[1].header == "B"
+    assert summary_table.columns[0]._cells[0] == "apple"
+    assert summary_table.columns[1]._cells[0] == "4"
+    assert "Details" in _static_content(preview._widgets[3]).plain
+    assert "Empty" in _static_content(preview._widgets[5]).plain
+    assert "Empty sheet" in _static_content(preview._widgets[6]).plain
+
+
+def test_xlsx_preview_caps_wide_and_long_content(tmp_path):
+    """Workbook previews should cap rows, columns, and oversized cell values."""
+    test_file = tmp_path / "wide.xlsx"
+    header = [f"col_{index}" for index in range(10)]
+    long_cell = "x" * 80
+    rows = [[long_cell, *[f"value_{index}" for index in range(1, 10)]] for _ in range(25)]
+    write_test_xlsx(test_file, [("Wide", [header, *rows])])
+
+    widgets = render_file(test_file)
+
+    preview = widgets[0]
+    assert isinstance(preview, XlsxPreview)
+    table = _static_content(preview._widgets[2])
+    assert len(table.columns) == 9
+    assert table.row_count == 20
+    assert table.columns[0]._cells[0] == "col_0"
+    clipped_cell = table.columns[0]._cells[1]
+    assert clipped_cell.endswith("…")
+    assert len(clipped_cell) == 24
+
+
+def test_xlsx_preview_binds_sheet_scan_to_visible_window():
+    """Workbook preview should bound worksheet scans to the preview window."""
+
+    class FakeSheet:
+        title = "Large"
+        max_row = 50_000
+        max_column = 200
+
+        def iter_rows(
+            self,
+            *,
+            min_row,
+            max_row,
+            min_col,
+            max_col,
+            values_only,
+        ):
+            assert min_row == 1
+            assert max_row == 21
+            assert min_col == 1
+            assert max_col == 9
+            assert values_only is True
+            return iter(
+                [
+                    ("alpha", "beta", "gamma"),
+                    ("delta", None, None),
+                ]
+            )
+
+    preview = _xlsx_sheet_preview_data(FakeSheet())
+
+    assert preview.row_count == 50_000
+    assert preview.column_count == 200
+    assert preview.truncated_rows is True
+    assert preview.truncated_columns is True
+    assert preview.columns == ["A", "B", "C", "D", "E", "F", "G", "H", "..."]
+    assert preview.rows == [
+        ["alpha", "beta", "gamma", "", "", "", "", "", ""],
+        ["delta", "", "", "", "", "", "", "", ""],
+    ]
+
+
+def test_invalid_xlsx_shows_error_preview(tmp_path):
+    """Unreadable workbooks should surface an explicit error preview."""
+    test_file = tmp_path / "broken.xlsx"
+    test_file.write_bytes(b"not a workbook")
+
+    widgets = render_file(test_file)
+
+    assert len(widgets) == 1
+    assert isinstance(widgets[0], Static)
+    assert "Could not open broken.xlsx" in _static_content(widgets[0]).plain
 
 
 def test_invalid_json_falls_back_to_syntax_preview(tmp_path):

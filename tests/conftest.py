@@ -7,7 +7,10 @@ trajectory viewer.
 """
 
 import json
+from pathlib import Path
 from typing import Any
+from xml.sax.saxutils import escape
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from rich.syntax import Syntax
 from rich.text import Text
@@ -146,6 +149,106 @@ def sample_hermes_transcript() -> dict[str, Any]:
             {"from": "assistant", "value": "The key issue is Chlorpyrifos."},
         ],
     }
+
+
+def write_test_xlsx(path: Path, sheets: list[tuple[str, list[list[object | None]]]]) -> None:
+    """Write a minimal `.xlsx` workbook fixture with inline-string cells."""
+    workbook_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+{sheets}
+  </sheets>
+</workbook>
+"""
+    rels_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1"
+    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"
+    Target="xl/workbook.xml"/>
+</Relationships>
+"""
+    workbook_rels_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+{relationships}
+</Relationships>
+"""
+    content_types_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml"
+    ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+{overrides}
+</Types>
+"""
+
+    def column_name(index: int) -> str:
+        label = ""
+        while index > 0:
+            index, remainder = divmod(index - 1, 26)
+            label = chr(65 + remainder) + label
+        return label
+
+    def cell_xml(cell_ref: str, value: object | None) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, bool):
+            return f'<c r="{cell_ref}" t="b"><v>{1 if value else 0}</v></c>'
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return f'<c r="{cell_ref}"><v>{value}</v></c>'
+        text = escape(str(value))
+        return f'<c r="{cell_ref}" t="inlineStr"><is><t>{text}</t></is></c>'
+
+    def sheet_xml(rows: list[list[object | None]]) -> str:
+        row_xml: list[str] = []
+        for row_index, row in enumerate(rows, start=1):
+            cells = "".join(
+                cell_xml(f"{column_name(column_index)}{row_index}", value)
+                for column_index, value in enumerate(row, start=1)
+            )
+            row_xml.append(f'<row r="{row_index}">{cells}</row>')
+        return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+{rows}
+  </sheetData>
+</worksheet>
+""".format(rows="\n".join(row_xml))
+
+    sheet_entries = []
+    rel_entries = []
+    override_entries = []
+    sheet_payloads: list[tuple[str, str]] = []
+    for index, (sheet_name, rows) in enumerate(sheets, start=1):
+        escaped_name = escape(sheet_name, {'"': "&quot;", "'": "&apos;"})
+        sheet_entries.append(
+            f'    <sheet name="{escaped_name}" sheetId="{index}" r:id="rId{index}"/>'
+        )
+        rel_entries.append(
+            f'  <Relationship Id="rId{index}" '
+            'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" '
+            f'Target="worksheets/sheet{index}.xml"/>'
+        )
+        override_entries.append(
+            f'  <Override PartName="/xl/worksheets/sheet{index}.xml" '
+            'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+        )
+        sheet_payloads.append((f"xl/worksheets/sheet{index}.xml", sheet_xml(rows)))
+
+    with ZipFile(path, "w", compression=ZIP_DEFLATED) as archive:
+        archive.writestr(
+            "[Content_Types].xml",
+            content_types_xml.format(overrides="\n".join(override_entries)),
+        )
+        archive.writestr("_rels/.rels", rels_xml)
+        archive.writestr("xl/workbook.xml", workbook_xml.format(sheets="\n".join(sheet_entries)))
+        archive.writestr(
+            "xl/_rels/workbook.xml.rels",
+            workbook_rels_xml.format(relationships="\n".join(rel_entries)),
+        )
+        for name, payload in sheet_payloads:
+            archive.writestr(name, payload)
 
 
 def _static_content(widget: Static) -> object:

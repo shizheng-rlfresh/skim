@@ -27,7 +27,10 @@ from .preview import (
     MAX_JSON_FILE_SIZE,
     NOTEBOOK_EXTENSIONS,
     SYNTAX_MAP,
+    XLSX_EXTENSIONS,
+    XlsxSheetPreviewData,
     _clip_csv_cell,
+    _load_xlsx_preview,
     _looks_like_notebook,
     _notebook_language,
     _notebook_text,
@@ -107,6 +110,9 @@ def serialize_preview(
             "message": f"{resolved.name} is too large ({size:,} bytes)",
         }
 
+    if suffix in XLSX_EXTENSIONS:
+        return _serialize_xlsx_file(resolved, relative_path=relative_path)
+
     try:
         content = resolved.read_text(errors="replace")
     except OSError as error:
@@ -154,6 +160,31 @@ def serialize_preview(
         content,
         language=SYNTAX_MAP.get(suffix),
     )
+
+
+def _serialize_xlsx_file(path: Path, *, relative_path: str) -> dict[str, Any]:
+    """Return a browser-friendly workbook preview payload for one `.xlsx` file."""
+    try:
+        workbook = _load_xlsx_preview(path)
+    except Exception as error:
+        return {
+            "kind": "error",
+            "name": path.name,
+            "path": relative_path,
+            "message": f"Could not open {path.name}: {error}",
+        }
+
+    return {
+        "kind": "xlsx",
+        "name": path.name,
+        "path": relative_path,
+        "summary": {
+            "title": "Workbook Preview",
+            "sheet_count": len(workbook.sheets),
+            "sheet_names": [sheet.name for sheet in workbook.sheets],
+        },
+        "sheets": [_xlsx_sheet_payload(sheet) for sheet in workbook.sheets],
+    }
 
 
 def _serialize_json_file(
@@ -796,6 +827,20 @@ def _serialize_csv_preview(content: str, *, name: str, relative_path: str) -> di
         "summary": f"CSV Preview {len(body):,} rows x {len(header):,} columns",
         "truncated_rows": len(body) > MAX_CSV_ROWS,
         "truncated_columns": len(header) > MAX_CSV_COLS,
+    }
+
+
+def _xlsx_sheet_payload(sheet: XlsxSheetPreviewData) -> dict[str, Any]:
+    """Return a browser-friendly payload for one workbook sheet preview."""
+    return {
+        "name": sheet.name,
+        "columns": sheet.columns,
+        "rows": sheet.rows,
+        "row_count": sheet.row_count,
+        "column_count": sheet.column_count,
+        "truncated_rows": sheet.truncated_rows,
+        "truncated_columns": sheet.truncated_columns,
+        "empty": sheet.empty,
     }
 
 
