@@ -28,6 +28,7 @@ from textual.widgets import Collapsible, Input, Markdown, Static, TextArea, Tree
 import skim.trajectory as trajectory_module
 from skim import JsonInspector, PreviewPane, SkimApp, render_file
 from skim.preview import CsvPreview, XlsxPreview, _xlsx_sheet_preview_data
+from skim.review import FILE_ANNOTATION_KEY
 from skim.scrolling import FocusableDetailWrap
 from skim.trajectory import AnnotationStore
 
@@ -1400,6 +1401,39 @@ async def test_annotation_modal_blocks_tree_and_pane_shortcuts(tmp_path):
         assert inspector._tree.cursor_node is first_node
         assert inspector._tree.cursor_node is not second_node
         assert app.active_pane_id == active_before
+
+
+async def test_non_json_file_annotation_modal_saves_file_level_annotation(tmp_path):
+    """Pressing a on a non-JSON preview should save a file-level annotation."""
+    test_file = tmp_path / "note.md"
+    test_file.write_text("# Note\n")
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        pane.show_file(test_file)
+        await pilot.pause()
+
+        await pilot.press("a")
+        await pilot.pause()
+
+        tags = app.screen.query_one("#annotation-tags", Input)
+        note = app.screen.query_one("#annotation-note", TextArea)
+        tags.value = "important"
+        note.load_text("Review the whole file.")
+        app.screen.action_save()
+        await pilot.pause()
+
+        payload = json.loads((tmp_path / ".skim" / "review.json").read_text())
+        saved = payload["files"]["note.md"]["annotations"][FILE_ANNOTATION_KEY]
+        pane_text = "\n".join(
+            str(_static_content(widget))
+            for widget in pane.query(Static)
+        )
+        assert len(saved) == 1
+        assert saved[0]["tags"] == ["important"]
+        assert saved[0]["note"] == "Review the whole file."
+        assert "File Annotation" in pane_text
 
 
 async def test_json_inspector_footer_shows_live_preview_controls(tmp_path):

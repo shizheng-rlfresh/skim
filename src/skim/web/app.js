@@ -15,6 +15,7 @@ const DEFAULT_TRAJECTORY_SPLIT_RATIO = loadStoredSplitRatio("trajectory", 38);
 const elements = {};
 
 const state = {
+  mode: "browse",
   tree: null,
   browseRoot: "",
   expandedDirs: new Set(["."]),
@@ -30,6 +31,15 @@ const state = {
     query: "",
     selectedIndex: 0,
     matches: [],
+  },
+  triage: {
+    items: [],
+    search: "",
+    selectedTag: "",
+    selectedPreviewKind: "",
+    selectedAnnotationId: null,
+    lastAnnotationVersion: null,
+    pollId: null,
   },
   modal: null,
 };
@@ -60,6 +70,8 @@ function createPaneState(id) {
 function bindElements() {
   elements.appShell = document.getElementById("app-shell");
   elements.browseRoot = document.getElementById("browse-root");
+  elements.modeBrowse = document.getElementById("mode-browse");
+  elements.modeTriage = document.getElementById("mode-triage");
   elements.fileTree = document.getElementById("file-tree");
   elements.previewWork = document.getElementById("preview-work");
   elements.paneGrid = document.getElementById("pane-grid");
@@ -89,7 +101,11 @@ function bindEvents() {
   elements.fileTree?.addEventListener("click", onTreeClick);
   elements.fileTree?.addEventListener("keydown", onTreeKeyDown);
   elements.previewWork?.addEventListener("click", onWorkspaceClick);
+  elements.previewWork?.addEventListener("input", onWorkspaceInput);
+  elements.previewWork?.addEventListener("change", onWorkspaceInput);
   elements.previewWork?.addEventListener("pointerdown", onPreviewPointerDown);
+  elements.modeBrowse?.addEventListener("click", () => setMode("browse"));
+  elements.modeTriage?.addEventListener("click", () => setMode("triage"));
   elements.sidebarToggle?.addEventListener("click", toggleSidebar);
   elements.sidebarResizer?.addEventListener("pointerdown", beginSidebarResize);
   elements.splitPane?.addEventListener("click", splitActivePane);
@@ -121,7 +137,9 @@ async function bootstrap() {
   try {
     state.tree = await apiJson("/api/tree");
     state.browseRoot = state.tree.root_path || state.tree.name || ".";
+    await loadTriage({ preserveSelection: false });
     render();
+    startAnnotationPolling();
   } catch (error) {
     renderFailure(error);
   }
@@ -162,10 +180,18 @@ function paneById(paneId) {
 
 function render() {
   applyTheme();
+  renderViewToggle();
   renderTree();
   renderWorkspace();
   renderStatusBar();
   renderPalette();
+}
+
+function renderViewToggle() {
+  elements.modeBrowse?.classList.toggle("active", state.mode === "browse");
+  elements.modeBrowse?.setAttribute("aria-pressed", state.mode === "browse" ? "true" : "false");
+  elements.modeTriage?.classList.toggle("active", state.mode === "triage");
+  elements.modeTriage?.setAttribute("aria-pressed", state.mode === "triage" ? "true" : "false");
 }
 
 function renderTree() {
@@ -210,13 +236,21 @@ function renderTreeNode(node, depth) {
 }
 
 function renderWorkspace() {
-  if (!elements.paneGrid) {
+  if (!elements.previewWork || !elements.workspace) {
     return;
   }
+  elements.workspace.classList.toggle("sidebar-hidden", !state.sidebarVisible && state.mode === "browse");
+  elements.workspace.classList.toggle("triage-mode", state.mode === "triage");
+  elements.sidebarResizer?.classList.toggle("hidden", state.mode !== "browse" || !canResizeSidebar());
+  if (state.mode === "triage") {
+    elements.previewWork.innerHTML = renderTriageView();
+    elements.paneGrid = null;
+    return;
+  }
+  elements.previewWork.innerHTML = `<div class="pane-grid" id="pane-grid"></div>`;
+  elements.paneGrid = document.getElementById("pane-grid");
   const count = state.panes.length;
   const layoutMode = paneLayoutMode(count);
-  elements.workspace?.classList.toggle("sidebar-hidden", !state.sidebarVisible);
-  elements.sidebarResizer?.classList.toggle("hidden", !canResizeSidebar());
   elements.paneGrid.className = `pane-grid panes-${count} layout-${layoutMode}`;
   applySidebarWidth();
   elements.paneGrid.innerHTML = renderPaneGridMarkup(state.panes);
@@ -228,6 +262,7 @@ function renderPaneShell(pane) {
   const title = pane.preview?.name || "Preview";
   const kind = previewLabel(pane.preview);
   const path = pane.path || "No file selected";
+  const annotationActions = renderPaneHeaderAnnotationActions(pane);
   const closeButton = state.panes.length > 1
     ? `<button class="title-button" type="button" data-close-pane="${escapeAttribute(pane.id)}">×</button>`
     : "";
@@ -240,6 +275,7 @@ function renderPaneShell(pane) {
           <div class="pane-path">${escapeHtml(path)}</div>
         </div>
         <div class="title-actions">
+          ${annotationActions}
           <span class="pane-kind">${escapeHtml(kind)}</span>
           ${closeButton}
         </div>
@@ -249,6 +285,17 @@ function renderPaneShell(pane) {
       </div>
     </article>
   `;
+}
+
+function renderPaneHeaderAnnotationActions(pane) {
+  if (!pane?.path || !isFileAnnotationPreview(pane.preview)) {
+    return "";
+  }
+  return renderAnnotationActions(
+    pane,
+    pane.preview.annotation_path,
+    normalizeAnnotations(pane.preview.annotations, pane.preview.annotation),
+  );
 }
 
 function previewLabel(preview) {
@@ -269,6 +316,17 @@ function previewLabel(preview) {
     error: "Error",
   };
   return kindLabels[preview.kind] || languageLabel(preview.language);
+}
+
+function isFileAnnotationPreview(preview) {
+  return Boolean(
+    preview &&
+    preview.annotation_path &&
+    preview.kind !== "json_inspector" &&
+    preview.kind !== "trajectory" &&
+    preview.kind !== "error" &&
+    preview.kind !== "too_large",
+  );
 }
 
 function languageLabel(language) {
@@ -365,14 +423,286 @@ function renderPaneContent(pane) {
 
 function renderStatusBar() {
   if (elements.statusPaneCount) {
-    elements.statusPaneCount.textContent = `${state.panes.length} pane${state.panes.length === 1 ? "" : "s"}`;
+    if (state.mode === "triage") {
+      const visible = visibleTriageItems();
+      elements.statusPaneCount.textContent = `${visible.length} item${visible.length === 1 ? "" : "s"}`;
+    } else {
+      elements.statusPaneCount.textContent = `${state.panes.length} pane${state.panes.length === 1 ? "" : "s"}`;
+    }
   }
   if (elements.statusActivePath) {
-    elements.statusActivePath.textContent = activePane()?.path || "No file selected";
+    if (state.mode === "triage") {
+      elements.statusActivePath.textContent = selectedTriageItem()?.file_path || "No annotation selected";
+    } else {
+      elements.statusActivePath.textContent = activePane()?.path || "No file selected";
+    }
   }
   if (elements.browseRoot) {
     elements.browseRoot.textContent = state.browseRoot || "Loading…";
   }
+}
+
+function setMode(mode) {
+  if (mode !== "browse" && mode !== "triage") {
+    return;
+  }
+  state.mode = mode;
+  render();
+}
+
+async function loadTriage(options = {}) {
+  const payload = await apiJson("/api/triage");
+  const previous = options.preferredAnnotationId || (options.preserveSelection !== false ? state.triage.selectedAnnotationId : null);
+  state.triage.items = Array.isArray(payload.items) ? payload.items : [];
+  state.triage.lastAnnotationVersion = payload.annotation_version || null;
+  const visible = visibleTriageItems();
+  const preferred = visible.find((item) => item.annotation_id === previous) || visible[0] || null;
+  state.triage.selectedAnnotationId = preferred?.annotation_id || null;
+  return payload;
+}
+
+function startAnnotationPolling() {
+  if (!globalThis.setInterval || state.triage.pollId != null) {
+    return;
+  }
+  state.triage.pollId = globalThis.setInterval(() => {
+    void refreshAnnotationsIfNeeded();
+  }, 2000);
+}
+
+async function refreshAnnotationsIfNeeded() {
+  const payload = await apiJson("/api/annotation-version");
+  const version = payload.annotation_version || null;
+  if (!version || version === state.triage.lastAnnotationVersion) {
+    return;
+  }
+  await loadTriage({ preserveSelection: true });
+  await refreshOpenPanes();
+  renderWorkspace();
+  renderStatusBar();
+}
+
+async function refreshOpenPanes() {
+  for (const pane of state.panes) {
+    if (!pane.path) {
+      continue;
+    }
+    await loadPreviewForPane(pane.path, pane.id, {
+      selectedJsonPath: pane.selectedJsonPath,
+      selectedStepId: pane.selectedStepId,
+    });
+  }
+}
+
+function visibleTriageItems() {
+  const search = (state.triage.search || "").trim().toLowerCase();
+  return state.triage.items.filter((item) => {
+    if (state.triage.selectedTag && !(item.tags || []).includes(state.triage.selectedTag)) {
+      return false;
+    }
+    if (state.triage.selectedPreviewKind && item.preview_kind !== state.triage.selectedPreviewKind) {
+      return false;
+    }
+    if (!search) {
+      return true;
+    }
+    const haystack = [
+      item.file_path,
+      item.target_label,
+      item.target_path,
+      item.note_preview,
+      item.note_full,
+      ...(item.tags || []),
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    return haystack.includes(search);
+  });
+}
+
+function selectedTriageItem() {
+  const visible = visibleTriageItems();
+  const selected =
+    visible.find((item) => item.annotation_id === state.triage.selectedAnnotationId) ||
+    visible[0] ||
+    null;
+  state.triage.selectedAnnotationId = selected?.annotation_id || null;
+  return selected;
+}
+
+function triageTagOptions() {
+  const tags = new Set();
+  for (const item of state.triage.items) {
+    for (const tag of item.tags || []) {
+      tags.add(tag);
+    }
+  }
+  return Array.from(tags).sort((left, right) => left.localeCompare(right));
+}
+
+function triagePreviewKindOptions() {
+  const kinds = new Set();
+  for (const item of state.triage.items) {
+    if (item.preview_kind) {
+      kinds.add(item.preview_kind);
+    }
+  }
+  return Array.from(kinds).sort((left, right) => left.localeCompare(right));
+}
+
+function renderTriageView() {
+  const visible = visibleTriageItems();
+  const selected = selectedTriageItem();
+  return `
+    <section class="triage-shell">
+      <aside class="triage-panel triage-filters">
+        <div class="panel-heading">Filters</div>
+        <label class="field">
+          <span>Search</span>
+          <input type="text" value="${escapeAttribute(state.triage.search || "")}" placeholder="file, tag, note" data-triage-search>
+        </label>
+        <label class="field">
+          <span>Tag</span>
+          <select data-triage-tag>
+            <option value="">All tags</option>
+            ${triageTagOptions().map((tag) => `<option value="${escapeAttribute(tag)}" ${tag === state.triage.selectedTag ? "selected" : ""}>${escapeHtml(tag)}</option>`).join("")}
+          </select>
+        </label>
+        <label class="field">
+          <span>File type</span>
+          <select data-triage-preview-kind>
+            <option value="">All types</option>
+            ${triagePreviewKindOptions().map((kind) => `<option value="${escapeAttribute(kind)}" ${kind === state.triage.selectedPreviewKind ? "selected" : ""}>${escapeHtml(kind)}</option>`).join("")}
+          </select>
+        </label>
+        <div class="triage-summary">${visible.length} item${visible.length === 1 ? "" : "s"}</div>
+      </aside>
+      <section class="triage-panel triage-queue">
+        <div class="panel-heading">Queue</div>
+        ${renderTriageQueue(visible)}
+      </section>
+      <section class="triage-panel triage-detail">
+        <div class="panel-heading">Detail</div>
+        ${renderTriageDetail(selected)}
+      </section>
+    </section>
+  `;
+}
+
+function renderTriageQueue(items) {
+  if (!items.length) {
+    return `<div class="empty-state"><div><div class="empty-mark">◇</div><div>No annotations match the current filters.</div></div></div>`;
+  }
+  return `
+    <div class="triage-list">
+      ${items.map((item) => `
+        <button class="triage-row ${item.annotation_id === state.triage.selectedAnnotationId ? "selected" : ""}" type="button" data-triage-select="${escapeAttribute(item.annotation_id)}" data-triage-open="${escapeAttribute(item.annotation_id)}">
+          <div class="triage-row-head">
+            <span class="badge">${escapeHtml(item.preview_kind)}</span>
+            <span class="triage-file">${escapeHtml(item.file_path)}</span>
+            <span class="triage-time">${escapeHtml(formatAnnotationTimestamp(item.updated_at))}</span>
+          </div>
+          <div class="triage-target">${escapeHtml(item.target_label || "File")}</div>
+          <div class="triage-note">${escapeHtml(item.note_preview || "(empty)")}</div>
+          <div class="annotation-tags">${(item.tags || []).map((tag) => `<span class="annotation-tag">${escapeHtml(tag)}</span>`).join("")}</div>
+        </button>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderTriageDetail(item) {
+  if (!item) {
+    return `<div class="empty-state"><div><div class="empty-mark">◇</div><div>No annotation selected.</div></div></div>`;
+  }
+  return `
+    <div class="detail-stack triage-detail-stack">
+      <div class="preview-card">
+        <div class="detail-meta">
+          <span class="path-pill">${escapeHtml(item.file_path)}</span>
+          <span class="badge">${escapeHtml(item.target_label || "File")}</span>
+          <span class="badge">${escapeHtml(item.preview_kind)}</span>
+        </div>
+      </div>
+      <div class="preview-card">
+        <div class="annotation-tags">${(item.tags || []).map((tag) => `<span class="annotation-tag">${escapeHtml(tag)}</span>`).join("")}</div>
+        <div class="preview-block"><div class="text-block">${escapeHtml(item.note_full || "(empty)")}</div></div>
+      </div>
+      <div class="preview-card">
+        <div class="detail-meta">
+          <span class="badge">${escapeHtml(`Created ${formatAnnotationTimestamp(item.created_at)}`)}</span>
+          <span class="badge">${escapeHtml(`Updated ${formatAnnotationTimestamp(item.updated_at)}`)}</span>
+        </div>
+        <div class="title-actions triage-actions">
+          <button class="title-button" type="button" data-triage-open="${escapeAttribute(item.annotation_id)}">Open</button>
+          <button class="title-button" type="button" data-triage-edit="${escapeAttribute(item.annotation_id)}">Edit</button>
+          <button class="title-button danger" type="button" data-triage-delete="${escapeAttribute(item.annotation_id)}">Delete</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function triageItemById(annotationId) {
+  return state.triage.items.find((item) => item.annotation_id === annotationId) || null;
+}
+
+async function openTriageItem(annotationId) {
+  const item = triageItemById(annotationId);
+  if (!item) {
+    return null;
+  }
+  state.triage.selectedAnnotationId = item.annotation_id;
+  state.mode = "browse";
+  render();
+  await loadPreviewForPane(
+    item.file_path,
+    state.activePaneId,
+    item.target_kind === "json_path" ? { selectedJsonPath: item.target_path } : {},
+  );
+  return item;
+}
+
+function openTriageEditor(annotationId) {
+  const item = triageItemById(annotationId);
+  if (!item) {
+    return;
+  }
+  state.triage.selectedAnnotationId = item.annotation_id;
+  openModal({
+    paneId: state.activePaneId,
+    file: item.file_path,
+    path: item.target_kind === "file" ? "@file" : item.target_path,
+    annotations: [],
+    annotation: {
+      id: item.annotation_id,
+      created_at: item.created_at,
+      updated_at: item.updated_at,
+      tags: item.tags || [],
+      note: item.note_full,
+    },
+    annotationId: item.annotation_id,
+  });
+}
+
+async function deleteTriageItem(annotationId) {
+  const item = triageItemById(annotationId);
+  if (!item) {
+    return;
+  }
+  await apiJson("/api/annotations", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      file: item.file_path,
+      path: item.target_kind === "file" ? "@file" : item.target_path,
+      annotation_id: item.annotation_id,
+    }),
+  });
+  await loadTriage({ preserveSelection: true });
+  renderWorkspace();
+  renderStatusBar();
 }
 
 function toggleSidebar() {
@@ -1039,6 +1369,31 @@ async function onWorkspaceClick(event) {
   if (event.target.closest("[data-resize-split], [data-resize-pane-col], [data-resize-pane-row]")) {
     return;
   }
+  if (state.mode === "triage") {
+    const triageSelect = event.target.closest("[data-triage-select]");
+    if (triageSelect) {
+      state.triage.selectedAnnotationId = triageSelect.dataset.triageSelect || null;
+      renderWorkspace();
+      renderStatusBar();
+      return;
+    }
+    const triageOpen = event.target.closest("[data-triage-open]");
+    if (triageOpen) {
+      await openTriageItem(triageOpen.dataset.triageOpen || "");
+      return;
+    }
+    const triageEdit = event.target.closest("[data-triage-edit]");
+    if (triageEdit) {
+      openTriageEditor(triageEdit.dataset.triageEdit || "");
+      return;
+    }
+    const triageDelete = event.target.closest("[data-triage-delete]");
+    if (triageDelete) {
+      await deleteTriageItem(triageDelete.dataset.triageDelete || "");
+      return;
+    }
+    return;
+  }
   const closeButton = event.target.closest("[data-close-pane]");
   if (closeButton) {
     closePane(closeButton.dataset.closePane);
@@ -1053,6 +1408,32 @@ async function onWorkspaceClick(event) {
 
   if (paneId) {
     await onPreviewClick(event, paneId);
+  }
+}
+
+function onWorkspaceInput(event) {
+  if (state.mode !== "triage") {
+    return;
+  }
+  const search = event.target.closest("[data-triage-search]");
+  if (search) {
+    state.triage.search = search.value || "";
+    renderWorkspace();
+    renderStatusBar();
+    return;
+  }
+  const tag = event.target.closest("[data-triage-tag]");
+  if (tag) {
+    state.triage.selectedTag = tag.value || "";
+    renderWorkspace();
+    renderStatusBar();
+    return;
+  }
+  const previewKind = event.target.closest("[data-triage-preview-kind]");
+  if (previewKind) {
+    state.triage.selectedPreviewKind = previewKind.value || "";
+    renderWorkspace();
+    renderStatusBar();
   }
 }
 
@@ -1963,6 +2344,9 @@ function selectedAnnotationEntry(pane, annotationPath, annotations) {
   if (!pane || !annotationPath) {
     return annotations[0];
   }
+  if (!pane.selectedAnnotationIds) {
+    pane.selectedAnnotationIds = {};
+  }
   const selectedId = pane.selectedAnnotationIds?.[annotationPath];
   const selected = annotations.find((entry) => entry.id === selectedId) || annotations[0];
   pane.selectedAnnotationIds[annotationPath] = selected.id;
@@ -2002,50 +2386,67 @@ async function onSaveAnnotation(event) {
   if (!state.modal) {
     return;
   }
+  const modal = state.modal;
   const tags = (elements.modalTags?.value || "")
     .split(",")
     .map((tag) => tag.trim())
     .filter(Boolean);
-  await apiJson("/api/annotations", {
+  const response = await apiJson("/api/annotations", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      file: state.modal.file,
-      path: state.modal.path,
-      ...(state.modal.annotationId ? { annotation_id: state.modal.annotationId } : {}),
+      file: modal.file,
+      path: modal.path,
+      ...(modal.annotationId ? { annotation_id: modal.annotationId } : {}),
       tags,
       note: elements.modalNote?.value || "",
     }),
   });
-  const pane = paneById(state.modal.paneId);
+  const pane = paneById(modal.paneId);
   const selectedJsonPath = pane?.selectedJsonPath;
   const selectedStepId = pane?.selectedStepId;
-  const paneId = state.modal.paneId;
-  const file = state.modal.file;
+  const paneId = modal.paneId;
+  const file = modal.file;
   closeModal();
-  await globalThis.loadPreviewForPane(file, paneId, { selectedJsonPath, selectedStepId });
+  await loadTriage({
+    preserveSelection: true,
+    preferredAnnotationId: response.annotation?.id || modal.annotationId || null,
+  });
+  if (state.mode === "browse" && paneId && file) {
+    await globalThis.loadPreviewForPane(file, paneId, { selectedJsonPath, selectedStepId });
+  } else {
+    renderWorkspace();
+    renderStatusBar();
+  }
 }
 
 async function onDeleteAnnotation() {
   if (!state.modal) {
     return;
   }
+  const modal = state.modal;
   await apiJson("/api/annotations", {
     method: "DELETE",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      file: state.modal.file,
-      path: state.modal.path,
-      annotation_id: state.modal.annotationId,
+      file: modal.file,
+      path: modal.path,
+      annotation_id: modal.annotationId,
     }),
   });
-  const pane = paneById(state.modal.paneId);
+  const pane = paneById(modal.paneId);
   const selectedJsonPath = pane?.selectedJsonPath;
   const selectedStepId = pane?.selectedStepId;
-  const paneId = state.modal.paneId;
-  const file = state.modal.file;
+  const paneId = modal.paneId;
+  const file = modal.file;
   closeModal();
-  await globalThis.loadPreviewForPane(file, paneId, { selectedJsonPath, selectedStepId });
+  await loadTriage({ preserveSelection: true });
+  if (state.mode === "browse" && paneId && file) {
+    await globalThis.loadPreviewForPane(file, paneId, { selectedJsonPath, selectedStepId });
+  } else {
+    renderWorkspace();
+    renderStatusBar();
+  }
 }
 
 function openPalette() {

@@ -23,6 +23,7 @@ from textual.css.query import NoMatches
 from textual.widget import Widget
 from textual.widgets import Collapsible, Markdown, Static
 
+from .review import FILE_ANNOTATION_KEY, AnnotationStore
 from .scrolling import DragScrollMixin
 from .trajectory import JsonInspector, TrajectoryViewer
 
@@ -108,6 +109,15 @@ class XlsxPreview(Vertical):
         yield from self._widgets
 
 
+class FileAnnotationStatus(Static):
+    """Compact file-level annotation summary for non-JSON previews."""
+
+    def __init__(self, annotations, **kwargs: Any) -> None:
+        """Initialize the status widget from stored file annotations."""
+        super().__init__("", **kwargs)
+        self.update(_file_annotation_status_text(annotations))
+
+
 class PreviewPane(DragScrollMixin, VerticalScroll, can_focus=True):
     """Scrollable panel that shows file contents."""
 
@@ -129,6 +139,16 @@ class PreviewPane(DragScrollMixin, VerticalScroll, can_focus=True):
         self.remove_children()
         browse_root = getattr(self.app, "browse_path", path.parent)
         widgets = render_file(path, browse_root=browse_root)
+        store = getattr(self.app, "review_store", None)
+        if widgets and not isinstance(widgets[0], (JsonInspector, TrajectoryViewer)):
+            if isinstance(store, AnnotationStore):
+                widgets = [
+                    FileAnnotationStatus(
+                        store.annotations_for_path(path, FILE_ANNOTATION_KEY),
+                        classes="annotation-status-panel",
+                    ),
+                    *widgets,
+                ]
         for widget in widgets:
             self.mount(widget)
         self.scroll_home(animate=False)
@@ -596,6 +616,24 @@ def _notebook_output_widget(output: Any) -> Widget:
     if traceback is not None:
         return Static(Text(_notebook_text(traceback), style="red"))
     return Static(Text(json.dumps(output, indent=2)))
+
+
+def _file_annotation_status_text(annotations) -> Text:
+    """Return a compact summary of file-level annotation state."""
+    title = Text("File Annotation", style="bold")
+    if not annotations:
+        title.append("\nNo annotation yet", style="white")
+        title.append("\nPress a to annotate this file", style="dim")
+        return title
+    selected = annotations[0]
+    title.append(
+        f"\n{len(annotations)} annotation{'s' if len(annotations) != 1 else ''}",
+        style="white",
+    )
+    if selected.tags:
+        title.append(f"\nTags: {', '.join(selected.tags)}", style="cyan")
+    title.append(f"\nNote: {selected.note or '(empty)'}", style="white")
+    return title
 
 
 def _notebook_text(value: Any) -> str:

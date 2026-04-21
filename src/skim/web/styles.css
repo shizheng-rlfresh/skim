@@ -128,14 +128,16 @@ body {
 body,
 button,
 input,
-textarea {
+textarea,
+select {
   font-family: var(--font-mono);
   font-size: 13px;
 }
 
 button,
 input,
-textarea {
+textarea,
+select {
   font: inherit;
 }
 
@@ -200,6 +202,11 @@ button {
   min-width: 0;
 }
 
+.view-toggle {
+  display: inline-flex;
+  gap: 6px;
+}
+
 .status-left,
 .status-right {
   color: var(--fg-secondary);
@@ -241,6 +248,11 @@ button {
   color: var(--fg-primary);
 }
 
+.title-button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .title-button:hover,
 .solid-button:hover,
 .tree-row:hover,
@@ -272,6 +284,10 @@ button {
   overflow: hidden;
 }
 
+.workspace.triage-mode {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .workspace.sidebar-hidden {
   grid-template-columns: 0 0 minmax(0, 1fr);
 }
@@ -285,6 +301,11 @@ button {
 }
 
 .workspace.sidebar-hidden .sidebar {
+  display: none;
+}
+
+.workspace.triage-mode .sidebar,
+.workspace.triage-mode .sidebar-resizer {
   display: none;
 }
 
@@ -385,6 +406,74 @@ button {
   min-height: 0;
   height: 100%;
   overflow: hidden;
+}
+
+.triage-shell {
+  height: 100%;
+  display: grid;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(320px, 1.2fr) minmax(320px, 1.2fr);
+  gap: 12px;
+  padding: 12px;
+}
+
+.triage-panel {
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  padding: 12px;
+}
+
+.triage-summary {
+  color: var(--fg-secondary);
+}
+
+.triage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.triage-row {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-surface);
+  color: inherit;
+  text-align: left;
+  padding: 10px;
+}
+
+.triage-row.selected {
+  border-color: var(--accent);
+  background: var(--bg-highlight);
+}
+
+.triage-row-head,
+.triage-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.triage-file {
+  flex: 1;
+  min-width: 0;
+}
+
+.triage-time,
+.triage-target {
+  color: var(--fg-secondary);
+}
+
+.triage-note {
+  margin: 6px 0;
+}
+
+.triage-detail-stack {
+  gap: 10px;
 }
 
 .pane-grid {

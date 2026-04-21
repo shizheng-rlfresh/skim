@@ -15,7 +15,7 @@ from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from .trajectory import AnnotationStore
+from .review import AnnotationStore
 from .web_preview import serialize_preview
 
 SKIP_DIRS = {
@@ -106,7 +106,18 @@ class SkimHandler(SimpleHTTPRequestHandler):
             self._serve_preview(parse_qs(parsed.query))
             return
         if parsed.path == "/api/annotations":
-            self._json_response(self.store._payload)
+            self._json_response(self.store.payload)
+            return
+        if parsed.path == "/api/annotation-version":
+            self._json_response({"annotation_version": self.store.annotation_version})
+            return
+        if parsed.path == "/api/triage":
+            self._json_response(
+                {
+                    "annotation_version": self.store.annotation_version,
+                    "items": [item.to_payload() for item in self.store.triage_items()],
+                }
+            )
             return
         super().do_GET()
 

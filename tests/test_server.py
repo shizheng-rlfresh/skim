@@ -14,6 +14,7 @@ from pathlib import Path
 from conftest import sample_hermes_transcript, sample_submission, sample_trajectory, write_test_xlsx
 
 from skim.preview import MAX_FILE_SIZE
+from skim.review import FILE_ANNOTATION_KEY
 from skim.server import AnnotationStore, SkimHandler
 from skim.web_preview import serialize_preview
 
@@ -526,6 +527,81 @@ def test_api_annotations_support_multi_entry_round_trip(tmp_path):
     assert delete_payload == {"ok": True}
     remaining = after_delete["files"]["plain.json"]["annotations"]["$.hello"]
     assert [entry["id"] for entry in remaining] == [first["annotation"]["id"]]
+
+
+def test_api_annotations_support_file_level_targets(tmp_path):
+    """File-level annotations should round-trip through the shared annotations API."""
+    test_file = tmp_path / "notes.md"
+    test_file.write_text("# Note\n")
+
+    with running_server(tmp_path) as base_url:
+        save_status, save_payload = request_json(
+            base_url,
+            "/api/annotations",
+            method="POST",
+            body={
+                "file": "notes.md",
+                "path": FILE_ANNOTATION_KEY,
+                "tags": ["important"],
+                "note": "Review this whole file.",
+            },
+        )
+        _, preview = request_json(
+            base_url,
+            "/api/preview?path=" + urllib.parse.quote("notes.md"),
+        )
+        _, triage = request_json(base_url, "/api/triage")
+        delete_status, _ = request_json(
+            base_url,
+            "/api/annotations",
+            method="DELETE",
+            body={
+                "file": "notes.md",
+                "path": FILE_ANNOTATION_KEY,
+                "annotation_id": save_payload["annotation"]["id"],
+            },
+        )
+
+    assert save_status == 200
+    assert preview["annotation_path"] == FILE_ANNOTATION_KEY
+    assert preview["annotation_count"] == 1
+    assert preview["annotations"][0]["id"] == save_payload["annotation"]["id"]
+    assert triage["items"][0]["target_kind"] == "file"
+    assert triage["items"][0]["target_path"] is None
+    assert triage["items"][0]["file_path"] == "notes.md"
+    assert delete_status == 200
+
+
+def test_api_annotation_version_and_triage_reflect_annotation_changes(tmp_path):
+    """The triage and version endpoints should move when annotations change."""
+    test_file = tmp_path / "plain.json"
+    test_file.write_text(json.dumps({"hello": "world"}))
+
+    with running_server(tmp_path) as base_url:
+        version_status, initial = request_json(base_url, "/api/annotation-version")
+        triage_status, empty_triage = request_json(base_url, "/api/triage")
+        _, save_payload = request_json(
+            base_url,
+            "/api/annotations",
+            method="POST",
+            body={
+                "file": "plain.json",
+                "path": "$.hello",
+                "tags": ["important"],
+                "note": "keep this",
+            },
+        )
+        _, updated = request_json(base_url, "/api/annotation-version")
+        _, triage = request_json(base_url, "/api/triage")
+
+    assert version_status == 200
+    assert triage_status == 200
+    assert empty_triage["items"] == []
+    assert updated["annotation_version"] != initial["annotation_version"]
+    assert triage["annotation_version"] == updated["annotation_version"]
+    assert triage["items"][0]["annotation_id"] == save_payload["annotation"]["id"]
+    assert triage["items"][0]["target_kind"] == "json_path"
+    assert triage["items"][0]["target_path"] == "$.hello"
 
 
 def test_root_serves_local_static_shell_without_cdn_dependencies(tmp_path):

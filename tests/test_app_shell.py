@@ -21,6 +21,55 @@ async def test_app_launches():
         assert app.grid == [["pane-0"]]
 
 
+async def test_app_launches_in_triage_mode():
+    """The triage flag should start skim in the dedicated triage view."""
+    app = SkimApp(path=".", triage=True)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        assert app.app_mode == "triage"
+        assert app.query_one("#triage-queue", Static).has_focus
+
+
+async def test_triage_enter_opens_selected_item_in_browse_mode(tmp_path):
+    """Enter in triage mode should open the selected file back into browse."""
+    review_file = tmp_path / ".skim" / "review.json"
+    review_file.parent.mkdir()
+    review_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "files": {
+                    "plain.json": {
+                        "annotations": {
+                            "$.hello": [
+                                {
+                                    "id": "ann-1",
+                                    "created_at": "2026-04-21T14:00:00Z",
+                                    "updated_at": "2026-04-21T14:05:00Z",
+                                    "tags": ["important"],
+                                    "note": "keep this",
+                                }
+                            ]
+                        }
+                    }
+                },
+            }
+        )
+    )
+    (tmp_path / "plain.json").write_text(json.dumps({"hello": "world"}))
+    app = SkimApp(path=str(tmp_path), triage=True)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        assert app.app_mode == "browse"
+        assert pane.current_path == tmp_path / "plain.json"
+
+
 async def test_split_right():
     """Pressing s then right creates a second pane."""
     app = SkimApp(path=".")

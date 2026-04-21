@@ -456,6 +456,158 @@ console.log(JSON.stringify({
     }
 
 
+def test_render_pane_shell_includes_file_annotation_actions_for_non_json_previews():
+    """Non-JSON pane headers should expose file-level annotate/edit affordances."""
+    result = run_app_js(
+        """
+const plainHtml = ctx.renderPaneShell({
+  id: "pane-1",
+  path: "docs/spec.md",
+  preview: {
+    kind: "markdown",
+    name: "spec.md",
+    path: "docs/spec.md",
+    annotation_path: "@file",
+    annotations: [],
+    annotation_count: 0,
+  },
+});
+const annotatedHtml = ctx.renderPaneShell({
+  id: "pane-1",
+  path: "docs/spec.md",
+  preview: {
+    kind: "markdown",
+    name: "spec.md",
+    path: "docs/spec.md",
+    annotation_path: "@file",
+    annotations: [{
+      id: "ann-1",
+      created_at: "2026-04-21T14:00:00Z",
+      updated_at: "2026-04-21T14:05:00Z",
+      tags: ["important"],
+      note: "review",
+    }],
+    annotation_count: 1,
+  },
+});
+console.log(JSON.stringify({
+  plainHasAnnotate: plainHtml.includes('data-annotate="@file"') && plainHtml.includes(">Annotate<"),
+  annotatedHasEdit:
+    annotatedHtml.includes('data-annotation-id="ann-1"') &&
+    annotatedHtml.includes(">Edit annotation<"),
+}));
+"""
+        )
+
+    assert result == {"plainHasAnnotate": True, "annotatedHasEdit": True}
+
+
+def test_triage_visible_items_filter_and_selection_are_client_side():
+    """Triage filtering should stay client-side over search, tag, and file-type state."""
+    result = run_app_js(
+        """
+vm.runInContext(`
+state.triage = {
+  items: [
+    {
+      annotation_id: "ann-1",
+      file_path: "docs/spec.md",
+      target_kind: "file",
+      target_label: "File",
+      target_path: null,
+      preview_kind: "markdown",
+      tags: ["important"],
+      note_preview: "rollout wording",
+      note_full: "rollout wording",
+      created_at: "2026-04-21T14:00:00Z",
+      updated_at: "2026-04-21T14:05:00Z",
+    },
+    {
+      annotation_id: "ann-2",
+      file_path: "output.json",
+      target_kind: "json_path",
+      target_label: "$.task",
+      target_path: "$.task",
+      preview_kind: "json",
+      tags: ["bug"],
+      note_preview: "task summary",
+      note_full: "task summary",
+      created_at: "2026-04-21T14:10:00Z",
+      updated_at: "2026-04-21T14:15:00Z",
+    },
+  ],
+  search: "rollout",
+  selectedTag: "important",
+  selectedPreviewKind: "markdown",
+  selectedAnnotationId: "ann-1",
+  lastAnnotationVersion: "v1",
+};
+`, ctx);
+const visible = ctx.visibleTriageItems();
+console.log(JSON.stringify({
+  ids: visible.map((item) => item.annotation_id),
+  selected: ctx.selectedTriageItem()?.annotation_id || null,
+}));
+"""
+    )
+
+    assert result == {"ids": ["ann-1"], "selected": "ann-1"}
+
+
+def test_open_triage_item_switches_back_to_browse_and_routes_target():
+    """Opening a triage row should restore browse mode and route the selected target."""
+    result = run_app_js(
+        """
+vm.runInContext(`
+state.mode = "triage";
+state.panes = [createPaneState("pane-1")];
+state.activePaneId = "pane-1";
+state.triage = {
+  items: [{
+    annotation_id: "ann-1",
+    file_path: "output.json",
+    target_kind: "json_path",
+    target_label: "$.task",
+    target_path: "$.task",
+    preview_kind: "json",
+    tags: ["bug"],
+    note_preview: "task summary",
+    note_full: "task summary",
+    created_at: "2026-04-21T14:10:00Z",
+    updated_at: "2026-04-21T14:15:00Z",
+  }],
+  search: "",
+  selectedTag: "",
+  selectedPreviewKind: "",
+  selectedAnnotationId: "ann-1",
+  lastAnnotationVersion: "v1",
+};
+globalThis.__openCall = null;
+loadPreviewForPane = async function(path, paneId, options = {}) {
+  globalThis.__openCall = { path, paneId, options };
+  return { ok: true };
+};
+`, ctx);
+await ctx.openTriageItem("ann-1");
+console.log(JSON.stringify({
+  mode: vm.runInContext('state.mode', ctx),
+  selected: vm.runInContext('state.triage.selectedAnnotationId', ctx),
+  openCall: vm.runInContext('globalThis.__openCall', ctx),
+}));
+"""
+    )
+
+    assert result == {
+        "mode": "browse",
+        "selected": "ann-1",
+        "openCall": {
+            "path": "output.json",
+            "paneId": "pane-1",
+            "options": {"selectedJsonPath": "$.task"},
+        },
+    }
+
+
 def test_render_json_node_uses_structured_icon_key_and_value_segments():
     """JSON tree rows should render typed icons and separate key/value spans."""
     result = run_app_js(

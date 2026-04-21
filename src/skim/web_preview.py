@@ -36,9 +36,9 @@ from .preview import (
     _notebook_text,
     _parse_csv,
 )
+from .review import FILE_ANNOTATION_KEY, AnnotationStore
 from .trajectory import (
     AnnotationRecord,
-    AnnotationStore,
     JsonInspectorItem,
     _bundle_summary,
     _decode_nested_json,
@@ -86,6 +86,7 @@ def serialize_preview(
     resolved = path.resolve()
     root = (browse_root or resolved.parent).resolve()
     relative_path = _relative_path(resolved, root)
+    store = annotation_store or AnnotationStore(root)
 
     if not resolved.is_file():
         return {
@@ -111,7 +112,11 @@ def serialize_preview(
         }
 
     if suffix in XLSX_EXTENSIONS:
-        return _serialize_xlsx_file(resolved, relative_path=relative_path)
+        return _with_file_annotation_payload(
+            _serialize_xlsx_file(resolved, relative_path=relative_path),
+            source_path=resolved,
+            annotation_store=store,
+        )
 
     try:
         content = resolved.read_text(errors="replace")
@@ -124,18 +129,23 @@ def serialize_preview(
         }
 
     if suffix in MARKDOWN_EXTENSIONS:
-        return {
-            "kind": "markdown",
-            "name": resolved.name,
-            "path": relative_path,
-            "content": content,
-        }
+        return _with_file_annotation_payload(
+            {
+                "kind": "markdown",
+                "name": resolved.name,
+                "path": relative_path,
+                "content": content,
+            },
+            source_path=resolved,
+            annotation_store=store,
+        )
 
     if suffix in NOTEBOOK_EXTENSIONS:
         return _serialize_notebook_file(
             content,
             source_path=resolved,
             relative_path=relative_path,
+            annotation_store=store,
         )
 
     if suffix in JSON_EXTENSIONS:
@@ -143,22 +153,30 @@ def serialize_preview(
             content,
             source_path=resolved,
             review_root=root,
-            annotation_store=annotation_store,
+            annotation_store=store,
             relative_path=relative_path,
         )
 
     if suffix == ".csv":
-        return _serialize_csv_preview(
-            content,
-            name=resolved.name,
-            relative_path=relative_path,
+        return _with_file_annotation_payload(
+            _serialize_csv_preview(
+                content,
+                name=resolved.name,
+                relative_path=relative_path,
+            ),
+            source_path=resolved,
+            annotation_store=store,
         )
 
-    return _text_payload(
-        resolved.name,
-        relative_path,
-        content,
-        language=SYNTAX_MAP.get(suffix),
+    return _with_file_annotation_payload(
+        _text_payload(
+            resolved.name,
+            relative_path,
+            content,
+            language=SYNTAX_MAP.get(suffix),
+        ),
+        source_path=resolved,
+        annotation_store=store,
     )
 
 
@@ -232,6 +250,7 @@ def _serialize_notebook_file(
     *,
     source_path: Path,
     relative_path: str,
+    annotation_store: AnnotationStore,
 ) -> dict[str, Any]:
     try:
         parsed = json.loads(content)
@@ -255,6 +274,8 @@ def _serialize_notebook_file(
         parsed,
         name=source_path.name,
         relative_path=relative_path,
+        source_path=source_path,
+        annotation_store=annotation_store,
     )
 
 
@@ -263,6 +284,8 @@ def _serialize_notebook_preview(
     *,
     name: str,
     relative_path: str,
+    source_path: Path,
+    annotation_store: AnnotationStore,
 ) -> dict[str, Any]:
     cells = notebook.get("cells")
     if not isinstance(cells, list):
@@ -276,19 +299,23 @@ def _serialize_notebook_preview(
         for index, cell in enumerate(cells, start=1)
     ]
 
-    return {
-        "kind": "notebook",
-        "name": name,
-        "path": relative_path,
-        "language": language,
-        "summary": {
-            "title": "Notebook Preview",
-            "cell_count": len(cells),
-            "nbformat": nbformat,
-            "nbformat_minor": nbformat_minor,
+    return _with_file_annotation_payload(
+        {
+            "kind": "notebook",
+            "name": name,
+            "path": relative_path,
+            "language": language,
+            "summary": {
+                "title": "Notebook Preview",
+                "cell_count": len(cells),
+                "nbformat": nbformat,
+                "nbformat_minor": nbformat_minor,
+            },
+            "cells": serialized_cells,
         },
-        "cells": serialized_cells,
-    }
+        source_path=source_path,
+        annotation_store=annotation_store,
+    )
 
 
 def _serialize_notebook_cell(cell: Any, *, index: int, language: str) -> dict[str, Any]:
@@ -859,6 +886,27 @@ def _text_payload(
         "content": content,
         "render": _syntax_payload(content, language=language, line_numbers=True),
     }
+
+
+def _with_file_annotation_payload(
+    payload: dict[str, Any],
+    *,
+    source_path: Path,
+    annotation_store: AnnotationStore,
+) -> dict[str, Any]:
+    """Attach file-level annotation metadata to non-JSON preview payloads."""
+    annotations = annotation_store.annotations_for_path(source_path, FILE_ANNOTATION_KEY)
+    serialized = [_annotation_payload(record) for record in annotations]
+    payload.update(
+        {
+            "annotatable": True,
+            "annotation_path": FILE_ANNOTATION_KEY,
+            "annotations": serialized,
+            "annotation": serialized[0] if serialized else None,
+            "annotation_count": len(serialized),
+        }
+    )
+    return payload
 
 
 def _detail_payload_for_item(item: JsonInspectorItem) -> dict[str, Any]:
