@@ -904,6 +904,34 @@ button {
   gap: 12px;
 }
 
+.workbook-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 12px;
+}
+
+.workbook-tab {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-surface);
+  color: var(--fg-secondary);
+  padding: 8px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.workbook-tab:hover {
+  background: var(--bg-hover);
+  color: var(--fg-primary);
+}
+
+.workbook-tab.selected {
+  border-color: var(--accent);
+  background: var(--bg-highlight);
+  color: var(--fg-primary);
+}
+
 .detail-field {
   display: grid;
   gap: 3px;

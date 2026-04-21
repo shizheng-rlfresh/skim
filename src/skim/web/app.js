@@ -50,6 +50,7 @@ function createPaneState(id) {
     selectedJsonNodeId: null,
     selectedJsonPath: null,
     selectedStepId: null,
+    selectedWorkbookSheetName: null,
     selectedAnnotationIds: {},
     jsonSplitRatio: loadStoredSplitRatio("json", DEFAULT_JSON_SPLIT_RATIO, id),
     trajectorySplitRatio: loadStoredSplitRatio("trajectory", DEFAULT_TRAJECTORY_SPLIT_RATIO, id),
@@ -347,7 +348,7 @@ function renderPaneContent(pane) {
     case "csv":
       return renderCsvPreview(pane.preview);
     case "xlsx":
-      return renderXlsxPreview(pane.preview);
+      return renderXlsxPreview(pane);
     case "json_inspector":
       return renderJsonInspector(pane);
     case "trajectory":
@@ -1098,6 +1099,13 @@ async function onPreviewClick(event, paneId = state.activePaneId) {
     return;
   }
 
+  const workbookTab = event.target.closest("[data-sheet-name]");
+  if (workbookTab) {
+    pane.selectedWorkbookSheetName = workbookTab.dataset.sheetName || null;
+    renderWorkspace();
+    return;
+  }
+
   const jsonToggle = event.target.closest("[data-toggle-json]");
   if (jsonToggle) {
     const node = jsonNodeByPath(pane, jsonToggle.dataset.toggleJson);
@@ -1147,6 +1155,11 @@ async function loadPreviewForPane(path, paneId, options = {}) {
     } else {
       pane.selectedStepId = null;
     }
+    if (pane.preview.kind === "xlsx") {
+      initializeWorkbookState(pane);
+    } else {
+      pane.selectedWorkbookSheetName = null;
+    }
     renderTree();
     renderWorkspace();
     renderStatusBar();
@@ -1178,6 +1191,16 @@ function initializeJsonState(pane, selectedJsonPath = null) {
     null;
   pane.selectedJsonNodeId = preferred ? preferred.id : null;
   pane.selectedJsonPath = preferred ? preferred.path : null;
+}
+
+function initializeWorkbookState(pane) {
+  const sheets = pane.preview?.sheets || [];
+  if (!sheets.length) {
+    pane.selectedWorkbookSheetName = null;
+    return;
+  }
+  const preferred = sheets.find((sheet) => sheet.name === pane.selectedWorkbookSheetName) || sheets[0];
+  pane.selectedWorkbookSheetName = preferred.name;
 }
 
 function renderTextPreview(preview) {
@@ -1242,42 +1265,50 @@ function renderCsvPreview(preview) {
   `;
 }
 
-function renderXlsxPreview(preview) {
-  const sheets = (preview.sheets || []).map((sheet) => {
-    const table = sheet.columns.length
-      ? `
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>${sheet.columns.map((column) => `<th>${escapeHtml(column)}</th>`).join("")}</tr>
-            </thead>
-            <tbody>
-              ${sheet.rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")}
-            </tbody>
-          </table>
-        </div>
-      `
-      : `<p class="selection-subtitle">Empty sheet.</p>`;
-
-    const truncation = [
-      sheet.truncated_rows ? "rows truncated" : "",
-      sheet.truncated_columns ? "columns truncated" : "",
-    ].filter(Boolean).join(" · ");
-    const counts = sheet.empty
-      ? "0 rows · 0 columns"
-      : `${sheet.row_count} rows · ${sheet.column_count} columns`;
-
-    return `
-      <section class="preview-card">
-        <div class="detail-meta">
-          <span class="badge">${escapeHtml(sheet.name)}</span>
-          <span class="badge">${escapeHtml(counts)}</span>
-          ${truncation ? `<span class="badge">${escapeHtml(truncation)}</span>` : ""}
-        </div>
-        <div class="preview-block">${table}</div>
-      </section>
-    `;
-  }).join("");
+function renderXlsxPreview(pane) {
+  initializeWorkbookState(pane);
+  const preview = pane.preview;
+  const sheets = preview.sheets || [];
+  const selected = sheets.find((sheet) => sheet.name === pane.selectedWorkbookSheetName) || sheets[0] || null;
+  const tabs = sheets.length
+    ? `
+      <div class="workbook-tabs" role="tablist" aria-label="Workbook sheets">
+        ${sheets.map((sheet) => `
+          <button
+            class="workbook-tab ${sheet.name === selected?.name ? "selected" : ""}"
+            type="button"
+            role="tab"
+            aria-selected="${sheet.name === selected?.name ? "true" : "false"}"
+            data-pane-id="${escapeAttribute(pane.id)}"
+            data-sheet-name="${escapeAttribute(sheet.name)}"
+          >${escapeHtml(sheet.name)}</button>
+        `).join("")}
+      </div>
+    `
+    : "";
+  const table = selected && selected.columns.length
+    ? `
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>${selected.columns.map((column) => `<th>${escapeHtml(column)}</th>`).join("")}</tr>
+          </thead>
+          <tbody>
+            ${selected.rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")}
+          </tbody>
+        </table>
+      </div>
+    `
+    : `<p class="selection-subtitle">${selected?.empty ? "Empty sheet." : "Empty workbook."}</p>`;
+  const truncation = selected
+    ? [
+        selected.truncated_rows ? "rows truncated" : "",
+        selected.truncated_columns ? "columns truncated" : "",
+      ].filter(Boolean).join(" · ")
+    : "";
+  const counts = !selected || selected.empty
+    ? "0 rows · 0 columns"
+    : `${selected.row_count} rows · ${selected.column_count} columns`;
 
   return `
     <div class="notebook-stack">
@@ -1285,10 +1316,18 @@ function renderXlsxPreview(preview) {
         <div class="detail-meta">
           <span class="path-pill">${escapeHtml(preview.path)}</span>
           <span class="badge">${escapeHtml(preview.summary?.title || "Workbook Preview")}</span>
-          <span class="badge">${escapeHtml(`${preview.summary?.sheet_count ?? (preview.sheets || []).length} sheets`)}</span>
+          <span class="badge">${escapeHtml(`${preview.summary?.sheet_count ?? sheets.length} sheets`)}</span>
         </div>
       </div>
-      ${sheets || `<div class="preview-card"><div class="selection-subtitle">Empty workbook.</div></div>`}
+      ${tabs}
+      <section class="preview-card">
+        <div class="detail-meta">
+          <span class="badge">${escapeHtml(selected?.name || "Workbook")}</span>
+          <span class="badge">${escapeHtml(counts)}</span>
+          ${truncation ? `<span class="badge">${escapeHtml(truncation)}</span>` : ""}
+        </div>
+        <div class="preview-block">${table}</div>
+      </section>
     </div>
   `;
 }
@@ -2357,6 +2396,7 @@ function escapeSelectorValue(value) {
 
 globalThis.createPaneState = createPaneState;
 globalThis.loadPreviewForPane = loadPreviewForPane;
+globalThis.initializeWorkbookState = initializeWorkbookState;
 globalThis.loadStoredSidebarWidth = loadStoredSidebarWidth;
 globalThis.setSidebarWidth = setSidebarWidth;
 globalThis.canResizeSidebar = canResizeSidebar;
@@ -2369,3 +2409,4 @@ globalThis.trackTemplate = trackTemplate;
 globalThis.isStackedLayout = isStackedLayout;
 globalThis.canResizePaneLayout = canResizePaneLayout;
 globalThis.canResizeSplitViews = canResizeSplitViews;
+globalThis.onWorkspaceClick = onWorkspaceClick;

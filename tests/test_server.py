@@ -225,7 +225,7 @@ def test_api_preview_returns_xlsx_payload(tmp_path):
     write_test_xlsx(
         test_file,
         [
-            ("Summary", [["name", "value"], ["apple", 4], ["orange", 7]]),
+            ("Summary", [["apple", 4], ["orange", 7]]),
             ("Empty", []),
         ],
     )
@@ -241,8 +241,9 @@ def test_api_preview_returns_xlsx_payload(tmp_path):
     assert payload["path"] == "workbook.xlsx"
     assert payload["summary"]["sheet_count"] == 2
     assert payload["sheets"][0]["name"] == "Summary"
-    assert payload["sheets"][0]["columns"] == ["name", "value"]
+    assert payload["sheets"][0]["columns"] == ["A", "B"]
     assert payload["sheets"][0]["rows"] == [["apple", "4"], ["orange", "7"]]
+    assert payload["sheets"][0]["row_count"] == 2
     assert payload["sheets"][1]["name"] == "Empty"
     assert payload["sheets"][1]["empty"] is True
 

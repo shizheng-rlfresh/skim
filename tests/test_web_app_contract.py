@@ -200,17 +200,21 @@ console.log(JSON.stringify({
 
 
 def test_render_xlsx_preview_renders_workbook_summary_and_sheet_tables():
-    """Workbook previews should render a summary and one table section per sheet."""
+    """Workbook previews should render a summary, sheet tabs, and one selected table."""
     result = run_app_js(
         """
-const html = ctx.renderXlsxPreview({
+const pane = ctx.createPaneState("pane-1");
+pane.preview = {
+  kind: "xlsx",
   path: "workbook.xlsx",
   summary: { sheet_count: 2 },
   sheets: [
     {
       name: "Summary",
-      columns: ["name", "value"],
+      columns: ["A", "B"],
       rows: [["apple", "4"]],
+      row_count: 1,
+      column_count: 2,
       empty: false,
       truncated_rows: false,
       truncated_columns: false,
@@ -219,16 +223,22 @@ const html = ctx.renderXlsxPreview({
       name: "Empty",
       columns: [],
       rows: [],
+      row_count: 0,
+      column_count: 0,
       empty: true,
       truncated_rows: false,
       truncated_columns: false,
     },
   ],
-});
+};
+ctx.initializeWorkbookState(pane);
+const html = ctx.renderXlsxPreview(pane);
 console.log(JSON.stringify({
   hasSummary: html.includes("Workbook Preview"),
-  hasSheetTitle: html.includes("Summary"),
+  hasSheetTabs: html.includes("workbook-tabs"),
+  hasSelectedTab: html.includes('workbook-tab selected'),
   hasTable: html.includes("<table>"),
+  hidesUnselectedEmptyState: !html.includes("Empty sheet"),
   hasEmptySheet: html.includes("Empty sheet"),
 }));
 """
@@ -236,10 +246,99 @@ console.log(JSON.stringify({
 
     assert result == {
         "hasSummary": True,
-        "hasSheetTitle": True,
+        "hasSheetTabs": True,
+        "hasSelectedTab": True,
         "hasTable": True,
-        "hasEmptySheet": True,
+        "hidesUnselectedEmptyState": True,
+        "hasEmptySheet": False,
     }
+
+
+def test_xlsx_preview_preserves_selected_sheet_per_pane():
+    """Workbook sheet selection should be pane-local and preserve existing choices."""
+    result = run_app_js(
+        """
+const pane = ctx.createPaneState("pane-1");
+pane.selectedWorkbookSheetName = "Details";
+pane.preview = {
+  kind: "xlsx",
+  path: "workbook.xlsx",
+  summary: { sheet_count: 2 },
+  sheets: [
+    {
+      name: "Summary", columns: ["A"], rows: [["one"]], row_count: 1, column_count: 1,
+      empty: false, truncated_rows: false, truncated_columns: false,
+    },
+    {
+      name: "Details", columns: ["A"], rows: [["two"]], row_count: 1, column_count: 1,
+      empty: false, truncated_rows: false, truncated_columns: false,
+    },
+  ],
+};
+ctx.initializeWorkbookState(pane);
+const html = ctx.renderXlsxPreview(pane);
+console.log(JSON.stringify({
+  selected: pane.selectedWorkbookSheetName,
+  hasDetailsCell: html.includes("two"),
+  hidesSummaryCell: !html.includes("one"),
+}));
+"""
+    )
+
+    assert result == {
+        "selected": "Details",
+        "hasDetailsCell": True,
+        "hidesSummaryCell": True,
+    }
+
+
+def test_xlsx_preview_click_switches_selected_sheet_within_pane():
+    """Workbook tab clicks should switch the selected sheet only for that pane."""
+    result = run_app_js(
+        """
+vm.runInContext(`
+state.panes = [createPaneState("pane-1")];
+state.activePaneId = "pane-1";
+state.panes[0].preview = {
+  kind: "xlsx",
+  path: "workbook.xlsx",
+  summary: { sheet_count: 2 },
+  sheets: [
+    {
+      name: "Summary", columns: ["A"], rows: [["one"]], row_count: 1, column_count: 1,
+      empty: false, truncated_rows: false, truncated_columns: false,
+    },
+    {
+      name: "Details", columns: ["A"], rows: [["two"]], row_count: 1, column_count: 1,
+      empty: false, truncated_rows: false, truncated_columns: false,
+    },
+  ],
+};
+initializeWorkbookState(state.panes[0]);
+`, ctx);
+ctx.onWorkspaceClick({
+  target: {
+    closest(selector) {
+      if (selector === "[data-sheet-name]") {
+        return {
+          dataset: { sheetName: "Details", paneId: "pane-1" },
+        };
+      }
+      if (selector === "[data-pane-id]") {
+        return { dataset: { paneId: "pane-1" } };
+      }
+      return null;
+    },
+  },
+});
+const pane = vm.runInContext('state.panes[0]', ctx);
+console.log(JSON.stringify({
+  selected: pane.selectedWorkbookSheetName,
+}));
+"""
+    )
+
+    assert result == {"selected": "Details"}
 
 
 def test_preview_label_maps_xlsx_to_excel():

@@ -411,14 +411,16 @@ def _xlsx_sheet_preview_data(sheet: Any) -> XlsxSheetPreviewData:
             empty=True,
         )
 
-    header_values = sampled_rows[0] + [""] * max(0, max_columns - len(sampled_rows[0]))
-    display_header = [_clip_csv_cell(value) for value in header_values[:MAX_CSV_COLS]]
+    display_header = [
+        _spreadsheet_column_label(index)
+        for index in range(1, min(max_columns, MAX_CSV_COLS) + 1)
+    ]
     if max_columns > MAX_CSV_COLS:
         display_header.append("...")
 
     display_rows: list[list[str]] = []
     visible_columns = min(max_columns, MAX_CSV_COLS)
-    for row in sampled_rows[1 : MAX_CSV_ROWS + 1]:
+    for row in sampled_rows[:MAX_CSV_ROWS]:
         padded = row + [""] * max(0, max_columns - len(row))
         display_row = [_clip_csv_cell(padded[index]) for index in range(visible_columns)]
         if max_columns > MAX_CSV_COLS:
@@ -429,9 +431,9 @@ def _xlsx_sheet_preview_data(sheet: Any) -> XlsxSheetPreviewData:
         name=str(sheet.title),
         columns=display_header,
         rows=display_rows,
-        row_count=max(non_empty_rows - 1, 0),
+        row_count=non_empty_rows,
         column_count=max_columns,
-        truncated_rows=max(non_empty_rows - 1, 0) > MAX_CSV_ROWS,
+        truncated_rows=non_empty_rows > MAX_CSV_ROWS,
         truncated_columns=max_columns > MAX_CSV_COLS,
         empty=False,
     )
@@ -442,6 +444,16 @@ def _xlsx_cell_text(value: Any) -> str:
     if value is None:
         return ""
     return str(value)
+
+
+def _spreadsheet_column_label(index: int) -> str:
+    """Return the spreadsheet column label for one 1-based column index."""
+    label = ""
+    current = index
+    while current > 0:
+        current, remainder = divmod(current - 1, 26)
+        label = chr(65 + remainder) + label
+    return label
 
 
 def _raw_csv_section(content: str, *, collapsed: bool = True) -> Collapsible:
