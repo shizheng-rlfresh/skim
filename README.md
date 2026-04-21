@@ -22,6 +22,7 @@ Requires Python 3.12 or newer.
 ```bash
 uv run skim              # open current directory
 uv run skim ~/my/folder  # open a specific folder
+uv run skim . --triage   # start directly in triage mode
 uv run skim-dev          # launch Textual dev mode
 uv run skim-web .        # run the localhost web UI
 ```
@@ -35,10 +36,11 @@ uv run skim-web .
 ```
 
 The current implementation is Python-first and localhost-only, backed by typed
-preview payloads from `/api/preview`. The browser shell now includes multi-pane
-preview work, an active-pane file target, a command palette, local dark/light
-themes, bundled JetBrains Mono assets, and explicit notebook previews for
-`.ipynb` files.
+preview payloads from `/api/preview`. The browser shell now includes a
+`Browse | Triage` mode switch, multi-pane preview work, an active-pane file
+target, workspace-level annotation triage, local file-level annotations for
+non-JSON previews, a command palette, local dark/light themes, bundled
+JetBrains Mono assets, and explicit notebook previews for `.ipynb` files.
 
 See the full target design spec here:
 
@@ -121,6 +123,14 @@ JSON files open in a structural inspector rather than a plain text dump. The ins
 
 Annotations bind to the underlying raw JSON location, using `annotation_path` when an
 overlay node maps to a raw node and falling back to `raw_path` otherwise.
+
+## Workspace triage
+
+- `uv run skim . --triage` starts the TUI in a dedicated triage mode
+- the web UI exposes the same queue behind the `Browse | Triage` toggle
+- triage rows are normalized in Python from `.skim/review.json`
+- non-JSON previews store file-level annotations under the reserved `@file` target key
+- the web UI exposes `/api/triage` and `/api/annotation-version` for queue data and refresh
 
 ## File size limits
 
