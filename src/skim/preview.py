@@ -23,7 +23,7 @@ from textual.css.query import NoMatches
 from textual.widget import Widget
 from textual.widgets import Collapsible, Markdown, Static
 
-from .review import FILE_ANNOTATION_KEY, AnnotationStore
+from .review import FILE_ANNOTATION_KEY, AnnotationRecord, AnnotationStore
 from .scrolling import DragScrollMixin
 from .trajectory import JsonInspector, TrajectoryViewer
 
@@ -112,10 +112,23 @@ class XlsxPreview(Vertical):
 class FileAnnotationStatus(Static):
     """Compact file-level annotation summary for non-JSON previews."""
 
-    def __init__(self, annotations, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        annotations: tuple[AnnotationRecord, ...],
+        *,
+        selected_annotation_id: str | None = None,
+        annotation_mode: bool = False,
+        **kwargs: Any,
+    ) -> None:
         """Initialize the status widget from stored file annotations."""
         super().__init__("", **kwargs)
-        self.update(_file_annotation_status_text(annotations))
+        self.update(
+            _file_annotation_status_text(
+                annotations,
+                selected_annotation_id=selected_annotation_id,
+                annotation_mode=annotation_mode,
+            )
+        )
 
 
 class PreviewPane(DragScrollMixin, VerticalScroll, can_focus=True):
@@ -126,25 +139,34 @@ class PreviewPane(DragScrollMixin, VerticalScroll, can_focus=True):
         super().__init__(**kwargs)
         self._init_drag_scroll()
         self.current_path: Path | None = None
+        self.selected_annotation_ids: dict[str, str] = {}
+        self.file_annotation_mode = False
 
     def show_placeholder(self, message: str = "Select a file") -> None:
         """Show placeholder text when no file is selected."""
         self.current_path = None
+        self.file_annotation_mode = False
         self.remove_children()
         self.mount(Static(Text(message, style="dim italic")))
 
     def show_file(self, path: Path) -> None:
         """Render a file into the pane."""
+        same_file = self.current_path is not None and self.current_path.resolve() == path.resolve()
         self.current_path = path
+        if not same_file:
+            self.file_annotation_mode = False
         self.remove_children()
         browse_root = getattr(self.app, "browse_path", path.parent)
         widgets = render_file(path, browse_root=browse_root)
         store = getattr(self.app, "review_store", None)
         if widgets and not isinstance(widgets[0], (JsonInspector, TrajectoryViewer)):
             if isinstance(store, AnnotationStore):
+                annotations = store.annotations_for_path(path, FILE_ANNOTATION_KEY)
                 widgets = [
                     FileAnnotationStatus(
-                        store.annotations_for_path(path, FILE_ANNOTATION_KEY),
+                        annotations,
+                        selected_annotation_id=self.selected_file_annotation_id(annotations),
+                        annotation_mode=self.file_annotation_mode,
                         classes="annotation-status-panel",
                     ),
                     *widgets,
@@ -183,6 +205,37 @@ class PreviewPane(DragScrollMixin, VerticalScroll, can_focus=True):
                 return None
             return viewer if isinstance(viewer, TrajectoryViewer) else None
         return viewer if isinstance(viewer, JsonInspector) else None
+
+    def file_annotation_selection_key(self) -> str | None:
+        """Return the pane-local selection key for the current file annotation target."""
+        if self.current_path is None:
+            return None
+        return f"{self.current_path.resolve().as_posix()}::{FILE_ANNOTATION_KEY}"
+
+    def selected_file_annotation_id(
+        self, annotations: tuple[AnnotationRecord, ...]
+    ) -> str | None:
+        """Return the selected file annotation id, defaulting to the newest."""
+        key = self.file_annotation_selection_key()
+        if key is None or not annotations:
+            if key is not None:
+                self.selected_annotation_ids.pop(key, None)
+            return None
+        selected_id = self.selected_annotation_ids.get(key)
+        if any(annotation.id == selected_id for annotation in annotations):
+            return selected_id
+        self.selected_annotation_ids[key] = annotations[0].id
+        return annotations[0].id
+
+    def set_selected_file_annotation_id(self, annotation_id: str | None) -> None:
+        """Set or clear the selected file annotation id for the current file."""
+        key = self.file_annotation_selection_key()
+        if key is None:
+            return
+        if annotation_id is None:
+            self.selected_annotation_ids.pop(key, None)
+        else:
+            self.selected_annotation_ids[key] = annotation_id
 
 
 def render_file(path: Path, *, browse_root: Path | None = None) -> list[Widget]:
@@ -618,21 +671,47 @@ def _notebook_output_widget(output: Any) -> Widget:
     return Static(Text(json.dumps(output, indent=2)))
 
 
-def _file_annotation_status_text(annotations) -> Text:
+def _file_annotation_status_text(
+    annotations: tuple[AnnotationRecord, ...],
+    *,
+    selected_annotation_id: str | None,
+    annotation_mode: bool,
+) -> Text:
     """Return a compact summary of file-level annotation state."""
     title = Text("File Annotation", style="bold")
     if not annotations:
         title.append("\nNo annotation yet", style="white")
         title.append("\nPress a to annotate this file", style="dim")
         return title
-    selected = annotations[0]
+    selected = next(
+        (annotation for annotation in annotations if annotation.id == selected_annotation_id),
+        annotations[0],
+    )
     title.append(
         f"\n{len(annotations)} annotation{'s' if len(annotations) != 1 else ''}",
         style="white",
     )
-    if selected.tags:
-        title.append(f"\nTags: {', '.join(selected.tags)}", style="cyan")
+    for index, annotation in enumerate(annotations, start=1):
+        marker = "▶ " if annotation.id == selected.id else "  "
+        title.append(
+            f"\n{marker}{index}. {annotation.updated_at[:16].replace('T', ' ')} ",
+            style="bold green" if annotation.id == selected.id else "dim",
+        )
+        if annotation.tags:
+            title.append(f"[{', '.join(annotation.tags)}] ", style="cyan")
+        first_line = (annotation.note or "(empty)").splitlines()[0]
+        title.append(first_line[:80] + ("…" if len(first_line) > 80 else ""))
+    title.append(
+        f"\nTags: {', '.join(selected.tags) if selected.tags else '(none)'}",
+        style="cyan",
+    )
     title.append(f"\nNote: {selected.note or '(empty)'}", style="white")
+    title.append(
+        "\nUse ↑↓ to select, Enter to edit, a to add another"
+        if annotation_mode
+        else "\nPress Enter to browse annotations or a to add another",
+        style="dim",
+    )
     return title
 
 

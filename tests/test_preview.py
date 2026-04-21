@@ -1433,6 +1433,195 @@ async def test_non_json_file_annotation_modal_saves_file_level_annotation(tmp_pa
         assert "File Annotation" in pane_text
 
 
+async def test_non_json_file_annotations_support_multiple_entries_and_selection_mode(tmp_path):
+    """Non-JSON previews should list and select multiple file annotations like JSON nodes."""
+    test_file = tmp_path / "note.md"
+    test_file.write_text("# Note\n")
+    review_file = tmp_path / ".skim" / "review.json"
+    review_file.parent.mkdir()
+    review_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "files": {
+                    "note.md": {
+                        "annotations": {
+                            FILE_ANNOTATION_KEY: [
+                                {
+                                    "id": "older",
+                                    "created_at": "2026-04-20T10:00:00Z",
+                                    "updated_at": "2026-04-20T10:00:00Z",
+                                    "tags": ["important"],
+                                    "note": "older file note",
+                                },
+                                {
+                                    "id": "newer",
+                                    "created_at": "2026-04-20T11:00:00Z",
+                                    "updated_at": "2026-04-20T11:30:00Z",
+                                    "tags": ["followup"],
+                                    "note": "newer file note",
+                                },
+                            ]
+                        }
+                    }
+                },
+            }
+        )
+    )
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        pane.show_file(test_file)
+        await pilot.pause()
+
+        annotation = "\n".join(str(_static_content(widget)) for widget in pane.query(Static))
+        assert "2 annotations" in annotation
+        assert "newer file note" in annotation
+
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("down")
+        await pilot.pause()
+
+        annotation = "\n".join(str(_static_content(widget)) for widget in pane.query(Static))
+        assert "▶ 2." in annotation
+        assert "Note: older file note" in annotation
+
+
+async def test_non_json_file_annotation_selection_mode_edits_selected_entry(tmp_path):
+    """Enter from file-annotation selection mode should edit the selected older entry."""
+    test_file = tmp_path / "note.md"
+    test_file.write_text("# Note\n")
+    review_file = tmp_path / ".skim" / "review.json"
+    review_file.parent.mkdir()
+    review_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "files": {
+                    "note.md": {
+                        "annotations": {
+                            FILE_ANNOTATION_KEY: [
+                                {
+                                    "id": "older",
+                                    "created_at": "2026-04-20T10:00:00Z",
+                                    "updated_at": "2026-04-20T10:00:00Z",
+                                    "tags": ["important"],
+                                    "note": "older file note",
+                                },
+                                {
+                                    "id": "newer",
+                                    "created_at": "2026-04-20T11:00:00Z",
+                                    "updated_at": "2026-04-20T11:30:00Z",
+                                    "tags": ["followup"],
+                                    "note": "newer file note",
+                                },
+                            ]
+                        }
+                    }
+                },
+            }
+        )
+    )
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        pane.show_file(test_file)
+        await pilot.pause()
+
+        await pilot.press("enter")
+        await pilot.press("down")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+
+        tags = app.screen.query_one("#annotation-tags", Input)
+        note = app.screen.query_one("#annotation-note", TextArea)
+        assert tags.value == "important"
+        assert note.text == "older file note"
+
+        note.load_text("older file note updated")
+        app.screen.action_save()
+        await pilot.pause()
+
+        payload = json.loads(review_file.read_text())
+        saved = payload["files"]["note.md"]["annotations"][FILE_ANNOTATION_KEY]
+        older = next(annotation for annotation in saved if annotation["id"] == "older")
+        assert older["note"] == "older file note updated"
+        annotation = "\n".join(str(_static_content(widget)) for widget in pane.query(Static))
+        assert "Note: older file note updated" in annotation
+
+
+async def test_non_json_file_annotation_add_and_delete_keep_selection_sensible(tmp_path):
+    """Deleting and adding file annotations should preserve a sensible selected entry."""
+    test_file = tmp_path / "note.md"
+    test_file.write_text("# Note\n")
+    review_file = tmp_path / ".skim" / "review.json"
+    review_file.parent.mkdir()
+    review_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "files": {
+                    "note.md": {
+                        "annotations": {
+                            FILE_ANNOTATION_KEY: [
+                                {
+                                    "id": "older",
+                                    "created_at": "2026-04-20T10:00:00Z",
+                                    "updated_at": "2026-04-20T10:00:00Z",
+                                    "tags": ["important"],
+                                    "note": "older file note",
+                                },
+                                {
+                                    "id": "newer",
+                                    "created_at": "2026-04-20T11:00:00Z",
+                                    "updated_at": "2026-04-20T11:30:00Z",
+                                    "tags": ["followup"],
+                                    "note": "newer file note",
+                                },
+                            ]
+                        }
+                    }
+                },
+            }
+        )
+    )
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        pane.show_file(test_file)
+        await pilot.pause()
+
+        await pilot.press("enter")
+        await pilot.press("down")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        app.screen.action_delete()
+        await pilot.pause()
+
+        annotation = "\n".join(str(_static_content(widget)) for widget in pane.query(Static))
+        assert "older file note" not in annotation
+        assert "▶ 1." in annotation
+        assert "Note: newer file note" in annotation
+
+        await pilot.press("a")
+        await pilot.pause()
+        app.screen.query_one("#annotation-tags", Input).value = "fresh"
+        app.screen.query_one("#annotation-note", TextArea).load_text("brand new file note")
+        app.screen.action_save()
+        await pilot.pause()
+
+        annotation = "\n".join(str(_static_content(widget)) for widget in pane.query(Static))
+        assert "brand new file note" in annotation
+        assert "▶ 1." in annotation
+        assert "Note: brand new file note" in annotation
+
+
 async def test_json_inspector_footer_shows_live_preview_controls(tmp_path):
     """The JSON footer should describe the always-visible detail model."""
     test_file = tmp_path / "plain.json"

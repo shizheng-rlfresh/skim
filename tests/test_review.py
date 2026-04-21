@@ -34,6 +34,46 @@ def test_annotation_store_supports_file_level_annotation_round_trip(tmp_path):
     assert store.get_annotation(source, FILE_ANNOTATION_KEY).note == "Review the rollout wording."
 
 
+def test_annotation_store_supports_multiple_file_level_annotations_by_id(tmp_path):
+    """File-level annotations should support multi-entry update/delete like JSON nodes."""
+    source = tmp_path / "notes.md"
+    source.write_text("# Note\n")
+    store = AnnotationStore(tmp_path)
+
+    first = store.add_annotation(
+        source,
+        FILE_ANNOTATION_KEY,
+        tags=("important",),
+        note="Older file note.",
+    )
+    second = store.add_annotation(
+        source,
+        FILE_ANNOTATION_KEY,
+        tags=("follow-up",),
+        note="Newest file note.",
+    )
+
+    records = store.annotations_for_path(source, FILE_ANNOTATION_KEY)
+    assert [record.id for record in records] == [second.id, first.id]
+
+    updated = store.update_annotation(
+        source,
+        FILE_ANNOTATION_KEY,
+        first.id,
+        tags=("important", "edited"),
+        note="Older file note updated.",
+    )
+    assert updated is not None
+
+    after_update = store.annotations_for_path(source, FILE_ANNOTATION_KEY)
+    assert after_update[0].id == updated.id
+    assert after_update[0].note == "Older file note updated."
+
+    store.delete_annotation(source, FILE_ANNOTATION_KEY, second.id)
+    after_delete = store.annotations_for_path(source, FILE_ANNOTATION_KEY)
+    assert [record.id for record in after_delete] == [updated.id]
+
+
 def test_triage_items_normalize_and_sort_workspace_annotations(tmp_path):
     """Triage rows should flatten per-file annotations into a stable review queue."""
     review_file = tmp_path / ".skim" / "review.json"

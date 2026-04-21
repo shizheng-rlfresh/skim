@@ -266,6 +266,77 @@ async def test_triage_down_moves_selection_exactly_one_item(tmp_path):
         assert app.triage_selected_annotation_id == "ann-result"
 
 
+async def test_triage_selection_follows_grouped_render_order_across_files(tmp_path):
+    """Triage movement should follow the grouped queue order, not the flat payload order."""
+    review_file = tmp_path / ".skim" / "review.json"
+    review_file.parent.mkdir()
+    review_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "files": {
+                    "a.md": {
+                        "annotations": {
+                            "@file": [
+                                {
+                                    "id": "a-newer",
+                                    "created_at": "2026-04-21T14:40:00Z",
+                                    "updated_at": "2026-04-21T14:40:00Z",
+                                    "tags": ["one"],
+                                    "note": "a newer",
+                                },
+                                {
+                                    "id": "a-older",
+                                    "created_at": "2026-04-21T14:10:00Z",
+                                    "updated_at": "2026-04-21T14:10:00Z",
+                                    "tags": ["two"],
+                                    "note": "a older",
+                                },
+                            ]
+                        }
+                    },
+                    "b.md": {
+                        "annotations": {
+                            "@file": [
+                                {
+                                    "id": "b-newer",
+                                    "created_at": "2026-04-21T14:30:00Z",
+                                    "updated_at": "2026-04-21T14:30:00Z",
+                                    "tags": ["three"],
+                                    "note": "b newer",
+                                },
+                                {
+                                    "id": "b-older",
+                                    "created_at": "2026-04-21T14:20:00Z",
+                                    "updated_at": "2026-04-21T14:20:00Z",
+                                    "tags": ["four"],
+                                    "note": "b older",
+                                },
+                            ]
+                        }
+                    },
+                },
+            }
+        )
+    )
+    (tmp_path / "a.md").write_text("# A\n")
+    (tmp_path / "b.md").write_text("# B\n")
+    app = SkimApp(path=str(tmp_path), triage=True)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        assert app.triage_selected_annotation_id == "a-newer"
+
+        await pilot.press("down")
+        await pilot.pause()
+        assert app.triage_selected_annotation_id == "a-older"
+
+        await pilot.press("down")
+        await pilot.pause()
+        assert app.triage_selected_annotation_id == "b-newer"
+
+
 async def test_triage_does_not_enter_split_mode(tmp_path):
     """Split mode should stay disabled while the triage shell is active."""
     review_file = tmp_path / ".skim" / "review.json"

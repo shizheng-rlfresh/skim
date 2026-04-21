@@ -509,7 +509,7 @@ class SkimApp(App):
 
     def _selected_triage_item(self):
         """Return the selected triage row, defaulting to the first visible item."""
-        visible = self._visible_triage_items()
+        visible = self._visible_triage_sequence()
         selected = next(
             (item for item in visible if item.annotation_id == self.triage_selected_annotation_id),
             visible[0] if visible else None,
@@ -524,9 +524,10 @@ class SkimApp(App):
         previous = self.triage_selected_annotation_id if preserve_selection else None
         self.triage_items = self.review_store.triage_items()
         visible = self._visible_triage_items()
+        sequence = self._visible_triage_sequence(visible)
         selected = next(
-            (item for item in visible if item.annotation_id == previous),
-            visible[0] if visible else None,
+            (item for item in sequence if item.annotation_id == previous),
+            sequence[0] if sequence else None,
         )
         self.triage_selected_annotation_id = (
             selected.annotation_id if selected is not None else None
@@ -545,6 +546,14 @@ class SkimApp(App):
         for item in items:
             grouped.setdefault(item.file_path, []).append(item)
         return list(grouped.items())
+
+    def _visible_triage_sequence(self, items=None):
+        """Return visible triage rows in the same order the grouped queue renders them."""
+        visible = self._visible_triage_items() if items is None else items
+        sequence = []
+        for _, group_items in self._group_triage_items(visible):
+            sequence.extend(group_items)
+        return sequence
 
     def _triage_queue_text(self, items) -> str:
         """Return the rendered triage queue text."""
@@ -598,7 +607,7 @@ class SkimApp(App):
 
     def _move_triage_selection(self, delta: int) -> None:
         """Move the triage selection up or down."""
-        visible = self._visible_triage_items()
+        visible = self._visible_triage_sequence()
         if not visible:
             self.triage_selected_annotation_id = None
             self._refresh_triage_view()
@@ -672,31 +681,58 @@ class SkimApp(App):
         if result is None:
             return
         source_path = self.browse_path / file_path
+        selected_annotation_id: str | None = None
         if result.action == "delete":
             if result.annotation_id is None:
                 return
             self.review_store.delete_annotation(source_path, target_path, result.annotation_id)
         elif result.action == "save":
             if result.annotation_id is None:
-                self.review_store.add_annotation(
+                saved = self.review_store.add_annotation(
                     source_path,
                     target_path,
                     tags=result.tags,
                     note=result.note,
                 )
+                selected_annotation_id = saved.id
             else:
-                self.review_store.update_annotation(
+                updated = self.review_store.update_annotation(
                     source_path,
                     target_path,
                     result.annotation_id,
                     tags=result.tags,
                     note=result.note,
                 )
+                selected_annotation_id = updated.id if updated is not None else result.annotation_id
         self.triage_last_annotation_version = self.review_store.annotation_version
         self._refresh_triage_view()
-        active_path = self.pane_files.get(self.active_pane_id)
-        if active_path is not None and active_path.resolve() == source_path.resolve():
-            self.query_one(f"#{self.active_pane_id}", PreviewPane).show_file(source_path)
+        try:
+            pane = self.query_one(f"#{self.active_pane_id}", PreviewPane)
+        except Exception:
+            pane = None
+        active_path = (
+            pane.current_path
+            if pane is not None
+            else self.pane_files.get(self.active_pane_id)
+        )
+        if (
+            pane is not None
+            and active_path is not None
+            and active_path.resolve() == source_path.resolve()
+        ):
+            self.pane_files[self.active_pane_id] = source_path
+            if target_path == FILE_ANNOTATION_KEY:
+                updated_annotations = self.review_store.annotations_for_path(
+                    source_path,
+                    FILE_ANNOTATION_KEY,
+                )
+                if result.action == "delete":
+                    selected_annotation_id = (
+                        updated_annotations[0].id if updated_annotations else None
+                    )
+                pane.set_selected_file_annotation_id(selected_annotation_id)
+                pane.file_annotation_mode = bool(updated_annotations)
+            pane.show_file(source_path)
 
     def _edit_selected_triage_item(self) -> None:
         """Edit the currently selected triage item."""
@@ -704,7 +740,17 @@ class SkimApp(App):
         if item is None:
             return
         target = item.target_path or FILE_ANNOTATION_KEY
-        annotation = self.review_store.get_annotation(self.browse_path / item.file_path, target)
+        annotation = next(
+            (
+                record
+                for record in self.review_store.annotations_for_path(
+                    self.browse_path / item.file_path,
+                    target,
+                )
+                if record.id == item.annotation_id
+            ),
+            None,
+        )
         self._open_review_annotation_editor(
             file_path=item.file_path,
             target_path=target,
@@ -727,16 +773,88 @@ class SkimApp(App):
 
     def _open_file_annotation_editor_for_active_pane(self) -> bool:
         """Open a file-level annotation editor for the active non-JSON preview."""
+        return self._open_file_annotation_editor_for_active_pane_selection(add_new=False)
+
+    def _active_file_annotation_pane(self) -> PreviewPane | None:
+        """Return the active non-JSON preview pane when file annotations are available."""
         try:
             pane = self.query_one(f"#{self.active_pane_id}", PreviewPane)
         except Exception:
-            return False
+            return None
         if pane.current_path is None:
-            return False
+            return None
         viewer = pane.active_json_navigator()
         if viewer is not None:
+            return None
+        return pane
+
+    def _active_file_annotations(
+        self, pane: PreviewPane | None = None
+    ) -> tuple[AnnotationRecord, ...]:
+        """Return file-level annotations for the active non-JSON pane."""
+        active_pane = pane or self._active_file_annotation_pane()
+        if active_pane is None or active_pane.current_path is None:
+            return ()
+        return self.review_store.annotations_for_path(active_pane.current_path, FILE_ANNOTATION_KEY)
+
+    def _selected_file_annotation(
+        self, pane: PreviewPane | None = None
+    ) -> AnnotationRecord | None:
+        """Return the selected file-level annotation for the active non-JSON pane."""
+        active_pane = pane or self._active_file_annotation_pane()
+        annotations = self._active_file_annotations(active_pane)
+        if active_pane is None or not annotations:
+            return None
+        selected_id = active_pane.selected_file_annotation_id(annotations)
+        return next(
+            (annotation for annotation in annotations if annotation.id == selected_id),
+            annotations[0],
+        )
+
+    def _set_file_annotation_mode(self, enabled: bool) -> bool:
+        """Enter or leave file-annotation selection mode for the active pane."""
+        pane = self._active_file_annotation_pane()
+        if pane is None or pane.current_path is None:
             return False
-        annotation = self.review_store.get_annotation(pane.current_path, FILE_ANNOTATION_KEY)
+        annotations = self._active_file_annotations(pane)
+        if enabled and not annotations:
+            return False
+        pane.file_annotation_mode = enabled
+        pane.show_file(pane.current_path)
+        return True
+
+    def _move_file_annotation_selection(self, delta: int) -> bool:
+        """Move the selected file-level annotation within the active pane."""
+        pane = self._active_file_annotation_pane()
+        if pane is None or pane.current_path is None or not pane.file_annotation_mode:
+            return False
+        annotations = self._active_file_annotations(pane)
+        if not annotations:
+            pane.file_annotation_mode = False
+            pane.show_file(pane.current_path)
+            return False
+        selected_id = pane.selected_file_annotation_id(annotations)
+        current = next(
+            (
+                index
+                for index, annotation in enumerate(annotations)
+                if annotation.id == selected_id
+            ),
+            0,
+        )
+        next_index = max(0, min(len(annotations) - 1, current + delta))
+        pane.set_selected_file_annotation_id(annotations[next_index].id)
+        pane.show_file(pane.current_path)
+        return True
+
+    def _open_file_annotation_editor_for_active_pane_selection(
+        self, *, add_new: bool
+    ) -> bool:
+        """Open the file-level annotation editor for the active non-JSON preview."""
+        pane = self._active_file_annotation_pane()
+        if pane is None or pane.current_path is None:
+            return False
+        annotation = None if add_new else self._selected_file_annotation(pane)
         self._open_review_annotation_editor(
             file_path=self.review_store.relative_file_path(pane.current_path),
             target_path=FILE_ANNOTATION_KEY,
@@ -875,6 +993,8 @@ class SkimApp(App):
             if not isinstance(self.focused, Input):
                 self._move_triage_selection(1)
             return
+        if self._move_file_annotation_selection(1):
+            return
         if self.split_mode:
             self.split_mode = False
             self._split("down")
@@ -895,6 +1015,8 @@ class SkimApp(App):
         if self.app_mode == "triage":
             if not isinstance(self.focused, Input):
                 self._move_triage_selection(-1)
+            return
+        if self._move_file_annotation_selection(-1):
             return
         if self.split_mode:
             self.split_mode = False
@@ -1097,7 +1219,26 @@ class SkimApp(App):
             active_pane = self.query_one(f"#{self.active_pane_id}", PreviewPane)
             viewer = active_pane.active_json_navigator()
         except Exception:
+            active_pane = None
             viewer = None
+
+        if active_pane is not None and viewer is None:
+            file_annotations = self._active_file_annotations(active_pane)
+            if event.key == "escape" and active_pane.file_annotation_mode:
+                if self._set_file_annotation_mode(False):
+                    event.prevent_default()
+                    event.stop()
+                    return
+            if event.key == "enter":
+                if active_pane.file_annotation_mode:
+                    if self._open_file_annotation_editor_for_active_pane():
+                        event.prevent_default()
+                        event.stop()
+                        return
+                elif file_annotations and self._set_file_annotation_mode(True):
+                    event.prevent_default()
+                    event.stop()
+                    return
 
         if viewer is not None and event.key in {"left", "right"}:
             if viewer.handle_horizontal_key(event.key):
@@ -1122,7 +1263,9 @@ class SkimApp(App):
                 event.prevent_default()
                 event.stop()
                 return
-        if event.key == "a" and self._open_file_annotation_editor_for_active_pane():
+        if event.key == "a" and self._open_file_annotation_editor_for_active_pane_selection(
+            add_new=True
+        ):
             event.prevent_default()
             event.stop()
             return

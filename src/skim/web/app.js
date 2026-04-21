@@ -192,6 +192,7 @@ function renderViewToggle() {
   elements.modeBrowse?.setAttribute("aria-pressed", state.mode === "browse" ? "true" : "false");
   elements.modeTriage?.classList.toggle("active", state.mode === "triage");
   elements.modeTriage?.setAttribute("aria-pressed", state.mode === "triage" ? "true" : "false");
+  elements.splitPane?.classList.toggle("hidden", state.mode === "triage");
 }
 
 function renderTree() {
@@ -400,11 +401,11 @@ function renderPaneContent(pane) {
 
   switch (pane.preview.kind) {
     case "text":
-      return renderTextPreview(pane.preview);
+      return renderTextPreview(pane);
     case "markdown":
-      return renderMarkdownPreview(pane.preview);
+      return renderMarkdownPreview(pane);
     case "csv":
-      return renderCsvPreview(pane.preview);
+      return renderCsvPreview(pane);
     case "xlsx":
       return renderXlsxPreview(pane);
     case "json_inspector":
@@ -412,7 +413,7 @@ function renderPaneContent(pane) {
     case "trajectory":
       return renderTrajectoryPreview(pane);
     case "notebook":
-      return renderNotebookPreview(pane.preview);
+      return renderNotebookPreview(pane);
     case "too_large":
     case "error":
       return `<div class="notice">${escapeHtml(pane.preview.message)}</div>`;
@@ -1310,6 +1311,9 @@ function onPreviewPointerDown(event) {
 }
 
 function splitActivePane() {
+  if (state.mode === "triage") {
+    return null;
+  }
   if (state.panes.length >= MAX_PANES) {
     return null;
   }
@@ -1480,6 +1484,9 @@ async function onPreviewClick(event, paneId = state.activePaneId) {
         updateJsonInspectorPreview(paneId);
       } else if (pane.preview?.kind === "trajectory") {
         updateTrajectoryPreview(paneId);
+      } else {
+        renderWorkspace();
+        renderStatusBar();
       }
     }
     return;
@@ -1611,40 +1618,67 @@ function initializeWorkbookState(pane) {
   pane.selectedWorkbookSheetName = preferred.name;
 }
 
+function resolvePreviewInput(input) {
+  if (input?.preview) {
+    return { pane: input, preview: input.preview };
+  }
+  return { pane: null, preview: input };
+}
+
+function renderFileAnnotationPanel(pane, preview) {
+  if (!pane || !preview?.annotation_path) {
+    return "";
+  }
+  const annotations = normalizeAnnotations(preview.annotations, preview.annotation);
+  const selected = selectedAnnotationEntry(pane, preview.annotation_path, annotations);
+  return renderAnnotationPanel(
+    annotations,
+    true,
+    selected ? selected.id : null,
+    pane.id,
+    preview.annotation_path,
+  );
+}
+
 function renderTextPreview(preview) {
+  const ctx = resolvePreviewInput(preview);
   return `
     <div class="preview-card">
       <div class="detail-meta">
-        <span class="path-pill">${escapeHtml(preview.path)}</span>
-        ${preview.language ? `<span class="badge">${escapeHtml(preview.language)}</span>` : ""}
+        <span class="path-pill">${escapeHtml(ctx.preview.path)}</span>
+        ${ctx.preview.language ? `<span class="badge">${escapeHtml(ctx.preview.language)}</span>` : ""}
       </div>
-      ${renderRenderValue(preview.render || { kind: "text", value: preview.content })}
+      ${renderFileAnnotationPanel(ctx.pane, ctx.preview)}
+      ${renderRenderValue(ctx.preview.render || { kind: "text", value: ctx.preview.content })}
     </div>
   `;
 }
 
 function renderMarkdownPreview(preview) {
+  const ctx = resolvePreviewInput(preview);
   return `
     <div class="preview-card">
       <div class="detail-meta">
-        <span class="path-pill">${escapeHtml(preview.path)}</span>
+        <span class="path-pill">${escapeHtml(ctx.preview.path)}</span>
         <span class="badge">markdown</span>
       </div>
-      ${renderMarkdown(preview.content)}
+      ${renderFileAnnotationPanel(ctx.pane, ctx.preview)}
+      ${renderMarkdown(ctx.preview.content)}
     </div>
   `;
 }
 
 function renderCsvPreview(preview) {
-  const table = preview.columns.length
+  const ctx = resolvePreviewInput(preview);
+  const table = ctx.preview.columns.length
     ? `
       <div class="table-wrap">
         <table>
           <thead>
-            <tr>${preview.columns.map((column) => `<th>${escapeHtml(column)}</th>`).join("")}</tr>
+            <tr>${ctx.preview.columns.map((column) => `<th>${escapeHtml(column)}</th>`).join("")}</tr>
           </thead>
           <tbody>
-            ${preview.rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")}
+            ${ctx.preview.rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")}
           </tbody>
         </table>
       </div>
@@ -1652,22 +1686,23 @@ function renderCsvPreview(preview) {
     : `<p class="selection-subtitle">No tabular rows available.</p>`;
 
   const truncation = [
-    preview.truncated_rows ? "rows truncated" : "",
-    preview.truncated_columns ? "columns truncated" : "",
+    ctx.preview.truncated_rows ? "rows truncated" : "",
+    ctx.preview.truncated_columns ? "columns truncated" : "",
   ].filter(Boolean).join(" · ");
 
   return `
     <div class="preview-card">
       <div class="detail-meta">
-        <span class="path-pill">${escapeHtml(preview.path)}</span>
-        <span class="badge">${escapeHtml(preview.summary)}</span>
-        ${preview.parse_error ? `<span class="badge">${escapeHtml(preview.parse_error)}</span>` : ""}
+        <span class="path-pill">${escapeHtml(ctx.preview.path)}</span>
+        <span class="badge">${escapeHtml(ctx.preview.summary)}</span>
+        ${ctx.preview.parse_error ? `<span class="badge">${escapeHtml(ctx.preview.parse_error)}</span>` : ""}
         ${truncation ? `<span class="badge">${escapeHtml(truncation)}</span>` : ""}
       </div>
+      ${renderFileAnnotationPanel(ctx.pane, ctx.preview)}
       <div class="preview-block">${table}</div>
       <details class="raw-toggle">
         <summary>Raw CSV</summary>
-        ${renderRenderValue(preview.raw_render || { kind: "text", value: preview.raw })}
+        ${renderRenderValue(ctx.preview.raw_render || { kind: "text", value: ctx.preview.raw })}
       </details>
     </div>
   `;
@@ -1725,6 +1760,7 @@ function renderXlsxPreview(pane) {
           <span class="badge">${escapeHtml(preview.summary?.title || "Workbook Preview")}</span>
           <span class="badge">${escapeHtml(`${preview.summary?.sheet_count ?? sheets.length} sheets`)}</span>
         </div>
+        ${renderFileAnnotationPanel(pane, preview)}
       </div>
       ${tabs}
       <section class="preview-card">
@@ -2095,10 +2131,11 @@ function renderTrajectoryItem(item, pane) {
 }
 
 function renderNotebookPreview(preview) {
-  const version = preview.summary.nbformat_minor != null
-    ? `${preview.summary.nbformat}.${preview.summary.nbformat_minor}`
-    : String(preview.summary.nbformat ?? "");
-  const cells = preview.cells || [];
+  const ctx = resolvePreviewInput(preview);
+  const version = ctx.preview.summary.nbformat_minor != null
+    ? `${ctx.preview.summary.nbformat}.${ctx.preview.summary.nbformat_minor}`
+    : String(ctx.preview.summary.nbformat ?? "");
+  const cells = ctx.preview.cells || [];
   const body = cells.length
     ? cells.map(renderNotebookCell).join("")
     : `<div class="preview-card"><div class="selection-subtitle">Empty notebook.</div></div>`;
@@ -2108,11 +2145,12 @@ function renderNotebookPreview(preview) {
       <section class="preview-card">
         <div class="notebook-title">Notebook Preview</div>
         <div class="notebook-meta">
-          <span class="badge">${escapeHtml(preview.path)}</span>
-          <span class="badge">${escapeHtml(`${preview.summary.cell_count} cells`)}</span>
+          <span class="badge">${escapeHtml(ctx.preview.path)}</span>
+          <span class="badge">${escapeHtml(`${ctx.preview.summary.cell_count} cells`)}</span>
           ${version ? `<span class="badge">nbformat ${escapeHtml(version)}</span>` : ""}
-          <span class="badge">${escapeHtml(preview.language || "python")}</span>
+          <span class="badge">${escapeHtml(ctx.preview.language || "python")}</span>
         </div>
+        ${renderFileAnnotationPanel(ctx.pane, ctx.preview)}
       </section>
       ${body}
     </div>

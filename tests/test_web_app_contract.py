@@ -502,6 +502,55 @@ console.log(JSON.stringify({
     assert result == {"plainHasAnnotate": True, "annotatedHasEdit": True}
 
 
+def test_non_json_previews_render_file_annotation_panel_with_multiple_entries():
+    """Non-JSON previews should render the shared annotation panel for @file."""
+    result = run_app_js(
+        """
+const pane = ctx.createPaneState("pane-1");
+pane.path = "docs/spec.md";
+pane.preview = {
+  kind: "markdown",
+  name: "spec.md",
+  path: "docs/spec.md",
+  content: "# Spec",
+  annotation_path: "@file",
+  annotations: [
+    {
+      id: "newer",
+      created_at: "2026-04-20T11:00:00Z",
+      updated_at: "2026-04-20T11:30:00Z",
+      tags: ["bug"],
+      note: "newer file note",
+    },
+    {
+      id: "older",
+      created_at: "2026-04-20T10:00:00Z",
+      updated_at: "2026-04-20T10:00:00Z",
+      tags: ["evidence"],
+      note: "older file note",
+    },
+  ],
+  annotation_count: 2,
+};
+pane.selectedAnnotationIds = { "@file": "older" };
+const html = ctx.renderMarkdownPreview(pane);
+console.log(JSON.stringify({
+  hasPanel: html.includes('annotation-panel'),
+  hasCount: html.includes('2 annotations'),
+  hasOlderSelected: html.includes('annotation-entry selected'),
+  hasOlderNote: html.includes('older file note'),
+}));
+"""
+    )
+
+    assert result == {
+        "hasPanel": True,
+        "hasCount": True,
+        "hasOlderSelected": True,
+        "hasOlderNote": True,
+    }
+
+
 def test_triage_visible_items_filter_and_selection_are_client_side():
     """Triage filtering should stay client-side over search, tag, and file-type state."""
     result = run_app_js(
@@ -1125,6 +1174,26 @@ console.log(JSON.stringify({
         "activePaneId": "pane-6",
         "paneIds": ["pane-1", "pane-2", "pane-3", "pane-4", "pane-5", "pane-6"],
     }
+
+
+def test_split_active_pane_is_inert_in_triage_mode():
+    """Web triage mode should not allow pane splitting."""
+    result = run_app_js(
+        """
+vm.runInContext(`
+state.mode = "triage";
+state.panes = [createPaneState("pane-1")];
+state.activePaneId = "pane-1";
+`, ctx);
+ctx.splitActivePane();
+console.log(JSON.stringify({
+  paneCount: vm.runInContext('state.panes.length', ctx),
+  activePaneId: vm.runInContext('state.activePaneId', ctx),
+}));
+"""
+    )
+
+    assert result == {"paneCount": 1, "activePaneId": "pane-1"}
 
 
 def test_tree_click_opens_file_in_the_active_pane():
