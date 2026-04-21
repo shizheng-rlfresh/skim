@@ -566,7 +566,7 @@ def test_annotation_store_caches_one_file_lookup(tmp_path, monkeypatch):
     assert second is not None
     assert first.note == "cached"
     assert second.note == "cached"
-    assert records["$.hello"].note == "cached"
+    assert records["$.hello"][0].note == "cached"
     assert calls == 1
 
     store.set_annotation(source, "$.hello", tags=("updated",), note="changed")
@@ -575,6 +575,136 @@ def test_annotation_store_caches_one_file_lookup(tmp_path, monkeypatch):
     assert updated is not None
     assert updated.note == "changed"
     assert calls == 1
+
+
+def test_annotation_store_normalizes_legacy_single_record_entries(tmp_path):
+    """Legacy review.json entries should load as one-item annotation lists."""
+    source = tmp_path / "plain.json"
+    source.write_text(json.dumps({"hello": "world"}))
+    review_file = tmp_path / ".skim" / "review.json"
+    review_file.parent.mkdir()
+    review_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "files": {
+                    "plain.json": {
+                        "annotations": {
+                            "$.hello": {
+                                "tags": ["evidence"],
+                                "note": "cached",
+                            }
+                        }
+                    }
+                },
+            }
+        )
+    )
+
+    store = AnnotationStore(tmp_path)
+    records = store.annotations_for_path(source, "$.hello")
+
+    assert len(records) == 1
+    assert records[0].tags == ("evidence",)
+    assert records[0].note == "cached"
+    assert records[0].id
+    assert records[0].created_at
+    assert records[0].updated_at
+
+
+def test_annotation_store_adds_updates_and_deletes_individual_entries(tmp_path):
+    """Multi-entry annotation CRUD should preserve sibling annotations on one node."""
+    source = tmp_path / "plain.json"
+    source.write_text(json.dumps({"hello": "world"}))
+    store = AnnotationStore(tmp_path)
+
+    first = store.add_annotation(
+        source,
+        "$.hello",
+        tags=("evidence",),
+        note="first note",
+    )
+    second = store.add_annotation(
+        source,
+        "$.hello",
+        tags=("bug",),
+        note="second note",
+    )
+
+    records = store.annotations_for_path(source, "$.hello")
+    assert [record.id for record in records] == [second.id, first.id]
+
+    updated = store.update_annotation(
+        source,
+        "$.hello",
+        second.id,
+        tags=("bug", "confirmed"),
+        note="second note updated",
+    )
+    assert updated is not None
+    assert updated.id == second.id
+    assert updated.tags == ("bug", "confirmed")
+    assert updated.note == "second note updated"
+
+    store.delete_annotation(source, "$.hello", second.id)
+    after_delete = store.annotations_for_path(source, "$.hello")
+    assert [record.id for record in after_delete] == [first.id]
+
+    payload = json.loads((tmp_path / ".skim" / "review.json").read_text())
+    saved = payload["files"]["plain.json"]["annotations"]["$.hello"]
+    assert isinstance(saved, list)
+    assert saved[0]["id"] == first.id
+
+
+async def test_json_inspector_annotation_panel_lists_newest_first(tmp_path):
+    """Persisted multi-entry annotations should render as a newest-first list in the TUI."""
+    test_file = tmp_path / "plain.json"
+    test_file.write_text(json.dumps({"hello": "world"}))
+    review_file = tmp_path / ".skim" / "review.json"
+    review_file.parent.mkdir()
+    review_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "files": {
+                    "plain.json": {
+                        "annotations": {
+                            "$.hello": [
+                                {
+                                    "id": "older",
+                                    "created_at": "2026-04-20T10:00:00Z",
+                                    "updated_at": "2026-04-20T10:00:00Z",
+                                    "tags": ["evidence"],
+                                    "note": "older note",
+                                },
+                                {
+                                    "id": "newer",
+                                    "created_at": "2026-04-20T11:00:00Z",
+                                    "updated_at": "2026-04-20T11:30:00Z",
+                                    "tags": ["bug"],
+                                    "note": "newer note",
+                                },
+                            ]
+                        }
+                    }
+                },
+            }
+        )
+    )
+
+    widgets = render_file(test_file, browse_root=tmp_path)
+    inspector = widgets[0]
+    assert isinstance(inspector, JsonInspector)
+
+    app = SkimApp(path=str(tmp_path))
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        await pane.mount(inspector)
+        await pilot.pause()
+
+        annotation = _annotation_text(inspector)
+        assert "2 annotations" in annotation
+        assert annotation.index("newer note") < annotation.index("older note")
 
 
 def test_trajectory_json_inspector_uses_one_overlay_normalization_pass(tmp_path, monkeypatch):
@@ -623,13 +753,17 @@ async def test_annotation_modal_saves_selected_node_annotation(tmp_path):
 
         review_file = tmp_path / ".skim" / "review.json"
         payload = json.loads(review_file.read_text())
-        assert payload["files"]["plain.json"]["annotations"]["$.hello"] == {
-            "tags": ["evidence", "bug"],
-            "note": "First concrete failure appears here.",
-        }
+        saved = payload["files"]["plain.json"]["annotations"]["$.hello"]
+        assert len(saved) == 1
+        assert saved[0]["tags"] == ["evidence", "bug"]
+        assert saved[0]["note"] == "First concrete failure appears here."
+        assert saved[0]["id"]
+        assert saved[0]["created_at"]
+        assert saved[0]["updated_at"]
         assert inspector._tree.root.children[0].label.plain.startswith("* ")
         annotation = _annotation_text(inspector)
         detail = _detail_text(inspector)
+        assert "1 annotation" in annotation
         assert "evidence, bug" in annotation
         assert "First concrete failure appears here." in annotation
         assert "First concrete failure appears here." not in detail
@@ -648,10 +782,15 @@ async def test_annotation_modal_delete_removes_selected_node_annotation(tmp_path
                 "files": {
                     "plain.json": {
                         "annotations": {
-                            "$.hello": {
-                                "tags": ["evidence"],
-                                "note": "First concrete failure appears here.",
-                            }
+                            "$.hello": [
+                                {
+                                    "id": "existing",
+                                    "created_at": "2026-04-20T10:00:00Z",
+                                    "updated_at": "2026-04-20T10:00:00Z",
+                                    "tags": ["evidence"],
+                                    "note": "First concrete failure appears here.",
+                                }
+                            ]
                         }
                     }
                 },
@@ -666,7 +805,7 @@ async def test_annotation_modal_delete_removes_selected_node_annotation(tmp_path
         await pilot.pause()
 
         inspector = pane.query_one(JsonInspector)
-        await pilot.press("a")
+        await pilot.press("enter")
         await pilot.pause()
         app.screen.action_delete()
         await pilot.pause()

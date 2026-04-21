@@ -111,7 +111,7 @@ class SkimHandler(SimpleHTTPRequestHandler):
         super().do_GET()
 
     def do_POST(self) -> None:
-        """Persist or replace one annotation."""
+        """Create or update one annotation entry."""
         if self.path != "/api/annotations":
             self._error(404, "Not found")
             return
@@ -131,6 +131,10 @@ class SkimHandler(SimpleHTTPRequestHandler):
         if not isinstance(note, str):
             self._error(400, "Note must be a string")
             return
+        annotation_id = body.get("annotation_id")
+        if annotation_id is not None and not isinstance(annotation_id, str):
+            self._error(400, "annotation_id must be a string")
+            return
 
         source_path = self._resolve_browse_target(file_path)
         if source_path is None:
@@ -140,13 +144,36 @@ class SkimHandler(SimpleHTTPRequestHandler):
             self._error(404, "File not found")
             return
 
-        self.store.set_annotation(
-            source_path,
-            annotation_path,
-            tags=tuple(str(tag) for tag in tags),
-            note=note,
+        if annotation_id:
+            annotation = self.store.update_annotation(
+                source_path,
+                annotation_path,
+                annotation_id,
+                tags=tuple(str(tag) for tag in tags),
+                note=note,
+            )
+            if annotation is None:
+                self._error(404, "Annotation not found")
+                return
+        else:
+            annotation = self.store.add_annotation(
+                source_path,
+                annotation_path,
+                tags=tuple(str(tag) for tag in tags),
+                note=note,
+            )
+        self._json_response(
+            {
+                "ok": True,
+                "annotation": {
+                    "id": annotation.id,
+                    "created_at": annotation.created_at,
+                    "updated_at": annotation.updated_at,
+                    "tags": list(annotation.tags),
+                    "note": annotation.note,
+                },
+            }
         )
-        self._json_response({"ok": True})
 
     def do_DELETE(self) -> None:
         """Delete one annotation, if present."""
@@ -170,7 +197,12 @@ class SkimHandler(SimpleHTTPRequestHandler):
             self._error(404, "File not found")
             return
 
-        self.store.delete_annotation(source_path, annotation_path)
+        annotation_id = body.get("annotation_id")
+        if not isinstance(annotation_id, str):
+            self._error(400, "Missing annotation_id field")
+            return
+
+        self.store.delete_annotation(source_path, annotation_path, annotation_id)
         self._json_response({"ok": True})
 
     def do_OPTIONS(self) -> None:

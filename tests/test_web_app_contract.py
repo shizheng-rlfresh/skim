@@ -391,6 +391,47 @@ console.log(JSON.stringify({
     }
 
 
+def test_render_annotation_panel_lists_multiple_entries_and_defaults_to_newest():
+    """The annotation panel should show multiple entries newest-first for one node."""
+    result = run_app_js(
+        """
+const html = ctx.renderAnnotationPanel(
+  [
+    {
+      id: "newer",
+      created_at: "2026-04-20T11:00:00Z",
+      updated_at: "2026-04-20T11:30:00Z",
+      tags: ["bug"],
+      note: "newer note",
+    },
+    {
+      id: "older",
+      created_at: "2026-04-20T10:00:00Z",
+      updated_at: "2026-04-20T10:00:00Z",
+      tags: ["evidence"],
+      note: "older note",
+    },
+  ],
+  true,
+  "newer",
+);
+console.log(JSON.stringify({
+  hasList: html.includes('annotation-list'),
+  hasCount: html.includes('2 annotations'),
+  newerBeforeOlder: html.indexOf('newer note') < html.indexOf('older note'),
+  hasSelectedClass: html.includes('annotation-entry selected'),
+}));
+"""
+    )
+
+    assert result == {
+        "hasList": True,
+        "hasCount": True,
+        "newerBeforeOlder": True,
+        "hasSelectedClass": True,
+    }
+
+
 def test_render_json_node_marks_annotated_rows_more_obviously():
     """Annotated JSON rows should emit a dedicated row state and stronger marker glyph."""
     result = run_app_js(

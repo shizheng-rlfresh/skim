@@ -392,26 +392,31 @@ def serialize_trajectory_preview(
                     event_paths.get(id(result_event.raw)) if result_event is not None else None
                 )
                 parent_path = call_path or result_path or step_path
+                parent_annotations = _annotation_payload_for_path(file_annotations, parent_path)
+                input_annotations = _annotation_payload_for_path(
+                    file_annotations,
+                    call_path or parent_path,
+                )
+                output_annotations = _annotation_payload_for_path(
+                    file_annotations,
+                    result_path or parent_path,
+                )
                 blocks.append(
                     {
                         "id": block_id,
                         "kind": "tool",
                         "title": item.title.plain,
                         "annotation_path": _format_path(parent_path),
-                        "annotation": _annotation_payload_for_path(
-                            file_annotations,
-                            parent_path,
-                        ),
+                        "annotations": parent_annotations,
+                        "annotation_count": len(parent_annotations),
                         "tool_name": interaction.tool_name,
                         "call_id": interaction.call_id,
                         "status": _interaction_status(interaction),
                         "summary": _interaction_payload(interaction),
                         "input": {
                             "annotation_path": _format_path(call_path or parent_path),
-                            "annotation": _annotation_payload_for_path(
-                                file_annotations,
-                                call_path or parent_path,
-                            ),
+                            "annotations": input_annotations,
+                            "annotation_count": len(input_annotations),
                             "render": _render_value(
                                 _decoded_tool_result(call_event.raw.get("arguments"))
                                 if call_event is not None
@@ -421,10 +426,8 @@ def serialize_trajectory_preview(
                         },
                         "output": {
                             "annotation_path": _format_path(result_path or parent_path),
-                            "annotation": _annotation_payload_for_path(
-                                file_annotations,
-                                result_path or parent_path,
-                            ),
+                            "annotations": output_annotations,
+                            "annotation_count": len(output_annotations),
                             "render": _render_value(
                                 _decoded_tool_result(result_event.raw.get("output"))
                                 if result_event is not None
@@ -442,13 +445,15 @@ def serialize_trajectory_preview(
             event = item.event
             event_path = event_paths.get(id(event.raw)) or step_path
             render_value = _event_text(event.raw) or _event_payload(event.raw)
+            event_annotations = _annotation_payload_for_path(file_annotations, event_path)
             blocks.append(
                 {
                     "id": block_id,
                     "kind": "event",
                     "title": item.title.plain,
                     "annotation_path": _format_path(event_path),
-                    "annotation": _annotation_payload_for_path(file_annotations, event_path),
+                    "annotations": event_annotations,
+                    "annotation_count": len(event_annotations),
                     "event_kind": event.kind,
                     "excerpt": event.excerpt,
                     "role": _message_role(event.raw) if event.kind == "message" else None,
@@ -513,7 +518,7 @@ class _JsonInspectorSerializer:
         node_id = f"node-{self._next_id}"
         self._next_id += 1
         annotation_path = self._annotation_key(item)
-        annotation = self._annotation_for_path(annotation_path)
+        annotations = self._annotation_for_path(annotation_path)
         display_key, display_value, value_type, node_class = _node_display_metadata(item)
         payload: dict[str, Any] = {
             "id": node_id,
@@ -524,7 +529,8 @@ class _JsonInspectorSerializer:
             "raw_path": list(item.raw_path),
             "annotatable": annotation_path is not None,
             "annotation_path": annotation_path,
-            "annotation": annotation,
+            "annotations": annotations,
+            "annotation_count": len(annotations),
             "style": _node_style(item.kind),
             "type_name": _json_type_name(item.raw_value),
             "key": item.key,
@@ -730,11 +736,10 @@ class _JsonInspectorSerializer:
             return None
         return _format_raw_path(item.raw_path)
 
-    def _annotation_for_path(self, path: str | None) -> dict[str, Any] | None:
+    def _annotation_for_path(self, path: str | None) -> list[dict[str, Any]]:
         if path is None:
-            return None
-        record = self._file_annotations.get(path)
-        return _annotation_payload(record)
+            return []
+        return [_annotation_payload(record) for record in self._file_annotations.get(path, ())]
 
 
 def _serialize_csv_preview(content: str, *, name: str, relative_path: str) -> dict[str, Any]:
@@ -1065,22 +1070,23 @@ def _decode_json_value(value: Any) -> Any:
     return value
 
 
-def _annotation_payload(record: AnnotationRecord | None) -> dict[str, Any] | None:
-    if record is None:
-        return None
+def _annotation_payload(record: AnnotationRecord) -> dict[str, Any]:
     return {
+        "id": record.id,
+        "created_at": record.created_at,
+        "updated_at": record.updated_at,
         "tags": list(record.tags),
         "note": record.note,
     }
 
 
 def _annotation_payload_for_path(
-    annotations: dict[str, AnnotationRecord],
+    annotations: dict[str, tuple[AnnotationRecord, ...]],
     path: tuple[str | int, ...] | None,
-) -> dict[str, Any] | None:
+) -> list[dict[str, Any]]:
     if path is None:
-        return None
-    return _annotation_payload(annotations.get(_format_raw_path(path)))
+        return []
+    return [_annotation_payload(record) for record in annotations.get(_format_raw_path(path), ())]
 
 
 def _format_path(path: tuple[str | int, ...] | None) -> str | None:

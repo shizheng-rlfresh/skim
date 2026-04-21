@@ -50,6 +50,7 @@ function createPaneState(id) {
     selectedJsonNodeId: null,
     selectedJsonPath: null,
     selectedStepId: null,
+    selectedAnnotationIds: {},
     jsonSplitRatio: loadStoredSplitRatio("json", DEFAULT_JSON_SPLIT_RATIO, id),
     trajectorySplitRatio: loadStoredSplitRatio("trajectory", DEFAULT_TRAJECTORY_SPLIT_RATIO, id),
   };
@@ -1057,13 +1058,32 @@ async function onPreviewClick(event, paneId = state.activePaneId) {
     return;
   }
 
+  const annotationSelection = event.target.closest("[data-select-annotation]");
+  if (annotationSelection) {
+    const annotationPath = annotationSelection.dataset.annotationPath;
+    const annotationId = annotationSelection.dataset.selectAnnotation;
+    if (annotationPath && annotationId) {
+      pane.selectedAnnotationIds[annotationPath] = annotationId;
+      if (pane.preview?.kind === "json_inspector") {
+        updateJsonInspectorPreview(paneId);
+      } else if (pane.preview?.kind === "trajectory") {
+        updateTrajectoryPreview(paneId);
+      }
+    }
+    return;
+  }
+
   const annotate = event.target.closest("[data-annotate]");
   if (annotate) {
+    const annotations = decodeAnnotationList(annotate.dataset.annotations);
+    const annotationId = annotate.dataset.annotationId || null;
     openModal({
       paneId,
       file: pane.path,
       path: annotate.dataset.annotate,
-      annotation: decodeAnnotation(annotate.dataset.annotation),
+      annotations,
+      annotation: annotationId ? annotations.find((entry) => entry.id === annotationId) || null : null,
+      annotationId,
     });
     return;
   }
@@ -1230,7 +1250,7 @@ function renderJsonInspector(pane) {
     <div class="split-view" data-json-shell style="grid-template-columns:${escapeAttribute(splitTemplate(splitRatio))}">
       <div class="pane-list" data-json-pane-list>${renderJsonPaneList(pane)}</div>
       <div class="split-resizer" data-resize-split="json" aria-hidden="true"></div>
-      <div class="detail-panel" data-json-detail>${renderJsonDetail(selected)}</div>
+      <div class="detail-panel" data-json-detail>${renderJsonDetail(selected, pane)}</div>
     </div>
   `;
 }
@@ -1246,8 +1266,10 @@ function renderJsonNode(node, depth, pane) {
   const toggle = node.children.length
     ? `<button class="tree-toggle" type="button" data-toggle-json="${escapeAttribute(node.path)}">${expanded ? "▾" : "▸"}</button>`
     : `<span class="tree-toggle"></span>`;
-  const rowClass = node.annotation ? "json-tree-row-annotated" : "";
-  const marker = node.annotation
+  const nodeAnnotations = normalizeAnnotations(node.annotations, node.annotation);
+  const hasAnnotations = nodeAnnotations.length > 0 || (node.annotation_count || 0) > 0;
+  const rowClass = hasAnnotations ? "json-tree-row-annotated" : "";
+  const marker = hasAnnotations
     ? `<span class="annotation-marker"><span class="annotation-dot"></span><span class="annotation-glyph" aria-hidden="true">✦</span></span>`
     : "";
   const key = node.display_key || node.label;
@@ -1307,15 +1329,27 @@ function toggleJsonNode(pane, node, options = {}) {
   updateJsonInspectorPreview(pane.id);
 }
 
-function renderJsonDetail(selected) {
+function renderJsonDetail(selected, pane) {
+  const annotations = normalizeAnnotations(selected.annotations, selected.annotation);
+  const selectedAnnotation = selectedAnnotationEntry(
+    pane,
+    selected.annotation_path,
+    annotations,
+  );
   return `
     <h3>${escapeHtml(selected.label)}</h3>
     <div class="detail-meta">
       <span class="path-pill">${escapeHtml(selected.path)}</span>
       <span class="badge">${escapeHtml(selected.type_name)}</span>
-      ${selected.annotatable ? renderAnnotateButton(selected.annotation_path, selected.annotation) : ""}
+      ${selected.annotatable ? renderAnnotationActions(pane, selected.annotation_path, annotations) : ""}
     </div>
-    ${renderAnnotationPanel(selected.annotation, selected.annotatable)}
+    ${renderAnnotationPanel(
+      annotations,
+      selected.annotatable,
+      selectedAnnotation ? selectedAnnotation.id : null,
+      pane.id,
+      selected.annotation_path,
+    )}
     ${renderDetailPayload(selected.detail)}
   `;
 }
@@ -1345,7 +1379,7 @@ function updateJsonInspectorPreview(paneId = state.activePaneId) {
   const paneScroll = paneList.scrollTop;
   const detailScroll = detail.scrollTop;
   paneList.innerHTML = renderJsonPaneList(pane);
-  detail.innerHTML = renderJsonDetail(selected);
+  detail.innerHTML = renderJsonDetail(selected, pane);
   paneList.scrollTop = paneScroll;
   detail.scrollTop = detailScroll;
 }
@@ -1372,7 +1406,7 @@ function renderTrajectoryPreview(pane) {
       </div>
       <div class="split-resizer" data-resize-split="trajectory" aria-hidden="true"></div>
       <div class="step-detail" data-trajectory-detail>
-        ${renderTrajectoryDetail(pane.preview, selected)}
+        ${renderTrajectoryDetail(pane.preview, selected, pane)}
       </div>
     </div>
   `;
@@ -1400,7 +1434,7 @@ function renderTrajectoryStepList(preview, selected) {
   `).join("");
 }
 
-function renderTrajectoryDetail(preview, selected) {
+function renderTrajectoryDetail(preview, selected, pane) {
   return `
     <h3>${escapeHtml(preview.header)}</h3>
     <div class="trajectory-meta">
@@ -1413,7 +1447,7 @@ function renderTrajectoryDetail(preview, selected) {
     <div class="preview-card">
       <h3>${escapeHtml(selected.title)}</h3>
       <div class="selection-subtitle">${escapeHtml(selected.path)}</div>
-      ${(selected.items || []).map(renderTrajectoryItem).join("")}
+      ${(selected.items || []).map((item) => renderTrajectoryItem(item, pane)).join("")}
     </div>
   `;
 }
@@ -1443,19 +1477,37 @@ function updateTrajectoryPreview(paneId = state.activePaneId) {
   const listScroll = list.scrollTop;
   const detailScroll = detail.scrollTop;
   list.innerHTML = renderTrajectoryStepList(pane.preview, selected);
-  detail.innerHTML = renderTrajectoryDetail(pane.preview, selected);
+  detail.innerHTML = renderTrajectoryDetail(pane.preview, selected, pane);
   list.scrollTop = listScroll;
   detail.scrollTop = detailScroll;
 }
 
-function renderTrajectoryItem(item) {
+function renderTrajectoryItem(item, pane) {
   if (item.kind === "tool") {
+    const annotations = normalizeAnnotations(item.annotations, item.annotation);
+    const inputAnnotations = normalizeAnnotations(item.input.annotations, item.input.annotation);
+    const outputAnnotations = normalizeAnnotations(item.output.annotations, item.output.annotation);
+    const selectedAnnotation = selectedAnnotationEntry(
+      pane,
+      item.annotation_path,
+      annotations,
+    );
+    const selectedInputAnnotation = selectedAnnotationEntry(
+      pane,
+      item.input.annotation_path,
+      inputAnnotations,
+    );
+    const selectedOutputAnnotation = selectedAnnotationEntry(
+      pane,
+      item.output.annotation_path,
+      outputAnnotations,
+    );
     return `
       <article class="item-card">
         <div class="item-header">
           <div>
             <div class="selection-title">
-              ${item.annotation ? `<span class="annotation-dot"></span>` : ""}
+              ${(annotations.length || (item.annotation_count || 0) > 0) ? `<span class="annotation-dot"></span>` : ""}
               <strong>${escapeHtml(item.title)}</strong>
             </div>
             <div class="item-meta">
@@ -1464,24 +1516,42 @@ function renderTrajectoryItem(item) {
               ${item.status ? `<span class="badge">${escapeHtml(item.status)}</span>` : ""}
             </div>
           </div>
-          ${renderAnnotateButton(item.annotation_path, item.annotation)}
+          ${renderAnnotationActions(pane, item.annotation_path, annotations)}
         </div>
-        ${renderAnnotationPanel(item.annotation, true)}
+        ${renderAnnotationPanel(
+          annotations,
+          true,
+          selectedAnnotation ? selectedAnnotation.id : null,
+          pane.id,
+          item.annotation_path,
+        )}
         <div class="subsection-grid">
           <section class="subsection-card">
             <div class="subsection-header">
               <strong>Input</strong>
-              ${renderAnnotateButton(item.input.annotation_path, item.input.annotation)}
+              ${renderAnnotationActions(pane, item.input.annotation_path, inputAnnotations)}
             </div>
-            ${renderAnnotationPanel(item.input.annotation, true)}
+            ${renderAnnotationPanel(
+              inputAnnotations,
+              true,
+              selectedInputAnnotation ? selectedInputAnnotation.id : null,
+              pane.id,
+              item.input.annotation_path,
+            )}
             ${renderRenderValue(item.input.render)}
           </section>
           <section class="subsection-card">
             <div class="subsection-header">
               <strong>Output</strong>
-              ${renderAnnotateButton(item.output.annotation_path, item.output.annotation)}
+              ${renderAnnotationActions(pane, item.output.annotation_path, outputAnnotations)}
             </div>
-            ${renderAnnotationPanel(item.output.annotation, true)}
+            ${renderAnnotationPanel(
+              outputAnnotations,
+              true,
+              selectedOutputAnnotation ? selectedOutputAnnotation.id : null,
+              pane.id,
+              item.output.annotation_path,
+            )}
             ${renderRenderValue(item.output.render)}
           </section>
         </div>
@@ -1489,12 +1559,18 @@ function renderTrajectoryItem(item) {
     `;
   }
 
+  const annotations = normalizeAnnotations(item.annotations, item.annotation);
+  const selectedAnnotation = selectedAnnotationEntry(
+    pane,
+    item.annotation_path,
+    annotations,
+  );
   return `
     <article class="item-card">
       <div class="item-header">
         <div>
           <div class="selection-title">
-            ${item.annotation ? `<span class="annotation-dot"></span>` : ""}
+            ${(annotations.length || (item.annotation_count || 0) > 0) ? `<span class="annotation-dot"></span>` : ""}
             <strong>${escapeHtml(item.title)}</strong>
           </div>
           <div class="item-meta">
@@ -1504,9 +1580,15 @@ function renderTrajectoryItem(item) {
             ${item.excerpt ? `<span class="badge">${escapeHtml(item.excerpt)}</span>` : ""}
           </div>
         </div>
-        ${renderAnnotateButton(item.annotation_path, item.annotation)}
+        ${renderAnnotationActions(pane, item.annotation_path, annotations)}
       </div>
-      ${renderAnnotationPanel(item.annotation, true)}
+      ${renderAnnotationPanel(
+        annotations,
+        true,
+        selectedAnnotation ? selectedAnnotation.id : null,
+        pane.id,
+        item.annotation_path,
+      )}
       ${renderRenderValue(item.render)}
     </article>
   `;
@@ -1564,19 +1646,53 @@ function renderAnnotateButton(path, annotation) {
   return `<button class="title-button annotate-button ${stateClass}" type="button" data-annotate="${escapeAttribute(path)}" data-annotation="${payload}">${label}</button>`;
 }
 
-function renderAnnotationPanel(annotation, annotatable) {
+function renderEditAnnotationButton(path, annotation, annotations) {
+  if (!path || !annotation) {
+    return "";
+  }
+  return `<button class="title-button annotate-button annotate-button-active" type="button" data-annotate="${escapeAttribute(path)}" data-annotation-id="${escapeAttribute(annotation.id)}" data-annotations="${escapeAttribute(JSON.stringify(annotations || []))}">Edit annotation</button>`;
+}
+
+function renderAnnotationActions(pane, path, annotations) {
+  if (!path) {
+    return "";
+  }
+  const selected = selectedAnnotationEntry(pane, path, annotations);
+  if (!annotations || !annotations.length) {
+    return renderAnnotateButton(path, null);
+  }
+  return `<div class="annotation-actions">${renderAnnotateButton(path, null)}${renderEditAnnotationButton(path, selected, annotations)}</div>`;
+}
+
+function renderAnnotationPanel(annotations, annotatable, selectedAnnotationId = null, paneId = "", annotationPath = "") {
   if (!annotatable) {
     return `<div class="annotation-panel"><div class="selection-subtitle">Annotations unavailable for this node.</div></div>`;
   }
-  if (!annotation) {
+  if (!annotations || !annotations.length) {
     return `<div class="annotation-panel"><div class="selection-subtitle">No annotation yet.</div></div>`;
   }
+  const selected = annotations.find((entry) => entry.id === selectedAnnotationId) || annotations[0];
   return `
     <div class="annotation-panel">
-      <div class="annotation-tags">
-        ${annotation.tags.map((tag) => `<span class="annotation-tag">${escapeHtml(tag)}</span>`).join("")}
+      <div class="selection-subtitle">${escapeHtml(`${annotations.length} annotation${annotations.length === 1 ? "" : "s"}`)}</div>
+      <div class="annotation-list">
+        ${annotations.map((annotation) => `
+          <button
+            class="annotation-entry ${annotation.id === selected.id ? "selected" : ""}"
+            type="button"
+            data-select-annotation="${escapeAttribute(annotation.id)}"
+            data-annotation-path="${escapeAttribute(annotationPath || "")}"
+            data-pane-id="${escapeAttribute(paneId || "")}"
+          >
+            <span class="annotation-entry-time">${escapeHtml(formatAnnotationTimestamp(annotation.updated_at))}</span>
+            <span class="annotation-entry-summary">${escapeHtml(annotation.note || "(empty)")}</span>
+          </button>
+        `).join("")}
       </div>
-      <div>${escapeHtml(annotation.note || "(empty)")}</div>
+      <div class="annotation-tags">
+        ${(selected.tags || []).map((tag) => `<span class="annotation-tag">${escapeHtml(tag)}</span>`).join("")}
+      </div>
+      <div>${escapeHtml(selected.note || "(empty)")}</div>
     </div>
   `;
 }
@@ -1736,6 +1852,39 @@ function decodeAnnotation(value) {
   }
 }
 
+function decodeAnnotationList(value) {
+  const decoded = decodeAnnotation(value);
+  return Array.isArray(decoded) ? decoded : [];
+}
+
+function normalizeAnnotations(annotations, annotation) {
+  if (Array.isArray(annotations)) {
+    return annotations;
+  }
+  return annotation ? [annotation] : [];
+}
+
+function selectedAnnotationEntry(pane, annotationPath, annotations) {
+  if (!annotations || !annotations.length) {
+    return null;
+  }
+  if (!pane || !annotationPath) {
+    return annotations[0];
+  }
+  const selectedId = pane.selectedAnnotationIds?.[annotationPath];
+  const selected = annotations.find((entry) => entry.id === selectedId) || annotations[0];
+  pane.selectedAnnotationIds[annotationPath] = selected.id;
+  return selected;
+}
+
+function formatAnnotationTimestamp(value) {
+  if (!value) {
+    return "";
+  }
+  const normalized = String(value).replace("T", " ").replace("Z", "");
+  return normalized.slice(0, 16);
+}
+
 function openModal(payload) {
   state.modal = payload;
   elements.modalFile && (elements.modalFile.textContent = payload.file || "");
@@ -1746,7 +1895,7 @@ function openModal(payload) {
   if (elements.modalNote) {
     elements.modalNote.value = payload.annotation ? payload.annotation.note : "";
   }
-  elements.modalDelete?.classList.toggle("hidden", !payload.annotation);
+  elements.modalDelete?.classList.toggle("hidden", !payload.annotationId);
   elements.modal?.classList.remove("hidden");
   elements.modalTags?.focus();
 }
@@ -1771,6 +1920,7 @@ async function onSaveAnnotation(event) {
     body: JSON.stringify({
       file: state.modal.file,
       path: state.modal.path,
+      ...(state.modal.annotationId ? { annotation_id: state.modal.annotationId } : {}),
       tags,
       note: elements.modalNote?.value || "",
     }),
@@ -1794,6 +1944,7 @@ async function onDeleteAnnotation() {
     body: JSON.stringify({
       file: state.modal.file,
       path: state.modal.path,
+      annotation_id: state.modal.annotationId,
     }),
   });
   const pane = paneById(state.modal.paneId);
