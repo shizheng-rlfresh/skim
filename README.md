@@ -23,7 +23,26 @@ Requires Python 3.12 or newer.
 uv run skim              # open current directory
 uv run skim ~/my/folder  # open a specific folder
 uv run skim-dev          # launch Textual dev mode
+uv run skim-web .        # run the localhost web UI
 ```
+
+## Web UI
+
+The repo also includes a localhost browser UI:
+
+```bash
+uv run skim-web .
+```
+
+The current implementation is Python-first and localhost-only, backed by typed
+preview payloads from `/api/preview`. The browser shell now includes multi-pane
+preview work, an active-pane file target, a command palette, local dark/light
+themes, bundled JetBrains Mono assets, and explicit notebook previews for
+`.ipynb` files.
+
+See the full target design spec here:
+
+- [docs/skim-web-ui-spec.md](./docs/skim-web-ui-spec.md)
 
 ## Keybindings
 

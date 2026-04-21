@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>skim web</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app-shell" id="app-shell">
+  <header class="title-bar">
+    <div class="title-group">
+      <button class="title-button" id="sidebar-toggle" type="button" aria-label="Toggle sidebar">◧</button>
+      <div class="title-copy">
+        <div class="app-title">skim web</div>
+        <div class="title-meta" id="browse-root">Loading…</div>
+      </div>
+    </div>
+    <div class="title-actions">
+      <button class="title-button search-button" id="palette-toggle" type="button">Search ⌘K</button>
+      <button class="title-button" id="split-pane" type="button">Split</button>
+      <button class="title-button" id="theme-toggle" type="button" aria-label="Toggle theme">◐</button>
+    </div>
+  </header>
+
+  <main class="workspace" id="workspace">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <div class="panel-heading">Explorer</div>
+      </div>
+      <div class="tree-root" id="file-tree"></div>
+    </aside>
+
+    <div class="sidebar-resizer" id="sidebar-resizer" role="separator" aria-label="Resize file tree" aria-orientation="vertical"></div>
+
+    <section class="preview-work" id="preview-work">
+      <div class="pane-grid" id="pane-grid"></div>
+    </section>
+  </main>
+
+  <footer class="status-bar">
+    <div class="status-left">
+      <span id="status-pane-count">1 pane</span>
+      <span class="status-separator">·</span>
+      <span id="status-active-path">No file selected</span>
+    </div>
+    <div class="status-right">⌘B sidebar · ⌘K search</div>
+  </footer>
+</div>
+
+<div class="modal-backdrop hidden" id="command-palette">
+  <div class="palette-card" role="dialog" aria-modal="true" aria-labelledby="palette-title">
+    <div class="panel-heading" id="palette-title">Search Files</div>
+    <input class="palette-input" id="palette-input" type="text" placeholder="Type a filename or path">
+    <div class="palette-results" id="palette-results"></div>
+  </div>
+</div>
+
+<div class="modal-backdrop hidden" id="annotation-modal">
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="annotation-title">
+    <div class="modal-header">
+      <div>
+        <div class="panel-heading">Annotation</div>
+        <h2 id="annotation-title">Edit annotation</h2>
+      </div>
+      <button class="title-button" id="modal-close" type="button">Close</button>
+    </div>
+
+    <form class="modal-form" id="annotation-form">
+      <div class="modal-meta">
+        <div class="meta-block">
+          <span class="meta-label">File</span>
+          <span class="meta-value" id="modal-file"></span>
+        </div>
+        <div class="meta-block">
+          <span class="meta-label">Path</span>
+          <span class="meta-value" id="modal-path"></span>
+        </div>
+      </div>
+
+      <label class="field">
+        <span>Tags</span>
+        <input id="annotation-tags" name="tags" placeholder="important, follow-up">
+      </label>
+
+      <label class="field">
+        <span>Note</span>
+        <textarea id="annotation-note" name="note" rows="6" placeholder="Add a local review note"></textarea>
+      </label>
+
+      <div class="modal-actions">
+        <button class="title-button danger hidden" id="annotation-delete" type="button">Delete</button>
+        <div class="action-group">
+          <button class="title-button" id="annotation-cancel" type="button">Cancel</button>
+          <button class="solid-button" type="submit">Save</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="app.js" defer></script>
+</body>
+</html>
