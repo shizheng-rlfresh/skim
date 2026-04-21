@@ -2268,11 +2268,7 @@ def _annotation_panel_widgets(
         return widgets
 
     selected = next(
-        (
-            annotation
-            for annotation in annotations
-            if annotation.id == selected_annotation_id
-        ),
+        (annotation for annotation in annotations if annotation.id == selected_annotation_id),
         annotations[0],
     )
     widgets.extend(
