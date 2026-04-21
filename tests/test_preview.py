@@ -752,6 +752,204 @@ async def test_json_inspector_annotation_panel_expands_for_long_annotation_lists
         assert inspector._annotation_wrap.size.height > 6
 
 
+async def test_json_inspector_enter_switches_into_annotation_selection_mode(tmp_path):
+    """Enter on a node with annotations should switch from tree navigation into annotation mode."""
+    test_file = tmp_path / "plain.json"
+    test_file.write_text(json.dumps({"hello": "world"}))
+    review_file = tmp_path / ".skim" / "review.json"
+    review_file.parent.mkdir()
+    review_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "files": {
+                    "plain.json": {
+                        "annotations": {
+                            "$.hello": [
+                                {
+                                    "id": "older",
+                                    "created_at": "2026-04-20T10:00:00Z",
+                                    "updated_at": "2026-04-20T10:00:00Z",
+                                    "tags": ["evidence"],
+                                    "note": "older note",
+                                },
+                                {
+                                    "id": "newer",
+                                    "created_at": "2026-04-20T11:00:00Z",
+                                    "updated_at": "2026-04-20T11:30:00Z",
+                                    "tags": ["bug"],
+                                    "note": "newer note",
+                                },
+                            ]
+                        }
+                    }
+                },
+            }
+        )
+    )
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        pane.show_file(test_file)
+        await pilot.pause()
+
+        inspector = pane.query_one(JsonInspector)
+        assert inspector.is_tree_mode()
+
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert not inspector.is_tree_mode()
+        footer = _static_content(inspector._footer)
+        assert isinstance(footer, Text)
+        assert "Select" in footer.plain
+        annotation = _annotation_text(inspector)
+        assert "▶ 1." in annotation
+        assert "newer note" in annotation
+
+        await pilot.press("down")
+        await pilot.pause()
+
+        annotation = _annotation_text(inspector)
+        assert "▶ 2." in annotation
+        assert "Note: older note" in annotation
+
+
+async def test_annotation_mode_edits_selected_non_newest_annotation(tmp_path):
+    """Enter from annotation mode should edit the currently selected older annotation."""
+    test_file = tmp_path / "plain.json"
+    test_file.write_text(json.dumps({"hello": "world"}))
+    review_file = tmp_path / ".skim" / "review.json"
+    review_file.parent.mkdir()
+    review_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "files": {
+                    "plain.json": {
+                        "annotations": {
+                            "$.hello": [
+                                {
+                                    "id": "older",
+                                    "created_at": "2026-04-20T10:00:00Z",
+                                    "updated_at": "2026-04-20T10:00:00Z",
+                                    "tags": ["evidence"],
+                                    "note": "older note",
+                                },
+                                {
+                                    "id": "newer",
+                                    "created_at": "2026-04-20T11:00:00Z",
+                                    "updated_at": "2026-04-20T11:30:00Z",
+                                    "tags": ["bug"],
+                                    "note": "newer note",
+                                },
+                            ]
+                        }
+                    }
+                },
+            }
+        )
+    )
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        pane.show_file(test_file)
+        await pilot.pause()
+
+        await pilot.press("enter")
+        await pilot.press("down")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+
+        tags = app.screen.query_one("#annotation-tags", Input)
+        note = app.screen.query_one("#annotation-note", TextArea)
+        assert tags.value == "evidence"
+        assert note.text == "older note"
+
+        note.load_text("older note updated")
+        app.screen.action_save()
+        await pilot.pause()
+
+        payload = json.loads(review_file.read_text())
+        saved = payload["files"]["plain.json"]["annotations"]["$.hello"]
+        older = next(annotation for annotation in saved if annotation["id"] == "older")
+        assert older["note"] == "older note updated"
+        annotation = _annotation_text(pane.query_one(JsonInspector))
+        assert "Note: older note updated" in annotation
+        assert "▶ 1." in annotation
+
+
+async def test_annotation_mode_delete_and_add_keep_selection_stable(tmp_path):
+    """Deleting an older entry and adding a new one should keep selection sensible."""
+    test_file = tmp_path / "plain.json"
+    test_file.write_text(json.dumps({"hello": "world"}))
+    review_file = tmp_path / ".skim" / "review.json"
+    review_file.parent.mkdir()
+    review_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "files": {
+                    "plain.json": {
+                        "annotations": {
+                            "$.hello": [
+                                {
+                                    "id": "older",
+                                    "created_at": "2026-04-20T10:00:00Z",
+                                    "updated_at": "2026-04-20T10:00:00Z",
+                                    "tags": ["evidence"],
+                                    "note": "older note",
+                                },
+                                {
+                                    "id": "newer",
+                                    "created_at": "2026-04-20T11:00:00Z",
+                                    "updated_at": "2026-04-20T11:30:00Z",
+                                    "tags": ["bug"],
+                                    "note": "newer note",
+                                },
+                            ]
+                        }
+                    }
+                },
+            }
+        )
+    )
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        pane.show_file(test_file)
+        await pilot.pause()
+
+        await pilot.press("enter")
+        await pilot.press("down")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        app.screen.action_delete()
+        await pilot.pause()
+
+        annotation = _annotation_text(pane.query_one(JsonInspector))
+        assert "older note" not in annotation
+        assert "▶ 1." in annotation
+        assert "Note: newer note" in annotation
+
+        await pilot.press("a")
+        await pilot.pause()
+        app.screen.query_one("#annotation-tags", Input).value = "followup"
+        app.screen.query_one("#annotation-note", TextArea).load_text("brand new note")
+        app.screen.action_save()
+        await pilot.pause()
+
+        annotation = _annotation_text(pane.query_one(JsonInspector))
+        assert "brand new note" in annotation
+        assert "▶ 1." in annotation
+        assert "Note: brand new note" in annotation
+
+
 def test_trajectory_json_inspector_uses_one_overlay_normalization_pass(tmp_path, monkeypatch):
     """Opening trajectory JSON should normalize overlay data through one shared pass."""
     test_file = tmp_path / "trajectory.json"
@@ -850,6 +1048,8 @@ async def test_annotation_modal_delete_removes_selected_node_annotation(tmp_path
         await pilot.pause()
 
         inspector = pane.query_one(JsonInspector)
+        await pilot.press("enter")
+        await pilot.pause()
         await pilot.press("enter")
         await pilot.pause()
         app.screen.action_delete()

@@ -1570,12 +1570,19 @@ class JsonInspector(Vertical):
             if self.source_path is not None
             else {}
         )
+        self._annotation_mode = False
+        self._selected_annotation_ids: dict[str, str] = {}
         self._current_item: JsonInspectorItem | None = None
         self._tree: DragTree = DragTree("JSON", classes="trajectory-tree")
         self._build_tree()
         first_item = self._tree.root.children[0].data if self._tree.root.children else None
         initial_detail_widgets: list[Widget] = []
-        initial_annotation_widgets: list[Widget] = _annotation_panel_widgets(None, False)
+        initial_annotation_widgets: list[Widget] = _annotation_panel_widgets(
+            (),
+            False,
+            selected_annotation_id=None,
+            annotation_mode=False,
+        )
         if isinstance(first_item, JsonInspectorItem):
             self._current_item = first_item
             initial_detail_widgets = self._detail_widgets_for_item(first_item)
@@ -1622,11 +1629,18 @@ class JsonInspector(Vertical):
     def _show_detail(self, item: JsonInspectorItem) -> None:
         """Replace the detail pane with widgets for the selected tree item."""
         self._current_item = item
-        self._annotation_wrap.remove_children()
-        self._annotation_wrap.mount(*self._annotation_widgets_for_item(item))
+        self._mount_annotation_panel(item)
         self._detail_wrap.remove_children()
         self._detail_wrap.mount(*self._detail_widgets_for_item(item))
         self._detail_wrap.scroll_home(animate=False)
+        if self._annotation_mode and not self._annotations_for_item(item):
+            self.focus_tree_mode()
+
+    def _mount_annotation_panel(self, item: JsonInspectorItem) -> None:
+        """Replace the annotation panel for the selected tree item."""
+        self._annotation_wrap.remove_children()
+        self._annotation_wrap.mount(*self._annotation_widgets_for_item(item))
+        self._annotation_wrap.scroll_home(animate=False)
 
     def scroll_detail(self, delta: int) -> None:
         """Scroll the rendered detail panel."""
@@ -1634,20 +1648,57 @@ class JsonInspector(Vertical):
 
     def is_tree_mode(self) -> bool:
         """Return whether keyboard navigation is driving the left tree."""
-        return True
+        return not self._annotation_mode
 
     def focus_tree_mode(self) -> None:
         """Route keyboard focus to the JSON tree."""
+        self._annotation_mode = False
         self._ensure_tree_cursor()
         if self.is_attached:
             self._tree.focus(scroll_visible=False)
+        if self._current_item is not None:
+            self._mount_annotation_panel(self._current_item)
+        self._update_footer()
 
     def focus_detail_mode(self) -> None:
         """Keep compatibility with callers that expect a detail-focus method."""
-        self.focus_tree_mode()
+        self.focus_annotation_mode()
+
+    def focus_annotation_mode(self) -> None:
+        """Route keyboard navigation to the selected annotation list."""
+        item = self._annotation_item()
+        if item is None or not self._annotations_for_item(item):
+            self.focus_tree_mode()
+            return
+        self._annotation_mode = True
+        self._selected_annotation_for_item(item)
+        self._mount_annotation_panel(item)
+        self._update_footer()
 
     def handle_vertical_key(self, delta: int) -> bool:
         """Handle up/down keys by moving the JSON tree cursor."""
+        if self._annotation_mode:
+            item = self._annotation_item()
+            if item is None:
+                return True
+            annotations = self._annotations_for_item(item)
+            selected = self._selected_annotation_for_item(item)
+            if selected is None or not annotations:
+                return True
+            current_index = next(
+                (
+                    index
+                    for index, annotation in enumerate(annotations)
+                    if annotation.id == selected.id
+                ),
+                0,
+            )
+            next_index = max(0, min(len(annotations) - 1, current_index + (1 if delta > 0 else -1)))
+            path = self._annotation_key(item)
+            if path is not None:
+                self._selected_annotation_ids[path] = annotations[next_index].id
+                self._mount_annotation_panel(item)
+            return True
         self._ensure_tree_cursor()
         if delta < 0:
             self._tree.action_cursor_up()
@@ -1675,7 +1726,7 @@ class JsonInspector(Vertical):
         return False
 
     def handle_enter_key(self) -> bool:
-        """Edit the newest annotation when present, otherwise keep Enter local."""
+        """Enter annotation mode or edit the selected annotation from that mode."""
         item = self._annotation_item()
         if item is None:
             self._ensure_tree_cursor()
@@ -1684,13 +1735,19 @@ class JsonInspector(Vertical):
         if not annotations:
             self._ensure_tree_cursor()
             return True
+        if self.is_tree_mode():
+            self.focus_annotation_mode()
+            return True
         path = self._annotation_key(item)
         if path is None:
+            return True
+        annotation = self._selected_annotation_for_item(item)
+        if annotation is None:
             return True
         self.app.push_screen(
             AnnotationEditor(
                 path,
-                annotations[0],
+                annotation,
                 item,
                 on_submit=self._handle_annotation_result,
             )
@@ -1698,7 +1755,10 @@ class JsonInspector(Vertical):
         return True
 
     def handle_escape_key(self) -> bool:
-        """Consume Escape without switching JSON focus modes."""
+        """Return from annotation selection to the JSON tree when needed."""
+        if self._annotation_mode:
+            self.focus_tree_mode()
+            return True
         return True
 
     def handle_annotation_key(self) -> bool:
@@ -1731,14 +1791,26 @@ class JsonInspector(Vertical):
         text = Text()
         text.append(" JSON ", style="reverse")
         text.append(" ")
-        text.append("↑↓", style="bold")
-        text.append(" Move  ")
-        text.append("←→", style="bold")
-        text.append(" Branch  ")
-        text.append("PgUp/Dn", style="bold")
-        text.append(" Scroll  ")
-        text.append("a", style="bold")
-        text.append(" Annotate")
+        if self._annotation_mode:
+            text.append("↑↓", style="bold")
+            text.append(" Select  ")
+            text.append("Enter", style="bold")
+            text.append(" Edit  ")
+            text.append("Esc", style="bold")
+            text.append(" Back  ")
+            text.append("a", style="bold")
+            text.append(" New annotation")
+        else:
+            text.append("↑↓", style="bold")
+            text.append(" Move  ")
+            text.append("←→", style="bold")
+            text.append(" Branch  ")
+            text.append("Enter", style="bold")
+            text.append(" Annotations  ")
+            text.append("PgUp/Dn", style="bold")
+            text.append(" Scroll  ")
+            text.append("a", style="bold")
+            text.append(" Annotate")
         return text
 
     def _update_footer(self) -> None:
@@ -2007,6 +2079,8 @@ class JsonInspector(Vertical):
         return _annotation_panel_widgets(
             self._annotations_for_item(item),
             self._is_annotatable(item),
+            selected_annotation_id=self._selected_annotation_id_for_item(item),
+            annotation_mode=self._annotation_mode,
         )
 
     def _annotation_item(self) -> JsonInspectorItem | None:
@@ -2035,6 +2109,35 @@ class JsonInspector(Vertical):
             return ()
         return self._file_annotations.get(path, ())
 
+    def _selected_annotation_id_for_item(self, item: JsonInspectorItem) -> str | None:
+        """Return the selected annotation id for one item, defaulting to the newest."""
+        path = self._annotation_key(item)
+        if path is None:
+            return None
+        annotations = self._annotations_for_item(item)
+        if not annotations:
+            self._selected_annotation_ids.pop(path, None)
+            return None
+        selected_id = self._selected_annotation_ids.get(path)
+        if any(annotation.id == selected_id for annotation in annotations):
+            return selected_id
+        self._selected_annotation_ids[path] = annotations[0].id
+        return annotations[0].id
+
+    def _selected_annotation_for_item(self, item: JsonInspectorItem) -> AnnotationRecord | None:
+        """Return the currently selected annotation record for one item."""
+        selected_id = self._selected_annotation_id_for_item(item)
+        if selected_id is None:
+            return None
+        return next(
+            (
+                annotation
+                for annotation in self._annotations_for_item(item)
+                if annotation.id == selected_id
+            ),
+            None,
+        )
+
     def _tree_label_for_item(self, item: JsonInspectorItem) -> Text:
         """Return the rendered tree label for one item, including annotation state."""
         label = _json_tree_label(self.data, item)
@@ -2052,30 +2155,44 @@ class JsonInspector(Vertical):
         path = self._annotation_key(item)
         if path is None:
             return
+        selected_annotation_id: str | None = None
         if result.action == "delete":
             if result.annotation_id is None:
                 return
             self._annotation_store.delete_annotation(self.source_path, path, result.annotation_id)
         elif result.action == "save":
             if result.annotation_id is None:
-                self._annotation_store.add_annotation(
+                saved = self._annotation_store.add_annotation(
                     self.source_path,
                     path,
                     tags=result.tags,
                     note=result.note,
                 )
+                selected_annotation_id = saved.id
             else:
-                self._annotation_store.update_annotation(
+                updated = self._annotation_store.update_annotation(
                     self.source_path,
                     path,
                     result.annotation_id,
                     tags=result.tags,
                     note=result.note,
                 )
+                selected_annotation_id = updated.id if updated is not None else result.annotation_id
         else:
             return
         self._file_annotations = self._annotation_store.annotations_for_file(self.source_path)
+        updated_annotations = self._annotations_for_item(item)
+        if result.action == "delete":
+            selected_annotation_id = updated_annotations[0].id if updated_annotations else None
+        if selected_annotation_id is None:
+            self._selected_annotation_ids.pop(path, None)
+        else:
+            self._selected_annotation_ids[path] = selected_annotation_id
         self._refresh_annotation_labels(path)
+        if updated_annotations:
+            self.focus_annotation_mode()
+        else:
+            self.focus_tree_mode()
         self._show_detail(item)
 
     def _refresh_annotation_labels(self, path: str | None = None) -> None:
@@ -2118,6 +2235,9 @@ def _json_detail_widgets(item: JsonInspectorItem) -> list[Widget]:
 def _annotation_panel_widgets(
     annotations: tuple[AnnotationRecord, ...],
     annotatable: bool,
+    *,
+    selected_annotation_id: str | None,
+    annotation_mode: bool,
 ) -> list[Widget]:
     """Return the separate annotation-status panel for one selected JSON node."""
     widgets: list[Widget] = [
@@ -2147,7 +2267,14 @@ def _annotation_panel_widgets(
         )
         return widgets
 
-    selected = annotations[0]
+    selected = next(
+        (
+            annotation
+            for annotation in annotations
+            if annotation.id == selected_annotation_id
+        ),
+        annotations[0],
+    )
     widgets.extend(
         _metadata_fields(
             [
@@ -2165,6 +2292,9 @@ def _annotation_panel_widgets(
     )
     for index, annotation in enumerate(annotations, start=1):
         summary = Text()
+        marker = "▶ " if annotation.id == selected.id else "  "
+        marker_style = "bold green" if annotation.id == selected.id else "dim"
+        summary.append(marker, style=marker_style)
         summary.append(f"{index}. ", style="bold")
         summary.append(f"{annotation.updated_at[:16].replace('T', ' ')} ", style="dim")
         if annotation.tags:
@@ -2178,7 +2308,12 @@ def _annotation_panel_widgets(
     widgets.append(Static(note, classes="annotation-status-body"))
     widgets.append(
         Static(
-            Text("Press Enter to edit newest or a to add another", style="dim"),
+            Text(
+                "Use ↑↓ to select, Enter to edit, a to add another"
+                if annotation_mode
+                else "Press Enter to browse annotations or a to add another",
+                style="dim",
+            ),
             classes="annotation-status-hint",
         )
     )
