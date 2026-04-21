@@ -11,7 +11,7 @@ requires-python = ">=3.12"
 dependencies = [
     "pygments>=2.20.0",
     "rich>=15.0.0",
-    "textual[syntax]>=8.2.3",
+    "textual[syntax]>=8.2.4",
 ]
 
 
