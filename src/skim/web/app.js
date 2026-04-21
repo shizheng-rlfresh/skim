@@ -1272,13 +1272,12 @@ function renderXlsxPreview(pane) {
   const selected = sheets.find((sheet) => sheet.name === pane.selectedWorkbookSheetName) || sheets[0] || null;
   const tabs = sheets.length
     ? `
-      <div class="workbook-tabs" role="tablist" aria-label="Workbook sheets">
+      <div class="workbook-tabs" aria-label="Workbook sheets">
         ${sheets.map((sheet) => `
           <button
             class="workbook-tab ${sheet.name === selected?.name ? "selected" : ""}"
             type="button"
-            role="tab"
-            aria-selected="${sheet.name === selected?.name ? "true" : "false"}"
+            aria-pressed="${sheet.name === selected?.name ? "true" : "false"}"
             data-pane-id="${escapeAttribute(pane.id)}"
             data-sheet-name="${escapeAttribute(sheet.name)}"
           >${escapeHtml(sheet.name)}</button>

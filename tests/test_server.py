@@ -248,6 +248,17 @@ def test_api_preview_returns_xlsx_payload(tmp_path):
     assert payload["sheets"][1]["empty"] is True
 
 
+def test_api_preview_accepts_quoted_xlsx_sheet_names(tmp_path):
+    """Workbook fixtures should escape quoted sheet names in workbook.xml."""
+    test_file = tmp_path / "quoted.xlsx"
+    write_test_xlsx(test_file, [('He said "hi"', [["apple"]])])
+
+    payload = serialize_preview(test_file, browse_root=tmp_path)
+
+    assert payload["kind"] == "xlsx"
+    assert payload["sheets"][0]["name"] == 'He said "hi"'
+
+
 def test_api_preview_returns_error_for_invalid_xlsx(tmp_path):
     """Unreadable workbooks should surface an explicit error payload."""
     test_file = tmp_path / "broken.xlsx"

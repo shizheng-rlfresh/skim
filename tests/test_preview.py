@@ -27,7 +27,7 @@ from textual.widgets import Collapsible, Input, Markdown, Static, TextArea, Tree
 
 import skim.trajectory as trajectory_module
 from skim import JsonInspector, PreviewPane, SkimApp, render_file
-from skim.preview import CsvPreview, XlsxPreview
+from skim.preview import CsvPreview, XlsxPreview, _xlsx_sheet_preview_data
 from skim.scrolling import FocusableDetailWrap
 from skim.trajectory import AnnotationStore
 
@@ -270,6 +270,48 @@ def test_xlsx_preview_caps_wide_and_long_content(tmp_path):
     clipped_cell = table.columns[0]._cells[1]
     assert clipped_cell.endswith("…")
     assert len(clipped_cell) == 24
+
+
+def test_xlsx_preview_binds_sheet_scan_to_visible_window():
+    """Workbook preview should bound worksheet scans to the preview window."""
+
+    class FakeSheet:
+        title = "Large"
+        max_row = 50_000
+        max_column = 200
+
+        def iter_rows(
+            self,
+            *,
+            min_row,
+            max_row,
+            min_col,
+            max_col,
+            values_only,
+        ):
+            assert min_row == 1
+            assert max_row == 21
+            assert min_col == 1
+            assert max_col == 9
+            assert values_only is True
+            return iter(
+                [
+                    ("alpha", "beta", "gamma"),
+                    ("delta", None, None),
+                ]
+            )
+
+    preview = _xlsx_sheet_preview_data(FakeSheet())
+
+    assert preview.row_count == 50_000
+    assert preview.column_count == 200
+    assert preview.truncated_rows is True
+    assert preview.truncated_columns is True
+    assert preview.columns == ["A", "B", "C", "D", "E", "F", "G", "H", "..."]
+    assert preview.rows == [
+        ["alpha", "beta", "gamma", "", "", "", "", "", ""],
+        ["delta", "", "", "", "", "", "", "", ""],
+    ]
 
 
 def test_invalid_xlsx_shows_error_preview(tmp_path):

@@ -383,21 +383,42 @@ def _load_xlsx_preview(path: Path) -> XlsxPreviewData:
 def _xlsx_sheet_preview_data(sheet: Any) -> XlsxSheetPreviewData:
     """Return display-ready preview data for one worksheet."""
     sampled_rows: list[list[str]] = []
-    non_empty_rows = 0
-    max_columns = 0
+    sampled_non_empty_rows = 0
+    sampled_max_columns = 0
+    declared_row_count = max(int(sheet.max_row or 0), 0)
+    declared_column_count = max(int(sheet.max_column or 0), 0)
+    scan_row_limit = min(declared_row_count, MAX_CSV_ROWS + 1)
+    scan_column_limit = min(declared_column_count, MAX_CSV_COLS + 1)
 
-    for row in sheet.iter_rows(values_only=True):
+    for row in sheet.iter_rows(
+        min_row=1,
+        max_row=scan_row_limit,
+        min_col=1,
+        max_col=scan_column_limit,
+        values_only=True,
+    ):
         values = [_xlsx_cell_text(value) for value in row]
         while values and values[-1] == "":
             values.pop()
         if not values:
             continue
-        non_empty_rows += 1
-        max_columns = max(max_columns, len(values))
+        sampled_non_empty_rows += 1
+        sampled_max_columns = max(sampled_max_columns, len(values))
         if len(sampled_rows) < MAX_CSV_ROWS + 1:
             sampled_rows.append(values)
 
-    if non_empty_rows == 0:
+    row_count = (
+        declared_row_count
+        if declared_row_count > MAX_CSV_ROWS + 1
+        else sampled_non_empty_rows
+    )
+    column_count = (
+        declared_column_count
+        if declared_column_count > MAX_CSV_COLS + 1
+        else sampled_max_columns
+    )
+
+    if row_count == 0 or column_count == 0:
         return XlsxSheetPreviewData(
             name=str(sheet.title),
             columns=[],
@@ -410,17 +431,18 @@ def _xlsx_sheet_preview_data(sheet: Any) -> XlsxSheetPreviewData:
         )
 
     display_header = [
-        _spreadsheet_column_label(index) for index in range(1, min(max_columns, MAX_CSV_COLS) + 1)
+        _spreadsheet_column_label(index)
+        for index in range(1, min(column_count, MAX_CSV_COLS) + 1)
     ]
-    if max_columns > MAX_CSV_COLS:
+    if column_count > MAX_CSV_COLS:
         display_header.append("...")
 
     display_rows: list[list[str]] = []
-    visible_columns = min(max_columns, MAX_CSV_COLS)
+    visible_columns = min(column_count, MAX_CSV_COLS)
     for row in sampled_rows[:MAX_CSV_ROWS]:
-        padded = row + [""] * max(0, max_columns - len(row))
+        padded = row + [""] * max(0, min(scan_column_limit, column_count) - len(row))
         display_row = [_clip_csv_cell(padded[index]) for index in range(visible_columns)]
-        if max_columns > MAX_CSV_COLS:
+        if column_count > MAX_CSV_COLS:
             display_row.append(_clip_csv_cell(" | ".join(padded[MAX_CSV_COLS:])))
         display_rows.append(display_row)
 
@@ -428,10 +450,10 @@ def _xlsx_sheet_preview_data(sheet: Any) -> XlsxSheetPreviewData:
         name=str(sheet.title),
         columns=display_header,
         rows=display_rows,
-        row_count=non_empty_rows,
-        column_count=max_columns,
-        truncated_rows=non_empty_rows > MAX_CSV_ROWS,
-        truncated_columns=max_columns > MAX_CSV_COLS,
+        row_count=row_count,
+        column_count=column_count,
+        truncated_rows=row_count > MAX_CSV_ROWS,
+        truncated_columns=column_count > MAX_CSV_COLS,
         empty=False,
     )
 

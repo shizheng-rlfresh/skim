@@ -221,7 +221,7 @@ def write_test_xlsx(path: Path, sheets: list[tuple[str, list[list[object | None]
     override_entries = []
     sheet_payloads: list[tuple[str, str]] = []
     for index, (sheet_name, rows) in enumerate(sheets, start=1):
-        escaped_name = escape(sheet_name)
+        escaped_name = escape(sheet_name, {'"': "&quot;", "'": "&apos;"})
         sheet_entries.append(
             f'    <sheet name="{escaped_name}" sheetId="{index}" r:id="rId{index}"/>'
         )
