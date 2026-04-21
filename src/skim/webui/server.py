@@ -278,5 +278,7 @@ def main() -> None:
     parser.add_argument("-p", "--port", type=int, default=8008, help="Port (default: 8008)")
     args = parser.parse_args()
     serve(args.path, args.port)
+
+
 if __name__ == "__main__":
     main()
