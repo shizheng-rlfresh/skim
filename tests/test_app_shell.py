@@ -208,6 +208,109 @@ async def test_triage_queue_groups_annotations_by_file(tmp_path):
         assert "result summary" in content
 
 
+async def test_triage_down_moves_selection_exactly_one_item(tmp_path):
+    """One down-arrow press in triage should advance by exactly one annotation."""
+    review_file = tmp_path / ".skim" / "review.json"
+    review_file.parent.mkdir()
+    review_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "files": {
+                    "output.json": {
+                        "annotations": {
+                            "$.task": [
+                                {
+                                    "id": "ann-task",
+                                    "created_at": "2026-04-21T14:10:00Z",
+                                    "updated_at": "2026-04-21T14:15:00Z",
+                                    "tags": ["bug"],
+                                    "note": "task summary",
+                                }
+                            ],
+                            "$.result": [
+                                {
+                                    "id": "ann-result",
+                                    "created_at": "2026-04-21T14:20:00Z",
+                                    "updated_at": "2026-04-21T14:25:00Z",
+                                    "tags": ["followup"],
+                                    "note": "result summary",
+                                }
+                            ],
+                            "$.other": [
+                                {
+                                    "id": "ann-other",
+                                    "created_at": "2026-04-21T14:30:00Z",
+                                    "updated_at": "2026-04-21T14:35:00Z",
+                                    "tags": ["later"],
+                                    "note": "other summary",
+                                }
+                            ],
+                        }
+                    }
+                },
+            }
+        )
+    )
+    (tmp_path / "output.json").write_text(json.dumps({"task": "x", "result": "y", "other": "z"}))
+    app = SkimApp(path=str(tmp_path), triage=True)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        assert app.triage_selected_annotation_id == "ann-other"
+
+        await pilot.press("down")
+        await pilot.pause()
+
+        assert app.triage_selected_annotation_id == "ann-result"
+
+
+async def test_triage_does_not_enter_split_mode(tmp_path):
+    """Split mode should stay disabled while the triage shell is active."""
+    review_file = tmp_path / ".skim" / "review.json"
+    review_file.parent.mkdir()
+    review_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "files": {
+                    "notes.md": {
+                        "annotations": {
+                            "@file": [
+                                {
+                                    "id": "ann-file",
+                                    "created_at": "2026-04-21T14:00:00Z",
+                                    "updated_at": "2026-04-21T14:05:00Z",
+                                    "tags": ["important"],
+                                    "note": "rollout wording",
+                                }
+                            ]
+                        }
+                    }
+                },
+            }
+        )
+    )
+    (tmp_path / "notes.md").write_text("# Notes\n")
+    app = SkimApp(path=str(tmp_path), triage=True)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        await pilot.press("s")
+        await pilot.pause()
+
+        assert not app.split_mode
+        assert app._total_panes() == 1
+
+        await pilot.press("right")
+        await pilot.pause()
+
+        assert not app.split_mode
+        assert app._total_panes() == 1
+
+
 async def test_split_right():
     """Pressing s then right creates a second pane."""
     app = SkimApp(path=".")

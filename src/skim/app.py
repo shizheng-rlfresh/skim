@@ -451,6 +451,7 @@ class SkimApp(App):
     def _show_mode(self, mode: str) -> None:
         """Show either the browse shell or the triage shell."""
         self.app_mode = mode
+        self.split_mode = False
         browser = self.query_one("#browser-shell", Horizontal)
         triage = self.query_one("#triage-shell", Horizontal)
         if mode == "triage":
@@ -1019,16 +1020,6 @@ class SkimApp(App):
                 event.prevent_default()
                 event.stop()
                 return
-            if event.key in {"up", "k"} and not isinstance(self.focused, Input):
-                self._move_triage_selection(-1)
-                event.prevent_default()
-                event.stop()
-                return
-            if event.key in {"down", "j"} and not isinstance(self.focused, Input):
-                self._move_triage_selection(1)
-                event.prevent_default()
-                event.stop()
-                return
             if event.key == "enter":
                 self._open_triage_item()
                 event.prevent_default()
@@ -1163,6 +1154,8 @@ class SkimApp(App):
     def action_enter_split(self) -> None:
         """Enter split mode for the next direction key."""
         if self._modal_is_active():
+            return
+        if self.app_mode == "triage":
             return
         if self._total_panes() >= MAX_ROWS * MAX_COLS:
             self.notify("Maximum 6 panes reached", severity="warning")
