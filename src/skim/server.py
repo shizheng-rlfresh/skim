@@ -1,7 +1,10 @@
-"""Compatibility alias for the localhost web server module."""
+"""Compatibility exports for the localhost web server module."""
 
-import sys
+from .core.review import AnnotationStore
+from .webui.server import SkimHandler, create_server, main, serve, static_dir
 
-from .webui import server as _server
+__all__ = ["AnnotationStore", "SkimHandler", "create_server", "main", "serve", "static_dir"]
 
-sys.modules[__name__] = _server
+
+if __name__ == "__main__":
+    main()

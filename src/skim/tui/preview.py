@@ -23,6 +23,7 @@ from textual.css.query import NoMatches
 from textual.widget import Widget
 from textual.widgets import Collapsible, Markdown, Static
 
+from ..core.previewing import looks_like_notebook as _core_looks_like_notebook
 from ..core.review import FILE_ANNOTATION_KEY, AnnotationRecord, AnnotationStore
 from .scrolling import DragScrollMixin
 from .trajectory import JsonInspector, TrajectoryViewer
@@ -553,11 +554,7 @@ def _raw_csv_section(content: str, *, collapsed: bool = True) -> Collapsible:
 
 def _looks_like_notebook(data: Any) -> bool:
     """Return whether parsed JSON looks like a notebook payload."""
-    return (
-        isinstance(data, dict)
-        and isinstance(data.get("cells"), list)
-        and isinstance(data.get("nbformat"), int)
-    )
+    return _core_looks_like_notebook(data)
 
 
 def _notebook_preview_widgets(notebook: dict[str, Any]) -> list[Widget]:

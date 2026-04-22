@@ -229,7 +229,42 @@ def _spreadsheet_column_label(index: int) -> str:
 
 def looks_like_notebook(data: Any) -> bool:
     """Return whether the parsed JSON looks like a notebook document."""
-    return isinstance(data, dict) and isinstance(data.get("cells"), list)
+    if not isinstance(data, dict):
+        return False
+    if not isinstance(data.get("cells"), list):
+        return False
+    if not isinstance(data.get("nbformat"), int):
+        return False
+    metadata = data.get("metadata")
+    if metadata is not None and not isinstance(metadata, dict):
+        return False
+    return all(_looks_like_notebook_cell(cell) for cell in data["cells"])
+
+
+def _looks_like_notebook_cell(cell: Any) -> bool:
+    """Return whether one notebook cell has the expected JSON shape."""
+    if not isinstance(cell, dict):
+        return False
+    metadata = cell.get("metadata")
+    if metadata is not None and not isinstance(metadata, dict):
+        return False
+    source = cell.get("source")
+    if source is not None and not _looks_like_notebook_text(source):
+        return False
+    attachments = cell.get("attachments")
+    if attachments is not None and not isinstance(attachments, dict):
+        return False
+    outputs = cell.get("outputs")
+    if outputs is not None and not isinstance(outputs, list):
+        return False
+    return True
+
+
+def _looks_like_notebook_text(value: Any) -> bool:
+    """Return whether one notebook text payload uses a supported shape."""
+    return isinstance(value, str) or (
+        isinstance(value, list) and all(isinstance(item, str) for item in value)
+    )
 
 
 def notebook_language(metadata: Any) -> str:
