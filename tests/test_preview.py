@@ -124,6 +124,34 @@ def test_ipynb_renders_code_cells_and_outputs(tmp_path):
     assert "42" in _static_content(widgets[6]).plain
 
 
+def test_ipynb_with_malformed_cell_falls_back_to_syntax_text(tmp_path):
+    """Notebook-shaped JSON with invalid cell metadata should avoid the notebook renderer."""
+    test_file = tmp_path / "broken.ipynb"
+    test_file.write_text(
+        json.dumps(
+            {
+                "cells": [
+                    {
+                        "cell_type": "markdown",
+                        "metadata": "bad",
+                        "source": ["# Title\n"],
+                    }
+                ],
+                "metadata": {"language_info": {"name": "python"}},
+                "nbformat": 4,
+            }
+        )
+    )
+
+    widgets = render_file(test_file)
+
+    assert len(widgets) == 1
+    assert isinstance(widgets[0], Static)
+    syntax = _static_content(widgets[0])
+    assert isinstance(syntax, Syntax)
+    assert '"cells"' in syntax.code
+
+
 def test_render_file_passes_source_context_to_json_inspector(tmp_path):
     """JSON inspectors should know the source file and review root."""
     test_file = tmp_path / "plain.json"

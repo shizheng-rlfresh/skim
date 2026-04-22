@@ -25,9 +25,9 @@ dev = [
 ]
 
 [project.scripts]
-skim = "skim:main"
-skim-dev = "skim:dev"
-skim-web = "skim.server:main"
+skim = "skim.cli:main"
+skim-dev = "skim.cli:dev"
+skim-web = "skim.cli:web"
 
 [tool.ruff]
 line-length = 100
