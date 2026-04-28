@@ -21,7 +21,7 @@ dev = [
     "pytest>=9.0.3",
     "pytest-asyncio>=1.2.0",
     "pytest-textual-snapshot>=1.0.0",
-    "ruff>=0.15.11",
+    "ruff>=0.15.12",
 ]
 
 [project.scripts]
