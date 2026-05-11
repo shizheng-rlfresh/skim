@@ -1,7 +1,35 @@
-"""Compatibility alias for the TUI trajectory module."""
+"""Compatibility exports for the TUI trajectory module."""
 
-import sys
+from .tui.trajectory import (
+    AnnotationEditor,
+    AnnotationEditorResult,
+    AnnotationStore,
+    JsonInspector,
+    JsonInspectorItem,
+    StepTimelineItem,
+    TrajectoryEvent,
+    TrajectoryTreeItem,
+    TrajectoryViewer,
+    extract_trajectory,
+    normalize_events,
+    normalize_step_events,
+    normalize_step_overlay,
+    normalize_step_timeline,
+)
 
-from .tui import trajectory as _trajectory
-
-sys.modules[__name__] = _trajectory
+__all__ = [
+    "AnnotationEditor",
+    "AnnotationEditorResult",
+    "AnnotationStore",
+    "JsonInspector",
+    "JsonInspectorItem",
+    "StepTimelineItem",
+    "TrajectoryEvent",
+    "TrajectoryTreeItem",
+    "TrajectoryViewer",
+    "extract_trajectory",
+    "normalize_events",
+    "normalize_step_events",
+    "normalize_step_overlay",
+    "normalize_step_timeline",
+]

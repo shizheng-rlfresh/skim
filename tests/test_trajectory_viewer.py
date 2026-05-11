@@ -12,6 +12,7 @@ from conftest import (
     _collapsible_by_title,
     _detail_syntax_blocks,
     _detail_text,
+    _node_label,
     _static_content,
     _top_level_collapsible_titles,
     _tree_labels,
@@ -46,12 +47,12 @@ def test_trajectory_tree_groups_step_events():
     step = viewer._tree.root.children[2]
 
     assert _tree_labels(viewer._tree) == ["Metadata", "Final Output", "Step 1"]
-    event_labels = [child.label.plain for child in step.children]
+    event_labels = [_node_label(child) for child in step.children]
     assert event_labels[0].startswith("001 Reasoning")
     assert event_labels[1].startswith("002 Assistant")
     assert event_labels[2].startswith("003 executeBash #")
     tool_node = step.children[2]
-    assert [child.label.plain for child in tool_node.children] == ["Input", "Output"]
+    assert [_node_label(child) for child in tool_node.children] == ["Input", "Output"]
 
 
 async def test_selecting_trajectory_tree_node_updates_detail():
@@ -337,9 +338,9 @@ async def test_unmatched_function_call_result_still_renders_safely():
     viewer = TrajectoryViewer(sample_trajectory(include_call=False))
     step = viewer._tree.root.children[2]
 
-    assert step.children[2].label.plain.startswith("003 executeBash #")
-    assert step.children[2].label.plain.endswith(" Output")
-    assert [child.label.plain for child in step.children[2].children] == ["Input", "Output"]
+    assert _node_label(step.children[2]).startswith("003 executeBash #")
+    assert _node_label(step.children[2]).endswith(" Output")
+    assert [_node_label(child) for child in step.children[2].children] == ["Input", "Output"]
 
 
 async def test_scroll_keys_scroll_trajectory_detail_panel():

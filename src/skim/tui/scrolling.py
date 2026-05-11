@@ -7,7 +7,7 @@ semantics; higher-level modules compose these widgets into the app.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Protocol, cast
 
 from textual import events
 from textual.containers import VerticalScroll
@@ -16,6 +16,27 @@ from textual.widgets import DirectoryTree as TextualDirectoryTree
 from textual.widgets import Tree as TextualTree
 
 DRAG_SCROLL_THRESHOLD = 2
+
+
+class _DragScrollable(Protocol):
+    """Widget protocol expected by the drag-scroll mixin."""
+
+    app: Any
+    max_scroll_y: int
+    scroll_y: int
+
+    def capture_mouse(self) -> None: ...
+
+    def release_mouse(self) -> None: ...
+
+    def scroll_to(
+        self,
+        *,
+        y: float,
+        animate: bool,
+        force: bool,
+        immediate: bool,
+    ) -> None: ...
 
 
 class DragScrollMixin:
@@ -37,7 +58,8 @@ class DragScrollMixin:
 
     def _can_start_drag_scroll(self, event: events.MouseDown) -> bool:
         """Return whether a drag-scroll gesture should start for this event."""
-        if event.button != 1 or self.max_scroll_y <= 0:  # type: ignore[attr-defined]
+        widget = cast(_DragScrollable, self)
+        if event.button != 1 or widget.max_scroll_y <= 0:
             return False
         if self._drag_scroll_requires_self_target() and event.widget is not self:
             return False
@@ -47,21 +69,23 @@ class DragScrollMixin:
         """Capture mouse input so a vertical drag can scroll the widget."""
         if not self._can_start_drag_scroll(event):
             return
-        self._drag_scroll_start_y = self.scroll_y  # type: ignore[attr-defined]
+        widget = cast(_DragScrollable, self)
+        self._drag_scroll_start_y = widget.scroll_y
         self._drag_scroll_origin_y = event.screen_y
         self._drag_scrolling = False
-        self.capture_mouse()  # type: ignore[attr-defined]
+        widget.capture_mouse()
 
     async def on_mouse_move(self, event: events.MouseMove) -> None:
         """Translate vertical mouse movement into vertical scrolling."""
-        if self.app.mouse_captured is not self or self._drag_scroll_origin_y is None:
+        widget = cast(_DragScrollable, self)
+        if widget.app.mouse_captured is not self or self._drag_scroll_origin_y is None:
             return
         delta = event.screen_y - self._drag_scroll_origin_y
         if not self._drag_scrolling and abs(delta) < DRAG_SCROLL_THRESHOLD:
             return
         self._drag_scrolling = True
         start_y = self._drag_scroll_start_y or 0
-        self.scroll_to(  # type: ignore[attr-defined]
+        widget.scroll_to(
             y=start_y - delta,
             animate=False,
             force=True,
@@ -71,8 +95,9 @@ class DragScrollMixin:
 
     async def on_mouse_up(self, event: events.MouseUp) -> None:
         """Release captured drag-scroll state."""
-        if self.app.mouse_captured is self:
-            self.release_mouse()  # type: ignore[attr-defined]
+        widget = cast(_DragScrollable, self)
+        if widget.app.mouse_captured is self:
+            widget.release_mouse()
         if self._drag_scrolling:
             event.stop()
         self._drag_scroll_start_y = None
@@ -81,8 +106,9 @@ class DragScrollMixin:
 
     def on_hide(self) -> None:
         """Release mouse capture if the widget hides mid-drag."""
-        if self.app.mouse_captured is self:
-            self.release_mouse()  # type: ignore[attr-defined]
+        widget = cast(_DragScrollable, self)
+        if widget.app.mouse_captured is self:
+            widget.release_mouse()
         self._drag_scroll_start_y = None
         self._drag_scroll_origin_y = None
         self._drag_scrolling = False

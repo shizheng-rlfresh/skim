@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import runpy
+import sys
 
 import skim
 import skim.app as legacy_app
@@ -54,6 +55,7 @@ def test_python_m_skim_server_executes_web_entrypoint(monkeypatch) -> None:
     called: list[str] = []
 
     monkeypatch.setattr(server, "main", lambda: called.append("called"))
+    monkeypatch.delitem(sys.modules, "skim.server", raising=False)
 
     runpy.run_module("skim.server", run_name="__main__", alter_sys=True)
 

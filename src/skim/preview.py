@@ -1,7 +1,43 @@
-"""Compatibility alias for the TUI preview module."""
+"""Compatibility exports for the TUI preview module."""
 
-import sys
+from .tui.preview import (
+    JSON_EXTENSIONS,
+    MARKDOWN_EXTENSIONS,
+    MAX_CSV_CELL_WIDTH,
+    MAX_CSV_COLS,
+    MAX_CSV_ROWS,
+    MAX_FILE_SIZE,
+    MAX_JSON_FILE_SIZE,
+    NOTEBOOK_EXTENSIONS,
+    SYNTAX_MAP,
+    XLSX_EXTENSIONS,
+    CsvPreview,
+    FileAnnotationStatus,
+    PreviewPane,
+    XlsxPreview,
+    XlsxPreviewData,
+    XlsxSheetPreviewData,
+    _xlsx_sheet_preview_data,
+    render_file,
+)
 
-from .tui import preview as _preview
-
-sys.modules[__name__] = _preview
+__all__ = [
+    "CsvPreview",
+    "FileAnnotationStatus",
+    "JSON_EXTENSIONS",
+    "MARKDOWN_EXTENSIONS",
+    "MAX_CSV_CELL_WIDTH",
+    "MAX_CSV_COLS",
+    "MAX_CSV_ROWS",
+    "MAX_FILE_SIZE",
+    "MAX_JSON_FILE_SIZE",
+    "NOTEBOOK_EXTENSIONS",
+    "PreviewPane",
+    "SYNTAX_MAP",
+    "XLSX_EXTENSIONS",
+    "XlsxPreview",
+    "XlsxPreviewData",
+    "XlsxSheetPreviewData",
+    "_xlsx_sheet_preview_data",
+    "render_file",
+]

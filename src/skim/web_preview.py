@@ -1,7 +1,5 @@
-"""Compatibility alias for the web preview serializer module."""
+"""Compatibility exports for the web preview serializer module."""
 
-import sys
+from .webui.preview_serializer import serialize_preview
 
-from .webui import preview_serializer as _preview_serializer
-
-sys.modules[__name__] = _preview_serializer
+__all__ = ["serialize_preview"]

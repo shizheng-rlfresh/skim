@@ -1,7 +1,5 @@
-"""Compatibility alias for the Textual app shell module."""
+"""Compatibility exports for the Textual app shell module."""
 
-import sys
+from .tui.app import ReviewAnnotationEditor, SkimApp, TriageDetail, TriageQueue, dev, main
 
-from .tui import app as _app
-
-sys.modules[__name__] = _app
+__all__ = ["ReviewAnnotationEditor", "SkimApp", "TriageDetail", "TriageQueue", "dev", "main"]

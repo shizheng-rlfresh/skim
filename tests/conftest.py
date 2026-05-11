@@ -7,6 +7,7 @@ trajectory viewer.
 """
 
 import json
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 from xml.sax.saxutils import escape
@@ -151,7 +152,9 @@ def sample_hermes_transcript() -> dict[str, Any]:
     }
 
 
-def write_test_xlsx(path: Path, sheets: list[tuple[str, list[list[object | None]]]]) -> None:
+def write_test_xlsx(
+    path: Path, sheets: Sequence[tuple[str, Sequence[Sequence[object | None]]]]
+) -> None:
     """Write a minimal `.xlsx` workbook fixture with inline-string cells."""
     workbook_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
@@ -200,7 +203,7 @@ def write_test_xlsx(path: Path, sheets: list[tuple[str, list[list[object | None]
         text = escape(str(value))
         return f'<c r="{cell_ref}" t="inlineStr"><is><t>{text}</t></is></c>'
 
-    def sheet_xml(rows: list[list[object | None]]) -> str:
+    def sheet_xml(rows: Sequence[Sequence[object | None]]) -> str:
         row_xml: list[str] = []
         for row_index, row in enumerate(rows, start=1):
             cells = "".join(
@@ -251,14 +254,20 @@ def write_test_xlsx(path: Path, sheets: list[tuple[str, list[list[object | None]
             archive.writestr(name, payload)
 
 
-def _static_content(widget: Static) -> object:
-    """Return the private Static content object for focused test inspection."""
-    return widget._Static__content
+def _static_content(widget: Any) -> Any:
+    """Return the Static content object for focused test inspection."""
+    return widget.content
 
 
 def _tree_labels(tree: Tree) -> list[str]:
     """Return the root child labels from a Textual tree widget."""
-    return [child.label.plain for child in tree.root.children]
+    return [_node_label(child) for child in tree.root.children]
+
+
+def _node_label(node: Any) -> str:
+    """Return a plain label for a Textual tree node."""
+    label = node.label
+    return label.plain if isinstance(label, Text) else str(label)
 
 
 def _detail_text(viewer: TrajectoryViewer | JsonInspector) -> str:
@@ -306,11 +315,12 @@ def _modal_preview_text(screen) -> str:
 
 def _detail_syntax_blocks(viewer: TrajectoryViewer | JsonInspector) -> list[Syntax]:
     """Return all Syntax renderables mounted inside the detail pane."""
-    return [
-        _static_content(widget)
-        for widget in viewer._detail_wrap.query(Static)
-        if isinstance(_static_content(widget), Syntax)
-    ]
+    blocks: list[Syntax] = []
+    for widget in viewer._detail_wrap.query(Static):
+        content = _static_content(widget)
+        if isinstance(content, Syntax):
+            blocks.append(content)
+    return blocks
 
 
 def _top_level_collapsible_titles(viewer: TrajectoryViewer | JsonInspector) -> list[str]:

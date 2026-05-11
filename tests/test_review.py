@@ -30,8 +30,9 @@ def test_annotation_store_supports_file_level_annotation_round_trip(tmp_path):
     assert len(saved) == 1
     assert saved[0]["id"] == created.id
     assert saved[0]["tags"] == ["important", "follow-up"]
-    assert store.get_annotation(source, FILE_ANNOTATION_KEY) is not None
-    assert store.get_annotation(source, FILE_ANNOTATION_KEY).note == "Review the rollout wording."
+    stored = store.get_annotation(source, FILE_ANNOTATION_KEY)
+    assert stored is not None
+    assert stored.note == "Review the rollout wording."
 
 
 def test_annotation_store_supports_multiple_file_level_annotations_by_id(tmp_path):

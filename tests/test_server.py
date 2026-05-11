@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import json
 import threading
+import urllib.error
 import urllib.parse
 import urllib.request
 from contextlib import contextmanager
 from functools import partial
 from http.server import HTTPServer
 from pathlib import Path
+from typing import Any, cast
 
 from conftest import sample_hermes_transcript, sample_submission, sample_trajectory, write_test_xlsx
 
@@ -35,7 +37,7 @@ def running_server(root: Path):
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        host, port = server.server_address
+        host, port = cast(tuple[str, int], server.server_address)
         yield f"http://{host}:{port}"
     finally:
         server.shutdown()
@@ -48,8 +50,8 @@ def request_json(
     path: str,
     *,
     method: str = "GET",
-    body: dict | None = None,
-) -> tuple[int, dict]:
+    body: dict[str, Any] | None = None,
+) -> tuple[int, dict[str, Any]]:
     """Return the JSON response body for one request."""
     data = json.dumps(body).encode() if body is not None else None
     request = urllib.request.Request(
@@ -61,10 +63,10 @@ def request_json(
     try:
         with urllib.request.urlopen(request) as response:
             status = response.status
-            payload = json.loads(response.read().decode())
+            payload = cast(dict[str, Any], json.loads(response.read().decode()))
     except urllib.error.HTTPError as error:
         status = error.code
-        payload = json.loads(error.read().decode())
+        payload = cast(dict[str, Any], json.loads(error.read().decode()))
     return status, payload
 
 
@@ -73,17 +75,17 @@ def request_json_with_headers(
     path: str,
     *,
     method: str = "GET",
-) -> tuple[int, dict, object]:
+) -> tuple[int, dict[str, Any], Any]:
     """Return the JSON response body plus response headers for one request."""
     request = urllib.request.Request(base_url + path, method=method)
     try:
         with urllib.request.urlopen(request) as response:
             status = response.status
-            payload = json.loads(response.read().decode())
+            payload = cast(dict[str, Any], json.loads(response.read().decode()))
             headers = response.headers
     except urllib.error.HTTPError as error:
         status = error.code
-        payload = json.loads(error.read().decode())
+        payload = cast(dict[str, Any], json.loads(error.read().decode()))
         headers = error.headers
     return status, payload, headers
 
