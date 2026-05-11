@@ -30,6 +30,12 @@ def test_cli_module_exposes_console_entrypoints() -> None:
 
 def test_legacy_python_modules_are_thin_compatibility_shims() -> None:
     """Top-level modules should re-export symbols from the new adapter/core packages."""
+    assert legacy_app is app
+    assert legacy_preview is preview
+    assert legacy_scrolling is scrolling
+    assert legacy_trajectory is trajectory
+    assert legacy_web_preview is preview_serializer
+
     assert legacy_app.SkimApp is app.SkimApp
     assert legacy_preview.PreviewPane is preview.PreviewPane
     assert legacy_trajectory.TrajectoryViewer is trajectory.TrajectoryViewer
@@ -37,6 +43,10 @@ def test_legacy_python_modules_are_thin_compatibility_shims() -> None:
     assert legacy_scrolling.DirectoryTree is scrolling.DirectoryTree
     assert legacy_server.serve is server.serve
     assert legacy_web_preview.serialize_preview is preview_serializer.serialize_preview
+    assert (
+        legacy_web_preview.serialize_json_inspector_preview
+        is preview_serializer.serialize_json_inspector_preview
+    )
 
 
 def test_legacy_review_module_reexports_extension_constants() -> None:

@@ -1,17 +1,19 @@
-"""Compatibility exports for Textual scrolling helpers."""
+"""Compatibility alias for Textual scrolling helpers."""
 
-from .tui.scrolling import (
-    AnnotationStatusWrap,
-    DirectoryTree,
-    DragScrollMixin,
-    DragTree,
-    FocusableDetailWrap,
-)
+from __future__ import annotations
 
-__all__ = [
-    "AnnotationStatusWrap",
-    "DirectoryTree",
-    "DragScrollMixin",
-    "DragTree",
-    "FocusableDetailWrap",
-]
+import sys
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .tui import scrolling as _scrolling
+
+    AnnotationStatusWrap = _scrolling.AnnotationStatusWrap
+    DirectoryTree = _scrolling.DirectoryTree
+    DragScrollMixin = _scrolling.DragScrollMixin
+    DragTree = _scrolling.DragTree
+    FocusableDetailWrap = _scrolling.FocusableDetailWrap
+else:
+    from .tui import scrolling as _scrolling
+
+    sys.modules[__name__] = _scrolling
