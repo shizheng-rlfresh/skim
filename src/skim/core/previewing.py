@@ -60,9 +60,18 @@ TEXT_EXTENSIONS = {
 }
 MAX_FILE_SIZE = 1_000_000
 MAX_JSON_FILE_SIZE = 10_000_000
+MAX_PLAIN_FALLBACK_FILE_SIZE = 25_000_000
 MAX_CSV_ROWS = 20
 MAX_CSV_COLS = 8
 MAX_CSV_CELL_WIDTH = 24
+PLAIN_TEXT_FALLBACK_EXTENSIONS = (
+    MARKDOWN_EXTENSIONS
+    | JSON_EXTENSIONS
+    | NOTEBOOK_EXTENSIONS
+    | CSV_EXTENSIONS
+    | CODE_EXTENSIONS
+    | TEXT_EXTENSIONS
+)
 
 
 @dataclass(frozen=True)
@@ -105,6 +114,11 @@ def preview_kind_for_path(file_path: str) -> str:
     if suffix in TEXT_EXTENSIONS:
         return "text"
     return "other"
+
+
+def supports_plain_text_fallback(suffix: str) -> bool:
+    """Return whether one suffix is safe to show through plain-text fallback."""
+    return suffix.lower() in PLAIN_TEXT_FALLBACK_EXTENSIONS
 
 
 def parse_csv(content: str) -> list[list[str]] | str:

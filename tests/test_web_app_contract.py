@@ -91,6 +91,35 @@ console.log(JSON.stringify({
     assert result == {"hasSyntax": True, "escapedSyntax": False}
 
 
+def test_render_text_preview_shows_large_file_notice():
+    """Plain fallback text previews should surface their degraded-rendering notice."""
+    result = run_app_js(
+        """
+const html = ctx.renderTextPreview({
+  path: "large.json",
+  language: "json",
+  notice: "Plain text preview: rich rendering skipped.",
+  render: { kind: "text", value: "{\\"items\\":[]}" },
+});
+console.log(JSON.stringify({
+  hasNotice: html.includes("Plain text preview"),
+  hasInlineClass: html.includes('class="preview-notice"'),
+  usesFullPaneNoticeClass: html.includes('class="notice"'),
+  hasText: html.includes("&quot;items&quot;"),
+  hasSyntax: html.includes("syntax-block"),
+}));
+"""
+    )
+
+    assert result == {
+        "hasNotice": True,
+        "hasInlineClass": True,
+        "usesFullPaneNoticeClass": False,
+        "hasText": True,
+        "hasSyntax": False,
+    }
+
+
 def test_render_detail_block_supports_syntax_payloads():
     """Structured detail blocks should render syntax HTML fragments directly."""
     result = run_app_js(

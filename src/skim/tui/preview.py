@@ -23,6 +23,12 @@ from textual.css.query import NoMatches
 from textual.widget import Widget
 from textual.widgets import Collapsible, Markdown, Static
 
+from ..core.previewing import (
+    MAX_FILE_SIZE,
+    MAX_JSON_FILE_SIZE,
+    MAX_PLAIN_FALLBACK_FILE_SIZE,
+    supports_plain_text_fallback,
+)
 from ..core.previewing import looks_like_notebook as _core_looks_like_notebook
 from ..core.review import FILE_ANNOTATION_KEY, AnnotationRecord, AnnotationStore
 from .scrolling import DragScrollMixin
@@ -51,8 +57,6 @@ MARKDOWN_EXTENSIONS = {".md", ".markdown", ".mdown"}
 JSON_EXTENSIONS = {".json"}
 NOTEBOOK_EXTENSIONS = {".ipynb"}
 XLSX_EXTENSIONS = {".xlsx"}
-MAX_FILE_SIZE = 1_000_000
-MAX_JSON_FILE_SIZE = 10_000_000
 MAX_CSV_ROWS = 20
 MAX_CSV_COLS = 8
 MAX_CSV_CELL_WIDTH = 24
@@ -245,12 +249,10 @@ def render_file(path: Path, *, browse_root: Path | None = None) -> list[Widget]:
 
     suffix = path.suffix.lower()
     size = path.stat().st_size
-    max_size = (
-        MAX_JSON_FILE_SIZE
-        if suffix in JSON_EXTENSIONS or suffix in NOTEBOOK_EXTENSIONS
-        else MAX_FILE_SIZE
-    )
+    max_size = _rich_preview_limit_for_suffix(suffix)
     if size > max_size:
+        if supports_plain_text_fallback(suffix) and size <= MAX_PLAIN_FALLBACK_FILE_SIZE:
+            return _plain_text_fallback_widgets(path, size=size, rich_limit=max_size)
         return [Static(Text(f"{path.name} is too large ({size:,} bytes)", style="red"))]
 
     if suffix in XLSX_EXTENSIONS:
@@ -292,6 +294,27 @@ def render_file(path: Path, *, browse_root: Path | None = None) -> list[Widget]:
     if lexer:
         return [Static(Syntax(content, lexer, line_numbers=True, word_wrap=True))]
     return [Static(Text(content))]
+
+
+def _rich_preview_limit_for_suffix(suffix: str) -> int:
+    """Return the size cap for rich rendering of one file suffix."""
+    if suffix in JSON_EXTENSIONS or suffix in NOTEBOOK_EXTENSIONS:
+        return MAX_JSON_FILE_SIZE
+    return MAX_FILE_SIZE
+
+
+def _plain_text_fallback_widgets(path: Path, *, size: int, rich_limit: int) -> list[Widget]:
+    """Return a bounded plain-text preview for files too large for rich rendering."""
+    try:
+        content = path.read_text(errors="replace")
+    except Exception as error:
+        return [Static(Text(f"Could not read {path.name}: {error}", style="red"))]
+    notice = Text(
+        "Plain text preview: "
+        f"{path.name} is {size:,} bytes, above the rich preview limit of {rich_limit:,} bytes.",
+        style="yellow",
+    )
+    return [Static(notice), Static(Text(content))]
 
 
 def _xlsx_widgets_for_file(path: Path) -> list[Widget]:

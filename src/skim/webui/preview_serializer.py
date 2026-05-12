@@ -25,10 +25,12 @@ from ..core.previewing import (
     MAX_CSV_ROWS,
     MAX_FILE_SIZE,
     MAX_JSON_FILE_SIZE,
+    MAX_PLAIN_FALLBACK_FILE_SIZE,
     NOTEBOOK_EXTENSIONS,
     SYNTAX_MAP,
     XLSX_EXTENSIONS,
     XlsxSheetPreviewData,
+    supports_plain_text_fallback,
 )
 from ..core.previewing import (
     clip_csv_cell as _clip_csv_cell,
@@ -110,12 +112,22 @@ def serialize_preview(
 
     suffix = resolved.suffix.lower()
     size = resolved.stat().st_size
-    max_size = (
-        MAX_JSON_FILE_SIZE
-        if suffix in JSON_EXTENSIONS or suffix in NOTEBOOK_EXTENSIONS
-        else MAX_FILE_SIZE
-    )
+    max_size = _rich_preview_limit_for_suffix(suffix)
     if size > max_size:
+        if supports_plain_text_fallback(suffix) and size <= MAX_PLAIN_FALLBACK_FILE_SIZE:
+            payload = _plain_text_fallback_payload(
+                resolved,
+                relative_path=relative_path,
+                size=size,
+                rich_limit=max_size,
+            )
+            if payload["kind"] != "error":
+                return _with_file_annotation_payload(
+                    payload,
+                    source_path=resolved,
+                    annotation_store=store,
+                )
+            return payload
         return {
             "kind": "too_large",
             "name": resolved.name,
@@ -214,6 +226,46 @@ def _serialize_xlsx_file(path: Path, *, relative_path: str) -> dict[str, Any]:
             "sheet_names": [sheet.name for sheet in workbook.sheets],
         },
         "sheets": [_xlsx_sheet_payload(sheet) for sheet in workbook.sheets],
+    }
+
+
+def _rich_preview_limit_for_suffix(suffix: str) -> int:
+    """Return the size cap for rich rendering of one file suffix."""
+    if suffix in JSON_EXTENSIONS or suffix in NOTEBOOK_EXTENSIONS:
+        return MAX_JSON_FILE_SIZE
+    return MAX_FILE_SIZE
+
+
+def _plain_text_fallback_payload(
+    path: Path,
+    *,
+    relative_path: str,
+    size: int,
+    rich_limit: int,
+) -> dict[str, Any]:
+    """Return a plain-text payload for files too large for rich rendering."""
+    try:
+        content = path.read_text(errors="replace")
+    except OSError as error:
+        return {
+            "kind": "error",
+            "name": path.name,
+            "path": relative_path,
+            "message": f"Could not read {path.name}: {error}",
+        }
+    notice = (
+        "Plain text preview: "
+        f"{path.name} is {size:,} bytes, above the rich preview limit of {rich_limit:,} bytes."
+    )
+    return {
+        "kind": "text",
+        "name": path.name,
+        "path": relative_path,
+        "language": SYNTAX_MAP.get(path.suffix.lower()),
+        "content": content,
+        "render": {"kind": "text", "value": content},
+        "degraded": True,
+        "notice": notice,
     }
 
 

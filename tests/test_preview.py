@@ -26,6 +26,7 @@ from rich.syntax import Syntax
 from rich.text import Text
 from textual.widgets import Collapsible, Input, Markdown, Static, TextArea, Tree
 
+import skim.preview as preview_module
 import skim.tui.trajectory as trajectory_module
 from skim import JsonInspector, PreviewPane, SkimApp, render_file
 from skim.app import ReviewAnnotationEditor
@@ -374,6 +375,65 @@ def test_invalid_json_falls_back_to_syntax_preview(tmp_path):
     assert len(widgets) == 1
     assert isinstance(widgets[0], Static)
     assert isinstance(_static_content(widgets[0]), Syntax)
+
+
+def test_large_code_file_falls_back_to_plain_text_preview(tmp_path, monkeypatch):
+    """Large source files should stay readable without expensive syntax rendering."""
+    monkeypatch.setattr(preview_module, "MAX_FILE_SIZE", 24)
+    monkeypatch.setattr(preview_module, "MAX_PLAIN_FALLBACK_FILE_SIZE", 256)
+    test_file = tmp_path / "large.py"
+    test_file.write_text("print('hello')\n" * 4)
+
+    widgets = render_file(test_file)
+
+    assert len(widgets) == 2
+    assert "Plain text preview" in _static_content(widgets[0]).plain
+    content = _static_content(widgets[1])
+    assert isinstance(content, Text)
+    assert "print('hello')" in content.plain
+
+
+def test_large_json_file_falls_back_to_plain_text_preview(tmp_path, monkeypatch):
+    """Large JSON files should skip the structural inspector rather than disappearing."""
+    monkeypatch.setattr(preview_module, "MAX_JSON_FILE_SIZE", 24)
+    monkeypatch.setattr(preview_module, "MAX_PLAIN_FALLBACK_FILE_SIZE", 256)
+    test_file = tmp_path / "large.json"
+    test_file.write_text(json.dumps({"items": ["alpha", "beta", "gamma"]}))
+
+    widgets = render_file(test_file)
+
+    assert len(widgets) == 2
+    assert "Plain text preview" in _static_content(widgets[0]).plain
+    content = _static_content(widgets[1])
+    assert isinstance(content, Text)
+    assert '"items"' in content.plain
+    assert not any(isinstance(widget, JsonInspector) for widget in widgets)
+
+
+def test_file_over_plain_fallback_limit_stays_too_large(tmp_path, monkeypatch):
+    """The plain fallback should remain bounded for extremely large files."""
+    monkeypatch.setattr(preview_module, "MAX_FILE_SIZE", 24)
+    monkeypatch.setattr(preview_module, "MAX_PLAIN_FALLBACK_FILE_SIZE", 32)
+    test_file = tmp_path / "huge.py"
+    test_file.write_text("print('hello')\n" * 4)
+
+    widgets = render_file(test_file)
+
+    assert len(widgets) == 1
+    assert "too large" in _static_content(widgets[0]).plain
+
+
+def test_large_unknown_binary_file_stays_too_large(tmp_path, monkeypatch):
+    """Plain fallback should not reinterpret unknown binary artifacts as text."""
+    monkeypatch.setattr(preview_module, "MAX_FILE_SIZE", 24)
+    monkeypatch.setattr(preview_module, "MAX_PLAIN_FALLBACK_FILE_SIZE", 256)
+    test_file = tmp_path / "image.png"
+    test_file.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
+
+    widgets = render_file(test_file)
+
+    assert len(widgets) == 1
+    assert "too large" in _static_content(widgets[0]).plain
 
 
 def test_invalid_ipynb_falls_back_to_syntax_preview(tmp_path):

@@ -8,6 +8,7 @@ from .previewing import (
     MAX_CSV_ROWS,
     MAX_FILE_SIZE,
     MAX_JSON_FILE_SIZE,
+    MAX_PLAIN_FALLBACK_FILE_SIZE,
     NOTEBOOK_EXTENSIONS,
     SYNTAX_MAP,
     XLSX_EXTENSIONS,
@@ -20,6 +21,7 @@ from .previewing import (
     notebook_text,
     parse_csv,
     preview_kind_for_path,
+    supports_plain_text_fallback,
 )
 from .review import AnnotationRecord, AnnotationStore, TriageItem, triage_preview_kind
 from .trajectory_data import extract_trajectory, normalize_events, normalize_step_overlay
@@ -33,6 +35,7 @@ __all__ = [
     "MAX_CSV_ROWS",
     "MAX_FILE_SIZE",
     "MAX_JSON_FILE_SIZE",
+    "MAX_PLAIN_FALLBACK_FILE_SIZE",
     "NOTEBOOK_EXTENSIONS",
     "SKIP_DIRS",
     "SYNTAX_MAP",
@@ -53,5 +56,6 @@ __all__ = [
     "parse_csv",
     "preview_kind_for_path",
     "resolve_browse_path",
+    "supports_plain_text_fallback",
     "triage_preview_kind",
 ]
