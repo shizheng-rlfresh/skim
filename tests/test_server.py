@@ -15,6 +15,7 @@ from typing import Any, cast
 
 from conftest import sample_hermes_transcript, sample_submission, sample_trajectory, write_test_xlsx
 
+import skim.web_preview as web_preview_module
 from skim.preview import MAX_FILE_SIZE
 from skim.review import FILE_ANNOTATION_KEY
 from skim.server import AnnotationStore, SkimHandler
@@ -145,8 +146,9 @@ def test_api_preview_falls_back_to_text_for_invalid_json(tmp_path):
     assert payload["content"] == "{not json"
 
 
-def test_api_preview_returns_too_large_payload_with_success_status(tmp_path):
+def test_api_preview_returns_too_large_payload_with_success_status(tmp_path, monkeypatch):
     """Oversized files should keep their typed preview payload instead of surfacing as errors."""
+    monkeypatch.setattr(web_preview_module, "MAX_PLAIN_FALLBACK_FILE_SIZE", MAX_FILE_SIZE)
     test_file = tmp_path / "big.py"
     test_file.write_text("x" * (MAX_FILE_SIZE + 1))
 
@@ -159,6 +161,55 @@ def test_api_preview_returns_too_large_payload_with_success_status(tmp_path):
     assert status == 200
     assert payload["kind"] == "too_large"
     assert payload["path"] == "big.py"
+
+
+def test_api_preview_large_text_falls_back_to_plain_payload(tmp_path, monkeypatch):
+    """Large text previews should skip syntax HTML while keeping the file readable."""
+    monkeypatch.setattr(web_preview_module, "MAX_FILE_SIZE", 24)
+    monkeypatch.setattr(web_preview_module, "MAX_PLAIN_FALLBACK_FILE_SIZE", 256)
+    test_file = tmp_path / "large.py"
+    test_file.write_text("print('hello')\n" * 4)
+
+    payload = serialize_preview(test_file, browse_root=tmp_path)
+
+    assert payload["kind"] == "text"
+    assert payload["path"] == "large.py"
+    assert payload["degraded"] is True
+    assert "Plain text preview" in payload["notice"]
+    assert payload["render"] == {
+        "kind": "text",
+        "value": "print('hello')\n" * 4,
+    }
+
+
+def test_api_preview_large_json_falls_back_to_plain_payload(tmp_path, monkeypatch):
+    """Large JSON should avoid building a browser JSON tree."""
+    monkeypatch.setattr(web_preview_module, "MAX_JSON_FILE_SIZE", 24)
+    monkeypatch.setattr(web_preview_module, "MAX_PLAIN_FALLBACK_FILE_SIZE", 256)
+    test_file = tmp_path / "large.json"
+    test_file.write_text(json.dumps({"items": ["alpha", "beta", "gamma"]}))
+
+    payload = serialize_preview(test_file, browse_root=tmp_path)
+
+    assert payload["kind"] == "text"
+    assert payload["language"] == "json"
+    assert payload["degraded"] is True
+    assert payload["render"]["kind"] == "text"
+    assert "tree" not in payload
+    assert "html" not in payload["render"]
+
+
+def test_api_preview_over_plain_fallback_limit_stays_too_large(tmp_path, monkeypatch):
+    """The web fallback should remain bounded for extremely large files."""
+    monkeypatch.setattr(web_preview_module, "MAX_FILE_SIZE", 24)
+    monkeypatch.setattr(web_preview_module, "MAX_PLAIN_FALLBACK_FILE_SIZE", 32)
+    test_file = tmp_path / "huge.py"
+    test_file.write_text("print('hello')\n" * 4)
+
+    payload = serialize_preview(test_file, browse_root=tmp_path)
+
+    assert payload["kind"] == "too_large"
+    assert "too large" in payload["message"]
 
 
 def test_api_preview_uses_explicit_notebook_payload(tmp_path):

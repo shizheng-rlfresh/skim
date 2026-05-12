@@ -1657,6 +1657,7 @@ function renderTextPreview(preview) {
         ${ctx.preview.language ? `<span class="badge">${escapeHtml(ctx.preview.language)}</span>` : ""}
       </div>
       ${renderFileAnnotationPanel(ctx.pane, ctx.preview)}
+      ${ctx.preview.notice ? `<div class="notice">${escapeHtml(ctx.preview.notice)}</div>` : ""}
       ${renderRenderValue(ctx.preview.render || { kind: "text", value: ctx.preview.content })}
     </div>
   `;
