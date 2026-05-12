@@ -103,13 +103,21 @@ const html = ctx.renderTextPreview({
 });
 console.log(JSON.stringify({
   hasNotice: html.includes("Plain text preview"),
+  hasInlineClass: html.includes('class="preview-notice"'),
+  usesFullPaneNoticeClass: html.includes('class="notice"'),
   hasText: html.includes("&quot;items&quot;"),
   hasSyntax: html.includes("syntax-block"),
 }));
 """
     )
 
-    assert result == {"hasNotice": True, "hasText": True, "hasSyntax": False}
+    assert result == {
+        "hasNotice": True,
+        "hasInlineClass": True,
+        "usesFullPaneNoticeClass": False,
+        "hasText": True,
+        "hasSyntax": False,
+    }
 
 
 def test_render_detail_block_supports_syntax_payloads():

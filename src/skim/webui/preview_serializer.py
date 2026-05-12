@@ -30,6 +30,7 @@ from ..core.previewing import (
     SYNTAX_MAP,
     XLSX_EXTENSIONS,
     XlsxSheetPreviewData,
+    supports_plain_text_fallback,
 )
 from ..core.previewing import (
     clip_csv_cell as _clip_csv_cell,
@@ -113,7 +114,7 @@ def serialize_preview(
     size = resolved.stat().st_size
     max_size = _rich_preview_limit_for_suffix(suffix)
     if size > max_size:
-        if suffix not in XLSX_EXTENSIONS and size <= MAX_PLAIN_FALLBACK_FILE_SIZE:
+        if supports_plain_text_fallback(suffix) and size <= MAX_PLAIN_FALLBACK_FILE_SIZE:
             payload = _plain_text_fallback_payload(
                 resolved,
                 relative_path=relative_path,

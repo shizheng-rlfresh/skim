@@ -423,6 +423,19 @@ def test_file_over_plain_fallback_limit_stays_too_large(tmp_path, monkeypatch):
     assert "too large" in _static_content(widgets[0]).plain
 
 
+def test_large_unknown_binary_file_stays_too_large(tmp_path, monkeypatch):
+    """Plain fallback should not reinterpret unknown binary artifacts as text."""
+    monkeypatch.setattr(preview_module, "MAX_FILE_SIZE", 24)
+    monkeypatch.setattr(preview_module, "MAX_PLAIN_FALLBACK_FILE_SIZE", 256)
+    test_file = tmp_path / "image.png"
+    test_file.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
+
+    widgets = render_file(test_file)
+
+    assert len(widgets) == 1
+    assert "too large" in _static_content(widgets[0]).plain
+
+
 def test_invalid_ipynb_falls_back_to_syntax_preview(tmp_path):
     """Invalid notebook JSON should still render as syntax-highlighted text."""
     test_file = tmp_path / "broken.ipynb"

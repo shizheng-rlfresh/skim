@@ -21,6 +21,7 @@ from .previewing import (
     notebook_text,
     parse_csv,
     preview_kind_for_path,
+    supports_plain_text_fallback,
 )
 from .review import AnnotationRecord, AnnotationStore, TriageItem, triage_preview_kind
 from .trajectory_data import extract_trajectory, normalize_events, normalize_step_overlay
@@ -55,5 +56,6 @@ __all__ = [
     "parse_csv",
     "preview_kind_for_path",
     "resolve_browse_path",
+    "supports_plain_text_fallback",
     "triage_preview_kind",
 ]

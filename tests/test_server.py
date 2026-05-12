@@ -212,6 +212,20 @@ def test_api_preview_over_plain_fallback_limit_stays_too_large(tmp_path, monkeyp
     assert "too large" in payload["message"]
 
 
+def test_api_preview_large_unknown_binary_file_stays_too_large(tmp_path, monkeypatch):
+    """Unknown binary artifacts should not be returned as degraded text payloads."""
+    monkeypatch.setattr(web_preview_module, "MAX_FILE_SIZE", 24)
+    monkeypatch.setattr(web_preview_module, "MAX_PLAIN_FALLBACK_FILE_SIZE", 256)
+    test_file = tmp_path / "image.png"
+    test_file.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
+
+    payload = serialize_preview(test_file, browse_root=tmp_path)
+
+    assert payload["kind"] == "too_large"
+    assert "content" not in payload
+    assert "render" not in payload
+
+
 def test_api_preview_uses_explicit_notebook_payload(tmp_path):
     """Notebook files should get a dedicated preview kind with flattened cells."""
     test_file = tmp_path / "notebook.ipynb"

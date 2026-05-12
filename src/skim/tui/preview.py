@@ -27,6 +27,7 @@ from ..core.previewing import (
     MAX_FILE_SIZE,
     MAX_JSON_FILE_SIZE,
     MAX_PLAIN_FALLBACK_FILE_SIZE,
+    supports_plain_text_fallback,
 )
 from ..core.previewing import looks_like_notebook as _core_looks_like_notebook
 from ..core.review import FILE_ANNOTATION_KEY, AnnotationRecord, AnnotationStore
@@ -250,7 +251,7 @@ def render_file(path: Path, *, browse_root: Path | None = None) -> list[Widget]:
     size = path.stat().st_size
     max_size = _rich_preview_limit_for_suffix(suffix)
     if size > max_size:
-        if suffix not in XLSX_EXTENSIONS and size <= MAX_PLAIN_FALLBACK_FILE_SIZE:
+        if supports_plain_text_fallback(suffix) and size <= MAX_PLAIN_FALLBACK_FILE_SIZE:
             return _plain_text_fallback_widgets(path, size=size, rich_limit=max_size)
         return [Static(Text(f"{path.name} is too large ({size:,} bytes)", style="red"))]
 
