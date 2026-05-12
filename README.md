@@ -150,9 +150,10 @@ overlay node maps to a raw node and falling back to `raw_path` otherwise.
 
 Rich previews are capped to keep the TUI and web UI responsive: most text-like
 files use a `1MB` rich-preview limit, while JSON and notebook (`.ipynb`) files
-use a `10MB` rich-preview limit. Larger text-like files fall back to plain text,
-without syntax highlighting, markdown rendering, CSV tables, notebook rendering,
-or JSON trees, up to `25MB`.
+use a `10MB` rich-preview limit. Recognized text-like files above those rich
+preview limits fall back to plain text, without syntax highlighting, markdown
+rendering, CSV tables, notebook rendering, or JSON trees, up to `25MB`.
+Unknown or binary files, and any file above `25MB`, still render as too large.
 
 ## License
 
