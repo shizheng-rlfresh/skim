@@ -184,8 +184,9 @@ class PreviewPane(DragScrollMixin, VerticalScroll, can_focus=True):
 
     def on_click(self) -> None:
         """Mark this pane as the active preview when clicked."""
-        if self.id is not None and hasattr(self.app, "set_active_pane"):
-            self.app.set_active_pane(self.id)
+        set_active_pane = getattr(self.app, "set_active_pane", None)
+        if self.id is not None and callable(set_active_pane):
+            set_active_pane(self.id)
 
     def scroll_content(self, delta: int) -> None:
         """Scroll specialized inner content when present, else scroll the pane."""

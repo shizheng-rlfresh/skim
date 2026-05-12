@@ -934,7 +934,7 @@ class SkimApp(App):
             return False
         return super().check_action(action, parameters)
 
-    def action_quit(self) -> None:
+    async def action_quit(self) -> None:
         """Quit the app unless a modal screen is active."""
         if self._modal_is_active():
             return

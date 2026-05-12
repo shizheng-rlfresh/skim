@@ -8,7 +8,7 @@ shell; those stay in the preview router and app modules.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -22,6 +22,7 @@ from textual.screen import ModalScreen
 from textual.widget import Widget
 from textual.widgets import Button, Collapsible, Input, Markdown, Static, TextArea
 from textual.widgets import Tree as TextualTree
+from textual.widgets.tree import TreeNode
 
 from ..core.review import AnnotationRecord, AnnotationStore
 from .scrolling import AnnotationStatusWrap, DragTree, FocusableDetailWrap
@@ -672,7 +673,7 @@ def _normalize_text_wrapper(value: Any) -> Any:
     return {key: _normalize_text_wrapper(item) for key, item in decoded.items()}
 
 
-def _metadata_fields(fields: list[tuple[str, str | None]]) -> list[Widget]:
+def _metadata_fields(fields: Sequence[tuple[str, str | None]]) -> list[Widget]:
     widgets: list[Widget] = []
     for label, value in fields:
         if value in (None, ""):
@@ -1596,7 +1597,7 @@ class JsonInspector(Vertical):
 
     def _add_overlay_children(
         self,
-        parent: TextualTree.Node[JsonInspectorItem],
+        parent: TreeNode[JsonInspectorItem],
         value: Any,
         raw_path: tuple[str | int, ...],
     ) -> None:
@@ -1652,7 +1653,7 @@ class JsonInspector(Vertical):
 
     def _add_trajectory_overlay(
         self,
-        parent: TextualTree.Node[JsonInspectorItem],
+        parent: TreeNode[JsonInspectorItem],
         trajectory: dict[str, Any],
         base_path: tuple[str | int, ...],
     ) -> None:
@@ -1799,7 +1800,7 @@ class JsonInspector(Vertical):
 
     def _add_raw_children(
         self,
-        parent: TextualTree.Node[JsonInspectorItem],
+        parent: TreeNode[JsonInspectorItem],
         value: Any,
         raw_path: tuple[str | int, ...],
     ) -> None:
@@ -2109,8 +2110,8 @@ def _json_tree_label(root_data: Any, item: JsonInspectorItem) -> Text:
 
 
 def _walk_tree_nodes(
-    node: TextualTree.Node[JsonInspectorItem],
-) -> list[TextualTree.Node[JsonInspectorItem]]:
+    node: TreeNode[JsonInspectorItem],
+) -> list[TreeNode[JsonInspectorItem]]:
     """Return the supplied node and all descendants."""
     nodes = [node]
     for child in node.children:

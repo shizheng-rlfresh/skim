@@ -13,6 +13,7 @@ from conftest import (
     _annotation_text,
     _detail_text,
     _modal_preview_text,
+    _node_label,
     _static_content,
     _tree_labels,
     sample_bundle,
@@ -25,12 +26,20 @@ from rich.syntax import Syntax
 from rich.text import Text
 from textual.widgets import Collapsible, Input, Markdown, Static, TextArea, Tree
 
-import skim.trajectory as trajectory_module
+import skim.tui.trajectory as trajectory_module
 from skim import JsonInspector, PreviewPane, SkimApp, render_file
+from skim.app import ReviewAnnotationEditor
 from skim.preview import CsvPreview, XlsxPreview, _xlsx_sheet_preview_data
 from skim.review import FILE_ANNOTATION_KEY
 from skim.scrolling import FocusableDetailWrap
-from skim.trajectory import AnnotationStore
+from skim.trajectory import AnnotationEditor, AnnotationStore
+
+
+def _annotation_screen(app: SkimApp) -> AnnotationEditor | ReviewAnnotationEditor:
+    """Return the active annotation modal with its action methods typed."""
+    screen = app.screen
+    assert isinstance(screen, AnnotationEditor | ReviewAnnotationEditor)
+    return screen
 
 
 def test_generic_json_uses_json_inspector(tmp_path):
@@ -659,7 +668,7 @@ async def test_persisted_annotations_mark_tree_and_detail_on_reload(tmp_path):
     widgets = render_file(test_file, browse_root=tmp_path)
     inspector = widgets[0]
     assert isinstance(inspector, JsonInspector)
-    assert inspector._tree.root.children[0].label.plain.startswith("* ")
+    assert _node_label(inspector._tree.root.children[0]).startswith("* ")
 
     app = SkimApp(path=str(tmp_path))
     async with app.run_test() as pilot:
@@ -1022,7 +1031,7 @@ async def test_annotation_mode_edits_selected_non_newest_annotation(tmp_path):
         assert note.text == "older note"
 
         note.load_text("older note updated")
-        app.screen.action_save()
+        _annotation_screen(app).action_save()
         await pilot.pause()
 
         payload = json.loads(review_file.read_text())
@@ -1081,7 +1090,7 @@ async def test_annotation_mode_delete_and_add_keep_selection_stable(tmp_path):
         await pilot.pause()
         await pilot.press("enter")
         await pilot.pause()
-        app.screen.action_delete()
+        _annotation_screen(app).action_delete()
         await pilot.pause()
 
         annotation = _annotation_text(pane.query_one(JsonInspector))
@@ -1093,7 +1102,7 @@ async def test_annotation_mode_delete_and_add_keep_selection_stable(tmp_path):
         await pilot.pause()
         app.screen.query_one("#annotation-tags", Input).value = "followup"
         app.screen.query_one("#annotation-note", TextArea).load_text("brand new note")
-        app.screen.action_save()
+        _annotation_screen(app).action_save()
         await pilot.pause()
 
         annotation = _annotation_text(pane.query_one(JsonInspector))
@@ -1143,7 +1152,7 @@ async def test_annotation_modal_saves_selected_node_annotation(tmp_path):
         note = app.screen.query_one("#annotation-note", TextArea)
         tags.value = "evidence, bug"
         note.load_text("First concrete failure appears here.")
-        app.screen.action_save()
+        _annotation_screen(app).action_save()
         await pilot.pause()
 
         review_file = tmp_path / ".skim" / "review.json"
@@ -1155,7 +1164,7 @@ async def test_annotation_modal_saves_selected_node_annotation(tmp_path):
         assert saved[0]["id"]
         assert saved[0]["created_at"]
         assert saved[0]["updated_at"]
-        assert inspector._tree.root.children[0].label.plain.startswith("* ")
+        assert _node_label(inspector._tree.root.children[0]).startswith("* ")
         annotation = _annotation_text(inspector)
         detail = _detail_text(inspector)
         assert "1 annotation" in annotation
@@ -1204,12 +1213,12 @@ async def test_annotation_modal_delete_removes_selected_node_annotation(tmp_path
         await pilot.pause()
         await pilot.press("enter")
         await pilot.pause()
-        app.screen.action_delete()
+        _annotation_screen(app).action_delete()
         await pilot.pause()
 
         payload = json.loads(review_file.read_text())
         assert payload["files"]["plain.json"]["annotations"] == {}
-        assert not inspector._tree.root.children[0].label.plain.startswith("* ")
+        assert not _node_label(inspector._tree.root.children[0]).startswith("* ")
         annotation = _annotation_text(inspector)
         detail = _detail_text(inspector)
         assert "No annotation yet" in annotation
@@ -1449,7 +1458,7 @@ async def test_non_json_file_annotation_modal_saves_file_level_annotation(tmp_pa
         note = app.screen.query_one("#annotation-note", TextArea)
         tags.value = "important"
         note.load_text("Review the whole file.")
-        app.screen.action_save()
+        _annotation_screen(app).action_save()
         await pilot.pause()
 
         payload = json.loads((tmp_path / ".skim" / "review.json").read_text())
@@ -1571,7 +1580,7 @@ async def test_non_json_file_annotation_selection_mode_edits_selected_entry(tmp_
         assert note.text == "older file note"
 
         note.load_text("older file note updated")
-        app.screen.action_save()
+        _annotation_screen(app).action_save()
         await pilot.pause()
 
         payload = json.loads(review_file.read_text())
@@ -1629,7 +1638,7 @@ async def test_non_json_file_annotation_add_and_delete_keep_selection_sensible(t
         await pilot.pause()
         await pilot.press("enter")
         await pilot.pause()
-        app.screen.action_delete()
+        _annotation_screen(app).action_delete()
         await pilot.pause()
 
         annotation = "\n".join(str(_static_content(widget)) for widget in pane.query(Static))
@@ -1641,7 +1650,7 @@ async def test_non_json_file_annotation_add_and_delete_keep_selection_sensible(t
         await pilot.pause()
         app.screen.query_one("#annotation-tags", Input).value = "fresh"
         app.screen.query_one("#annotation-note", TextArea).load_text("brand new file note")
-        app.screen.action_save()
+        _annotation_screen(app).action_save()
         await pilot.pause()
 
         annotation = "\n".join(str(_static_content(widget)) for widget in pane.query(Static))
@@ -1725,9 +1734,9 @@ def test_hermes_json_uses_json_inspector_with_transcript_labels(tmp_path):
     conversations_node = next(
         child
         for child in inspector._tree.root.children
-        if child.label.plain.startswith("Conversations ")
+        if _node_label(child).startswith("Conversations ")
     )
-    conversation_labels = [child.label.plain for child in conversations_node.children]
+    conversation_labels = [_node_label(child) for child in conversations_node.children]
     assert conversation_labels[0].startswith("[0] System")
     assert conversation_labels[1].startswith("[1] Human")
 
@@ -1744,8 +1753,10 @@ async def test_output_json_exposes_raw_path_on_selectable_nodes(tmp_path):
     trajectory_node = next(
         child
         for child in inspector._tree.root.children
-        if child.label.plain.startswith("Trajectory ")
+        if _node_label(child).startswith("Trajectory ")
     )
+    assert metadata_node.data is not None
+    assert trajectory_node.data is not None
     assert metadata_node.data.raw_path == ("trajectory", "metadata")
     assert trajectory_node.data.raw_path == ("trajectory",)
 
@@ -1772,6 +1783,7 @@ def test_text_formats_use_expected_syntax_preview(tmp_path, filename, lexer, con
     assert isinstance(widgets[0], Static)
     content = _static_content(widgets[0])
     assert isinstance(content, Syntax)
+    assert content.lexer is not None
     assert content.lexer.name.lower() == lexer
 
 
@@ -1819,6 +1831,7 @@ def test_synthetic_readme_formats_route_to_expected_syntax_preview(
     assert isinstance(widgets[0], Static)
     renderable = _static_content(widgets[0])
     assert isinstance(renderable, Syntax)
+    assert renderable.lexer is not None
     assert renderable.lexer.name.lower() == lexer
 
 

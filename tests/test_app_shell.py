@@ -11,6 +11,7 @@ from conftest import _static_content
 from textual.widgets import Static
 
 from skim import JsonInspector, PreviewPane, SkimApp
+from skim.scrolling import DirectoryTree
 
 
 async def test_app_launches():
@@ -521,7 +522,7 @@ async def test_f_enters_file_tree_mode(tmp_path):
     async with app.run_test() as pilot:
         await pilot.pause()
         pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
-        tree = app.query_one("DirectoryTree")
+        tree = app.query_one(DirectoryTree)
 
         assert app.focused is pane
         assert not app.file_tree_mode
@@ -541,7 +542,7 @@ async def test_f_toggles_back_to_active_pane(tmp_path):
     async with app.run_test() as pilot:
         await pilot.pause()
         pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
-        tree = app.query_one("DirectoryTree")
+        tree = app.query_one(DirectoryTree)
 
         await pilot.press("f")
         await pilot.pause()
@@ -563,7 +564,7 @@ async def test_file_tree_mode_up_down_moves_tree_cursor(tmp_path):
 
     async with app.run_test() as pilot:
         await pilot.pause()
-        tree = app.query_one("DirectoryTree")
+        tree = app.query_one(DirectoryTree)
 
         await pilot.press("f")
         await pilot.pause()
@@ -686,7 +687,7 @@ async def test_file_tree_mode_right_expands_directory(tmp_path):
 
     async with app.run_test() as pilot:
         await pilot.pause()
-        tree = app.query_one("DirectoryTree")
+        tree = app.query_one(DirectoryTree)
         folder_node = tree.root.children[0]
 
         await pilot.press("f")
@@ -712,7 +713,7 @@ async def test_file_tree_mode_left_collapses_directory_then_moves_to_parent(tmp_
 
     async with app.run_test() as pilot:
         await pilot.pause()
-        tree = app.query_one("DirectoryTree")
+        tree = app.query_one(DirectoryTree)
         folder_node = tree.root.children[0]
 
         await pilot.press("f")
@@ -745,7 +746,7 @@ async def test_file_tree_mode_right_on_file_opens_it_and_returns_to_pane(tmp_pat
     async with app.run_test() as pilot:
         await pilot.pause()
         pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
-        tree = app.query_one("DirectoryTree")
+        tree = app.query_one(DirectoryTree)
         file_node = tree.root.children[0]
 
         await pilot.press("f")
@@ -771,7 +772,7 @@ async def test_down_outside_file_tree_mode_still_scrolls_preview_pane(tmp_path):
     async with app.run_test() as pilot:
         await pilot.pause()
         pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
-        tree = app.query_one("DirectoryTree")
+        tree = app.query_one(DirectoryTree)
         pane.show_file(test_file)
         await pilot.pause()
 
@@ -792,7 +793,7 @@ async def test_shift_down_still_moves_file_tree_cursor(tmp_path):
 
     async with app.run_test() as pilot:
         await pilot.pause()
-        tree = app.query_one("DirectoryTree")
+        tree = app.query_one(DirectoryTree)
         before = tree.cursor_line
 
         await pilot.press("shift+down")
@@ -890,7 +891,7 @@ async def test_mouse_drag_scrolls_directory_tree(tmp_path):
 
     async with app.run_test() as pilot:
         await pilot.pause()
-        tree = app.query_one("DirectoryTree")
+        tree = app.query_one(DirectoryTree)
         before = tree.scroll_y
 
         await pilot.mouse_down(tree, offset=(5, 10))
