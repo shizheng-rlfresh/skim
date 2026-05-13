@@ -257,6 +257,7 @@ function renderWorkspace() {
   applySidebarWidth();
   elements.paneGrid.innerHTML = renderPaneGridMarkup(state.panes);
   applyPaneGridLayout();
+  installRenderedHtmlPreviewGuards(elements.paneGrid);
 }
 
 function renderPaneShell(pane) {
@@ -1714,8 +1715,9 @@ function renderHtmlDocumentPreview(content) {
       <iframe
         class="html-rendered-frame"
         title="Rendered HTML preview"
-        sandbox
+        sandbox="allow-same-origin"
         referrerpolicy="no-referrer"
+        data-rendered-html-preview="true"
         srcdoc="${escapeAttribute(renderHtmlPreviewDocument(content || ""))}"
       ></iframe>
     </div>
@@ -1728,7 +1730,7 @@ function renderHtmlPreviewDocument(content) {
     "script-src 'none'",
     "connect-src 'none'",
     "form-action 'none'",
-    "base-uri 'none'",
+    "base-uri about:",
     "object-src 'none'",
     "frame-src 'none'",
     "img-src data: blob:",
@@ -1742,7 +1744,7 @@ function renderHtmlPreviewDocument(content) {
 <head>
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="${csp}">
-<base href="about:blank">
+<base href="about:srcdoc">
 <style>
   html, body {
     margin: 0;
@@ -1756,6 +1758,63 @@ function renderHtmlPreviewDocument(content) {
 ${content}
 </body>
 </html>`;
+}
+
+function installRenderedHtmlPreviewGuards(root = document) {
+  const frames = root?.querySelectorAll?.("[data-rendered-html-preview]") || [];
+  for (const frame of frames) {
+    if (frame.dataset.linkGuardInstalled === "true") {
+      continue;
+    }
+    frame.dataset.linkGuardInstalled = "true";
+    frame.addEventListener("load", () => installRenderedHtmlPreviewGuard(frame));
+    installRenderedHtmlPreviewGuard(frame);
+  }
+}
+
+function installRenderedHtmlPreviewGuard(frame) {
+  let frameDocument;
+  try {
+    frameDocument = frame.contentDocument;
+  } catch {
+    return;
+  }
+  if (!frameDocument?.addEventListener || frameDocument.__skimRenderedHtmlLinkGuard) {
+    return;
+  }
+  frameDocument.__skimRenderedHtmlLinkGuard = true;
+  frameDocument.addEventListener(
+    "click",
+    (event) => handleRenderedHtmlPreviewDocumentClick(event, frameDocument),
+    true,
+  );
+}
+
+function handleRenderedHtmlPreviewDocumentClick(event, frameDocument) {
+  const link = event.target?.closest?.("a[href]");
+  if (!link) {
+    return false;
+  }
+  event.preventDefault();
+  const href = link.getAttribute("href") || "";
+  if (!href.startsWith("#") || href === "#") {
+    return true;
+  }
+  const targetName = decodeUrlFragment(href.slice(1));
+  const target =
+    frameDocument.getElementById?.(targetName) ||
+    frameDocument.getElementsByName?.(targetName)?.[0] ||
+    null;
+  target?.scrollIntoView?.({ block: "start" });
+  return true;
+}
+
+function decodeUrlFragment(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 function renderMarkdownPreview(preview) {
@@ -2980,3 +3039,4 @@ globalThis.canResizePaneLayout = canResizePaneLayout;
 globalThis.canResizeSplitViews = canResizeSplitViews;
 globalThis.onWorkspaceClick = onWorkspaceClick;
 globalThis.groupedTriageItems = groupedTriageItems;
+globalThis.handleRenderedHtmlPreviewDocumentClick = handleRenderedHtmlPreviewDocumentClick;

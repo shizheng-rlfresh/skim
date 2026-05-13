@@ -181,6 +181,12 @@ console.log(JSON.stringify({
   hasCsp: html.includes('Content-Security-Policy'),
   blocksScripts: html.includes("script-src &#39;none&#39;"),
   blocksForms: html.includes("form-action &#39;none&#39;"),
+  allowsSrcdocBase: html.includes("base-uri about:"),
+  blocksBaseNone: html.includes("base-uri &#39;none&#39;"),
+  hasSrcdocBase: html.includes("&lt;base href=&quot;about:srcdoc&quot;&gt;"),
+  hasSameOriginSandbox: html.includes('sandbox="allow-same-origin"'),
+  allowsScriptsSandbox: html.includes("allow-scripts"),
+  marksRenderedFrame: html.includes('data-rendered-html-preview="true"'),
   blocksRemoteResources: html.includes("img-src data: blob:"),
   hidesSyntax: !html.includes("syntax-block"),
 }));
@@ -195,8 +201,84 @@ console.log(JSON.stringify({
         "hasCsp": True,
         "blocksScripts": True,
         "blocksForms": True,
+        "allowsSrcdocBase": True,
+        "blocksBaseNone": False,
+        "hasSrcdocBase": True,
+        "hasSameOriginSandbox": True,
+        "allowsScriptsSandbox": False,
+        "marksRenderedFrame": True,
         "blocksRemoteResources": True,
         "hidesSyntax": True,
+    }
+
+
+def test_rendered_html_link_guard_scrolls_fragment_targets():
+    """Rendered HTML fragment links should scroll inside the iframe document."""
+    result = run_app_js(
+        """
+let prevented = 0;
+let scrolled = 0;
+const target = { scrollIntoView(options) { scrolled += options.block === "start" ? 1 : 10; } };
+const doc = {
+  getElementById(id) { return id === "step-1" ? target : null; },
+  getElementsByName() { return []; },
+};
+const link = {
+  getAttribute(name) { return name === "href" ? "#step-1" : null; },
+};
+const event = {
+  target: { closest(selector) { return selector === "a[href]" ? link : null; } },
+  preventDefault() { prevented += 1; },
+};
+const handled = ctx.handleRenderedHtmlPreviewDocumentClick(event, doc);
+console.log(JSON.stringify({ handled, prevented, scrolled }));
+"""
+    )
+
+    assert result == {"handled": True, "prevented": 1, "scrolled": 1}
+
+
+def test_rendered_html_link_guard_blocks_non_fragment_links():
+    """Rendered HTML links should not navigate to external or relative targets."""
+    result = run_app_js(
+        """
+let prevented = 0;
+let scrolled = 0;
+const doc = {
+  getElementById() { return { scrollIntoView() { scrolled += 1; } }; },
+  getElementsByName() { return []; },
+};
+function run(href) {
+  const link = {
+    getAttribute(name) { return name === "href" ? href : null; },
+  };
+  return ctx.handleRenderedHtmlPreviewDocumentClick({
+    target: { closest(selector) { return selector === "a[href]" ? link : null; } },
+    preventDefault() { prevented += 1; },
+  }, doc);
+}
+const externalHandled = run("https://example.com/");
+const relativeHandled = run("local/page.html");
+const nonLinkHandled = ctx.handleRenderedHtmlPreviewDocumentClick({
+  target: { closest() { return null; } },
+  preventDefault() { prevented += 100; },
+}, doc);
+console.log(JSON.stringify({
+  externalHandled,
+  relativeHandled,
+  nonLinkHandled,
+  prevented,
+  scrolled,
+}));
+"""
+    )
+
+    assert result == {
+        "externalHandled": True,
+        "relativeHandled": True,
+        "nonLinkHandled": False,
+        "prevented": 2,
+        "scrolled": 0,
     }
 
 
