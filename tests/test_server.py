@@ -113,6 +113,35 @@ def test_api_preview_returns_text_payload_for_plain_file(tmp_path):
     assert "tok-nb" in payload["render"]["html"] or "tok-n" in payload["render"]["html"]
 
 
+def test_api_preview_marks_html_as_renderable_without_changing_source_payload(tmp_path):
+    """HTML previews should keep source rendering while advertising rendered mode."""
+    test_file = tmp_path / "example.html"
+    test_file.write_text("<!doctype html><html><body><h1>Hi</h1></body></html>\n")
+
+    payload = serialize_preview(test_file, browse_root=tmp_path)
+
+    assert payload["kind"] == "text"
+    assert payload["path"] == "example.html"
+    assert payload["language"] == "html"
+    assert payload["content"].startswith("<!doctype html>")
+    assert payload["render"]["kind"] == "syntax"
+    assert payload["render"]["language"] == "html"
+    assert payload["render"]["line_numbers"] is True
+    assert payload["html_renderable"] is True
+
+
+def test_api_preview_does_not_mark_non_html_text_as_renderable(tmp_path):
+    """Only HTML files should advertise the rendered HTML option."""
+    test_file = tmp_path / "example.css"
+    test_file.write_text("body { color: red; }\n")
+
+    payload = serialize_preview(test_file, browse_root=tmp_path)
+
+    assert payload["kind"] == "text"
+    assert payload["language"] == "css"
+    assert "html_renderable" not in payload
+
+
 def test_api_preview_omits_wildcard_cors_headers(tmp_path):
     """Local API responses should not be exposed cross-origin to arbitrary websites."""
     test_file = tmp_path / "example.py"
@@ -180,6 +209,29 @@ def test_api_preview_large_text_falls_back_to_plain_payload(tmp_path, monkeypatc
         "kind": "text",
         "value": "print('hello')\n" * 4,
     }
+
+
+def test_api_preview_large_html_fallback_still_allows_rendered_mode(tmp_path, monkeypatch):
+    """Large readable HTML should skip syntax source but keep rendered HTML available."""
+    monkeypatch.setattr(web_preview_module, "MAX_FILE_SIZE", 24)
+    monkeypatch.setattr(web_preview_module, "MAX_PLAIN_FALLBACK_FILE_SIZE", 512)
+    content = "<!doctype html><html><body><h1>Hello</h1></body></html>\n" * 2
+    test_file = tmp_path / "large.html"
+    test_file.write_text(content)
+
+    payload = serialize_preview(test_file, browse_root=tmp_path)
+
+    assert payload["kind"] == "text"
+    assert payload["path"] == "large.html"
+    assert payload["language"] == "html"
+    assert payload["degraded"] is True
+    assert payload["notice"] == (
+        "Source preview: syntax highlighting skipped because large.html is 112 bytes, "
+        "above the rich source preview limit of 24 bytes."
+    )
+    assert payload["html_renderable"] is True
+    assert payload["render"] == {"kind": "text", "value": content}
+    assert "html" not in payload["render"]
 
 
 def test_api_preview_large_json_falls_back_to_plain_payload(tmp_path, monkeypatch):
@@ -767,6 +819,19 @@ def test_stylesheet_increases_preview_readability_defaults(tmp_path):
     assert ".detail-panel,\n.step-detail" in css or ".detail-panel,\r\n.step-detail" in css
     assert ".tree-row" in css
     assert "padding: 9px 12px;" in css
+
+
+def test_stylesheet_gives_rendered_html_a_viewport_sized_frame(tmp_path):
+    """Rendered HTML should use a substantial viewport-aware document frame."""
+    with running_server(tmp_path) as base_url:
+        request = urllib.request.Request(base_url + "/styles.css")
+        with urllib.request.urlopen(request) as response:
+            css = response.read().decode()
+
+    assert ".html-rendered-preview" in css
+    assert "height: clamp(640px, calc(100vh - 260px), 1200px);" in css
+    assert ".html-rendered-frame" in css
+    assert "height: 100%;" in css
 
 
 def test_stylesheet_defines_file_and_json_color_tokens(tmp_path):

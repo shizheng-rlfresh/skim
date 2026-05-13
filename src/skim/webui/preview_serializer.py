@@ -120,6 +120,7 @@ def serialize_preview(
                 relative_path=relative_path,
                 size=size,
                 rich_limit=max_size,
+                html_renderable=suffix == ".html",
             )
             if payload["kind"] != "error":
                 return _with_file_annotation_payload(
@@ -198,6 +199,7 @@ def serialize_preview(
             relative_path,
             content,
             language=SYNTAX_MAP.get(suffix),
+            html_renderable=suffix == ".html",
         ),
         source_path=resolved,
         annotation_store=store,
@@ -242,6 +244,7 @@ def _plain_text_fallback_payload(
     relative_path: str,
     size: int,
     rich_limit: int,
+    html_renderable: bool = False,
 ) -> dict[str, Any]:
     """Return a plain-text payload for files too large for rich rendering."""
     try:
@@ -253,11 +256,13 @@ def _plain_text_fallback_payload(
             "path": relative_path,
             "message": f"Could not read {path.name}: {error}",
         }
-    notice = (
-        "Plain text preview: "
-        f"{path.name} is {size:,} bytes, above the rich preview limit of {rich_limit:,} bytes."
+    notice = _plain_text_fallback_notice(
+        path.name,
+        size=size,
+        rich_limit=rich_limit,
+        html_renderable=html_renderable,
     )
-    return {
+    payload = {
         "kind": "text",
         "name": path.name,
         "path": relative_path,
@@ -267,6 +272,29 @@ def _plain_text_fallback_payload(
         "degraded": True,
         "notice": notice,
     }
+    if html_renderable:
+        payload["html_renderable"] = True
+    return payload
+
+
+def _plain_text_fallback_notice(
+    name: str,
+    *,
+    size: int,
+    rich_limit: int,
+    html_renderable: bool,
+) -> str:
+    """Return the user-facing notice for a degraded text preview."""
+    if html_renderable:
+        return (
+            "Source preview: syntax highlighting skipped because "
+            f"{name} is {size:,} bytes, above the rich source preview limit of "
+            f"{rich_limit:,} bytes."
+        )
+    return (
+        "Plain text preview: "
+        f"{name} is {size:,} bytes, above the rich preview limit of {rich_limit:,} bytes."
+    )
 
 
 def _serialize_json_file(
@@ -949,8 +977,9 @@ def _text_payload(
     content: str,
     *,
     language: str | None,
+    html_renderable: bool = False,
 ) -> dict[str, Any]:
-    return {
+    payload = {
         "kind": "text",
         "name": name,
         "path": relative_path,
@@ -958,6 +987,9 @@ def _text_payload(
         "content": content,
         "render": _syntax_payload(content, language=language, line_numbers=True),
     }
+    if html_renderable:
+        payload["html_renderable"] = True
+    return payload
 
 
 def _with_file_annotation_payload(

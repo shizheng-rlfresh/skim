@@ -120,6 +120,242 @@ console.log(JSON.stringify({
     }
 
 
+def test_render_html_preview_defaults_to_source_with_toggle():
+    """Renderable HTML previews should keep source mode as the default."""
+    result = run_app_js(
+        """
+const pane = ctx.createPaneState("pane-1");
+pane.preview = {
+  kind: "text",
+  path: "example.html",
+  language: "html",
+  content: "<!doctype html><h1>Hello</h1>",
+  html_renderable: true,
+  render: {
+    kind: "syntax",
+    html: '<div class="syntax-block"><span class="tok-nt">h1</span></div>',
+    value: "<!doctype html><h1>Hello</h1>",
+  },
+};
+const html = ctx.renderTextPreview(pane);
+console.log(JSON.stringify({
+  hasToggle: html.includes('data-html-preview-mode="source"') &&
+    html.includes('data-html-preview-mode="rendered"'),
+  sourcePressed: html.includes('data-html-preview-mode="source"') &&
+    html.includes('aria-pressed="true"'),
+  hasSyntax: html.includes("syntax-block"),
+  hasFrame: html.includes("<iframe"),
+}));
+"""
+    )
+
+    assert result == {
+        "hasToggle": True,
+        "sourcePressed": True,
+        "hasSyntax": True,
+        "hasFrame": False,
+    }
+
+
+def test_render_html_preview_rendered_mode_uses_sandboxed_srcdoc_iframe():
+    """Rendered HTML mode should isolate document content in a sandboxed iframe."""
+    result = run_app_js(
+        """
+const pane = ctx.createPaneState("pane-1");
+pane.htmlPreviewMode = "rendered";
+pane.preview = {
+  kind: "text",
+  path: "example.html",
+  language: "html",
+  content: '<h1>Hello</h1><script>globalThis.bad = true</script><form action="/x"></form>',
+  html_renderable: true,
+  render: { kind: "syntax", html: '<div class="syntax-block"></div>', value: "" },
+};
+const html = ctx.renderTextPreview(pane);
+console.log(JSON.stringify({
+  renderedPressed: html.includes('data-html-preview-mode="rendered"') &&
+    html.includes('aria-pressed="true"'),
+  hasFrame: html.includes('<iframe'),
+  hasSandbox: html.includes(' sandbox'),
+  hasSrcdoc: html.includes('srcdoc='),
+  hasCsp: html.includes('Content-Security-Policy'),
+  blocksScripts: html.includes("script-src &#39;none&#39;"),
+  blocksForms: html.includes("form-action &#39;none&#39;"),
+  allowsSrcdocBase: html.includes("base-uri about:"),
+  blocksBaseNone: html.includes("base-uri &#39;none&#39;"),
+  hasSrcdocBase: html.includes("&lt;base href=&quot;about:srcdoc&quot;&gt;"),
+  hasSameOriginSandbox: html.includes('sandbox="allow-same-origin"'),
+  allowsScriptsSandbox: html.includes("allow-scripts"),
+  marksRenderedFrame: html.includes('data-rendered-html-preview="true"'),
+  blocksRemoteResources: html.includes("img-src data: blob:"),
+  hidesSyntax: !html.includes("syntax-block"),
+}));
+"""
+    )
+
+    assert result == {
+        "renderedPressed": True,
+        "hasFrame": True,
+        "hasSandbox": True,
+        "hasSrcdoc": True,
+        "hasCsp": True,
+        "blocksScripts": True,
+        "blocksForms": True,
+        "allowsSrcdocBase": True,
+        "blocksBaseNone": False,
+        "hasSrcdocBase": True,
+        "hasSameOriginSandbox": True,
+        "allowsScriptsSandbox": False,
+        "marksRenderedFrame": True,
+        "blocksRemoteResources": True,
+        "hidesSyntax": True,
+    }
+
+
+def test_rendered_html_link_guard_scrolls_fragment_targets():
+    """Rendered HTML fragment links should scroll inside the iframe document."""
+    result = run_app_js(
+        """
+let prevented = 0;
+let scrolled = 0;
+const target = { scrollIntoView(options) { scrolled += options.block === "start" ? 1 : 10; } };
+const doc = {
+  getElementById(id) { return id === "step-1" ? target : null; },
+  getElementsByName() { return []; },
+};
+const link = {
+  getAttribute(name) { return name === "href" ? "#step-1" : null; },
+};
+const event = {
+  target: { closest(selector) { return selector === "a[href]" ? link : null; } },
+  preventDefault() { prevented += 1; },
+};
+const handled = ctx.handleRenderedHtmlPreviewDocumentClick(event, doc);
+console.log(JSON.stringify({ handled, prevented, scrolled }));
+"""
+    )
+
+    assert result == {"handled": True, "prevented": 1, "scrolled": 1}
+
+
+def test_rendered_html_link_guard_blocks_non_fragment_links():
+    """Rendered HTML links should not navigate to external or relative targets."""
+    result = run_app_js(
+        """
+let prevented = 0;
+let scrolled = 0;
+const doc = {
+  getElementById() { return { scrollIntoView() { scrolled += 1; } }; },
+  getElementsByName() { return []; },
+};
+function run(href) {
+  const link = {
+    getAttribute(name) { return name === "href" ? href : null; },
+  };
+  return ctx.handleRenderedHtmlPreviewDocumentClick({
+    target: { closest(selector) { return selector === "a[href]" ? link : null; } },
+    preventDefault() { prevented += 1; },
+  }, doc);
+}
+const externalHandled = run("https://example.com/");
+const relativeHandled = run("local/page.html");
+const nonLinkHandled = ctx.handleRenderedHtmlPreviewDocumentClick({
+  target: { closest() { return null; } },
+  preventDefault() { prevented += 100; },
+}, doc);
+console.log(JSON.stringify({
+  externalHandled,
+  relativeHandled,
+  nonLinkHandled,
+  prevented,
+  scrolled,
+}));
+"""
+    )
+
+    assert result == {
+        "externalHandled": True,
+        "relativeHandled": True,
+        "nonLinkHandled": False,
+        "prevented": 2,
+        "scrolled": 0,
+    }
+
+
+def test_render_degraded_html_preview_keeps_notice_toggle_and_rendered_mode():
+    """Large HTML source fallback should still be switchable to rendered mode."""
+    result = run_app_js(
+        """
+const pane = ctx.createPaneState("pane-1");
+pane.preview = {
+  kind: "text",
+  path: "large.html",
+  language: "html",
+  content: "<!doctype html><h1>Large</h1>",
+  html_renderable: true,
+  degraded: true,
+  notice: "Source preview: syntax highlighting skipped because large.html is 112 bytes, " +
+    "above the rich source preview limit of 24 bytes.",
+  render: { kind: "text", value: "<!doctype html><h1>Large</h1>" },
+};
+const sourceHtml = ctx.renderTextPreview(pane);
+pane.htmlPreviewMode = "rendered";
+const renderedHtml = ctx.renderTextPreview(pane);
+console.log(JSON.stringify({
+  sourceHasNotice: sourceHtml.includes("Source preview: syntax highlighting skipped"),
+  sourceHasPlainTextNotice: sourceHtml.includes("Plain text preview"),
+  sourceHasToggle: sourceHtml.includes('data-html-preview-mode="source"') &&
+    sourceHtml.includes('data-html-preview-mode="rendered"'),
+  sourceUsesTextFallback: sourceHtml.includes("text-block"),
+  sourceHasFrame: sourceHtml.includes("<iframe"),
+  renderedHasFrame: renderedHtml.includes("<iframe"),
+  renderedHasCsp: renderedHtml.includes("Content-Security-Policy"),
+  renderedHidesTextFallback: !renderedHtml.includes("text-block"),
+}));
+"""
+    )
+
+    assert result == {
+        "sourceHasNotice": True,
+        "sourceHasPlainTextNotice": False,
+        "sourceHasToggle": True,
+        "sourceUsesTextFallback": True,
+        "sourceHasFrame": False,
+        "renderedHasFrame": True,
+        "renderedHasCsp": True,
+        "renderedHidesTextFallback": True,
+    }
+
+
+def test_render_non_html_text_preview_omits_html_toggle_and_frame():
+    """Non-HTML text previews should keep the existing single source view."""
+    result = run_app_js(
+        """
+const pane = ctx.createPaneState("pane-1");
+pane.htmlPreviewMode = "rendered";
+pane.preview = {
+  kind: "text",
+  path: "example.py",
+  language: "python",
+  content: "print('hello')",
+  render: {
+    kind: "syntax",
+    html: '<div class="syntax-block"><span class="tok-nb">print</span></div>',
+    value: "print('hello')",
+  },
+};
+const html = ctx.renderTextPreview(pane);
+console.log(JSON.stringify({
+  hasToggle: html.includes("data-html-preview-mode"),
+  hasFrame: html.includes("<iframe"),
+  hasSyntax: html.includes("syntax-block"),
+}));
+"""
+    )
+
+    assert result == {"hasToggle": False, "hasFrame": False, "hasSyntax": True}
+
+
 def test_render_detail_block_supports_syntax_payloads():
     """Structured detail blocks should render syntax HTML fragments directly."""
     result = run_app_js(
