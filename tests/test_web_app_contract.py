@@ -212,14 +212,16 @@ pane.preview = {
   content: "<!doctype html><h1>Large</h1>",
   html_renderable: true,
   degraded: true,
-  notice: "Plain text preview: rich rendering skipped.",
+  notice: "Source preview: syntax highlighting skipped because large.html is 112 bytes, " +
+    "above the rich source preview limit of 24 bytes.",
   render: { kind: "text", value: "<!doctype html><h1>Large</h1>" },
 };
 const sourceHtml = ctx.renderTextPreview(pane);
 pane.htmlPreviewMode = "rendered";
 const renderedHtml = ctx.renderTextPreview(pane);
 console.log(JSON.stringify({
-  sourceHasNotice: sourceHtml.includes("Plain text preview"),
+  sourceHasNotice: sourceHtml.includes("Source preview: syntax highlighting skipped"),
+  sourceHasPlainTextNotice: sourceHtml.includes("Plain text preview"),
   sourceHasToggle: sourceHtml.includes('data-html-preview-mode="source"') &&
     sourceHtml.includes('data-html-preview-mode="rendered"'),
   sourceUsesTextFallback: sourceHtml.includes("text-block"),
@@ -233,6 +235,7 @@ console.log(JSON.stringify({
 
     assert result == {
         "sourceHasNotice": True,
+        "sourceHasPlainTextNotice": False,
         "sourceHasToggle": True,
         "sourceUsesTextFallback": True,
         "sourceHasFrame": False,

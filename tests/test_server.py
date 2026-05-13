@@ -225,7 +225,10 @@ def test_api_preview_large_html_fallback_still_allows_rendered_mode(tmp_path, mo
     assert payload["path"] == "large.html"
     assert payload["language"] == "html"
     assert payload["degraded"] is True
-    assert "Plain text preview" in payload["notice"]
+    assert payload["notice"] == (
+        "Source preview: syntax highlighting skipped because large.html is 112 bytes, "
+        "above the rich source preview limit of 24 bytes."
+    )
     assert payload["html_renderable"] is True
     assert payload["render"] == {"kind": "text", "value": content}
     assert "html" not in payload["render"]

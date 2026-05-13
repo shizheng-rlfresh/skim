@@ -256,9 +256,11 @@ def _plain_text_fallback_payload(
             "path": relative_path,
             "message": f"Could not read {path.name}: {error}",
         }
-    notice = (
-        "Plain text preview: "
-        f"{path.name} is {size:,} bytes, above the rich preview limit of {rich_limit:,} bytes."
+    notice = _plain_text_fallback_notice(
+        path.name,
+        size=size,
+        rich_limit=rich_limit,
+        html_renderable=html_renderable,
     )
     payload = {
         "kind": "text",
@@ -273,6 +275,26 @@ def _plain_text_fallback_payload(
     if html_renderable:
         payload["html_renderable"] = True
     return payload
+
+
+def _plain_text_fallback_notice(
+    name: str,
+    *,
+    size: int,
+    rich_limit: int,
+    html_renderable: bool,
+) -> str:
+    """Return the user-facing notice for a degraded text preview."""
+    if html_renderable:
+        return (
+            "Source preview: syntax highlighting skipped because "
+            f"{name} is {size:,} bytes, above the rich source preview limit of "
+            f"{rich_limit:,} bytes."
+        )
+    return (
+        "Plain text preview: "
+        f"{name} is {size:,} bytes, above the rich preview limit of {rich_limit:,} bytes."
+    )
 
 
 def _serialize_json_file(
