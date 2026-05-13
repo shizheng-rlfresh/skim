@@ -211,6 +211,26 @@ def test_api_preview_large_text_falls_back_to_plain_payload(tmp_path, monkeypatc
     }
 
 
+def test_api_preview_large_html_fallback_still_allows_rendered_mode(tmp_path, monkeypatch):
+    """Large readable HTML should skip syntax source but keep rendered HTML available."""
+    monkeypatch.setattr(web_preview_module, "MAX_FILE_SIZE", 24)
+    monkeypatch.setattr(web_preview_module, "MAX_PLAIN_FALLBACK_FILE_SIZE", 512)
+    content = "<!doctype html><html><body><h1>Hello</h1></body></html>\n" * 2
+    test_file = tmp_path / "large.html"
+    test_file.write_text(content)
+
+    payload = serialize_preview(test_file, browse_root=tmp_path)
+
+    assert payload["kind"] == "text"
+    assert payload["path"] == "large.html"
+    assert payload["language"] == "html"
+    assert payload["degraded"] is True
+    assert "Plain text preview" in payload["notice"]
+    assert payload["html_renderable"] is True
+    assert payload["render"] == {"kind": "text", "value": content}
+    assert "html" not in payload["render"]
+
+
 def test_api_preview_large_json_falls_back_to_plain_payload(tmp_path, monkeypatch):
     """Large JSON should avoid building a browser JSON tree."""
     monkeypatch.setattr(web_preview_module, "MAX_JSON_FILE_SIZE", 24)
@@ -796,6 +816,19 @@ def test_stylesheet_increases_preview_readability_defaults(tmp_path):
     assert ".detail-panel,\n.step-detail" in css or ".detail-panel,\r\n.step-detail" in css
     assert ".tree-row" in css
     assert "padding: 9px 12px;" in css
+
+
+def test_stylesheet_gives_rendered_html_a_viewport_sized_frame(tmp_path):
+    """Rendered HTML should use a substantial viewport-aware document frame."""
+    with running_server(tmp_path) as base_url:
+        request = urllib.request.Request(base_url + "/styles.css")
+        with urllib.request.urlopen(request) as response:
+            css = response.read().decode()
+
+    assert ".html-rendered-preview" in css
+    assert "height: clamp(640px, calc(100vh - 260px), 1200px);" in css
+    assert ".html-rendered-frame" in css
+    assert "height: 100%;" in css
 
 
 def test_stylesheet_defines_file_and_json_color_tokens(tmp_path):

@@ -120,6 +120,7 @@ def serialize_preview(
                 relative_path=relative_path,
                 size=size,
                 rich_limit=max_size,
+                html_renderable=suffix == ".html",
             )
             if payload["kind"] != "error":
                 return _with_file_annotation_payload(
@@ -243,6 +244,7 @@ def _plain_text_fallback_payload(
     relative_path: str,
     size: int,
     rich_limit: int,
+    html_renderable: bool = False,
 ) -> dict[str, Any]:
     """Return a plain-text payload for files too large for rich rendering."""
     try:
@@ -258,7 +260,7 @@ def _plain_text_fallback_payload(
         "Plain text preview: "
         f"{path.name} is {size:,} bytes, above the rich preview limit of {rich_limit:,} bytes."
     )
-    return {
+    payload = {
         "kind": "text",
         "name": path.name,
         "path": relative_path,
@@ -268,6 +270,9 @@ def _plain_text_fallback_payload(
         "degraded": True,
         "notice": notice,
     }
+    if html_renderable:
+        payload["html_renderable"] = True
+    return payload
 
 
 def _serialize_json_file(

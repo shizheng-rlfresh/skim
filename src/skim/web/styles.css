@@ -1246,7 +1246,7 @@ button {
 }
 
 .html-rendered-preview {
-  min-height: 320px;
+  height: clamp(640px, calc(100vh - 260px), 1200px);
   border: 1px solid var(--border-subtle);
   background: white;
 }
@@ -1254,7 +1254,7 @@ button {
 .html-rendered-frame {
   display: block;
   width: 100%;
-  min-height: 520px;
+  height: 100%;
   border: 0;
   background: white;
 }

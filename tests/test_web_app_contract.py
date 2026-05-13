@@ -200,6 +200,48 @@ console.log(JSON.stringify({
     }
 
 
+def test_render_degraded_html_preview_keeps_notice_toggle_and_rendered_mode():
+    """Large HTML source fallback should still be switchable to rendered mode."""
+    result = run_app_js(
+        """
+const pane = ctx.createPaneState("pane-1");
+pane.preview = {
+  kind: "text",
+  path: "large.html",
+  language: "html",
+  content: "<!doctype html><h1>Large</h1>",
+  html_renderable: true,
+  degraded: true,
+  notice: "Plain text preview: rich rendering skipped.",
+  render: { kind: "text", value: "<!doctype html><h1>Large</h1>" },
+};
+const sourceHtml = ctx.renderTextPreview(pane);
+pane.htmlPreviewMode = "rendered";
+const renderedHtml = ctx.renderTextPreview(pane);
+console.log(JSON.stringify({
+  sourceHasNotice: sourceHtml.includes("Plain text preview"),
+  sourceHasToggle: sourceHtml.includes('data-html-preview-mode="source"') &&
+    sourceHtml.includes('data-html-preview-mode="rendered"'),
+  sourceUsesTextFallback: sourceHtml.includes("text-block"),
+  sourceHasFrame: sourceHtml.includes("<iframe"),
+  renderedHasFrame: renderedHtml.includes("<iframe"),
+  renderedHasCsp: renderedHtml.includes("Content-Security-Policy"),
+  renderedHidesTextFallback: !renderedHtml.includes("text-block"),
+}));
+"""
+    )
+
+    assert result == {
+        "sourceHasNotice": True,
+        "sourceHasToggle": True,
+        "sourceUsesTextFallback": True,
+        "sourceHasFrame": False,
+        "renderedHasFrame": True,
+        "renderedHasCsp": True,
+        "renderedHidesTextFallback": True,
+    }
+
+
 def test_render_non_html_text_preview_omits_html_toggle_and_frame():
     """Non-HTML text previews should keep the existing single source view."""
     result = run_app_js(
