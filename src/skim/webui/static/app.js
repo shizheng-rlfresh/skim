@@ -61,6 +61,7 @@ function createPaneState(id) {
     selectedJsonPath: null,
     selectedStepId: null,
     selectedWorkbookSheetName: null,
+    htmlPreviewMode: "source",
     selectedAnnotationIds: {},
     jsonSplitRatio: loadStoredSplitRatio("json", DEFAULT_JSON_SPLIT_RATIO, id),
     trajectorySplitRatio: loadStoredSplitRatio("trajectory", DEFAULT_TRAJECTORY_SPLIT_RATIO, id),
@@ -1526,6 +1527,14 @@ async function onPreviewClick(event, paneId = state.activePaneId) {
     return;
   }
 
+  const htmlPreviewMode = event.target.closest("[data-html-preview-mode]");
+  if (htmlPreviewMode) {
+    const mode = htmlPreviewMode.dataset.htmlPreviewMode;
+    pane.htmlPreviewMode = mode === "rendered" ? "rendered" : "source";
+    renderWorkspace();
+    return;
+  }
+
   const jsonToggle = event.target.closest("[data-toggle-json]");
   if (jsonToggle) {
     const node = jsonNodeByPath(pane, jsonToggle.dataset.toggleJson);
@@ -1580,6 +1589,7 @@ async function loadPreviewForPane(path, paneId, options = {}) {
     } else {
       pane.selectedWorkbookSheetName = null;
     }
+    pane.htmlPreviewMode = "source";
     if (options.selectedAnnotationPath && options.selectedAnnotationId) {
       pane.selectedAnnotationIds[options.selectedAnnotationPath] = options.selectedAnnotationId;
     }
@@ -1650,6 +1660,8 @@ function renderFileAnnotationPanel(pane, preview) {
 
 function renderTextPreview(preview) {
   const ctx = resolvePreviewInput(preview);
+  const htmlRenderable = isRenderableHtmlPreview(ctx.preview);
+  const htmlMode = htmlRenderable && ctx.pane?.htmlPreviewMode === "rendered" ? "rendered" : "source";
   return `
     <div class="preview-card">
       <div class="detail-meta">
@@ -1658,9 +1670,92 @@ function renderTextPreview(preview) {
       </div>
       ${renderFileAnnotationPanel(ctx.pane, ctx.preview)}
       ${ctx.preview.notice ? `<div class="preview-notice">${escapeHtml(ctx.preview.notice)}</div>` : ""}
-      ${renderRenderValue(ctx.preview.render || { kind: "text", value: ctx.preview.content })}
+      ${htmlRenderable ? renderHtmlPreviewControls(htmlMode) : ""}
+      ${
+        htmlMode === "rendered"
+          ? renderHtmlDocumentPreview(ctx.preview.content)
+          : renderRenderValue(ctx.preview.render || { kind: "text", value: ctx.preview.content })
+      }
     </div>
   `;
+}
+
+function isRenderableHtmlPreview(preview) {
+  return Boolean(
+    preview &&
+      preview.html_renderable === true &&
+      preview.language === "html" &&
+      typeof preview.content === "string",
+  );
+}
+
+function renderHtmlPreviewControls(mode) {
+  return `
+    <div class="html-preview-toggle" role="group" aria-label="HTML preview mode">
+      <button
+        class="title-button html-preview-toggle-button"
+        type="button"
+        data-html-preview-mode="source"
+        aria-pressed="${mode !== "rendered" ? "true" : "false"}"
+      >Source</button>
+      <button
+        class="title-button html-preview-toggle-button"
+        type="button"
+        data-html-preview-mode="rendered"
+        aria-pressed="${mode === "rendered" ? "true" : "false"}"
+      >Rendered</button>
+    </div>
+  `;
+}
+
+function renderHtmlDocumentPreview(content) {
+  return `
+    <div class="html-rendered-preview">
+      <iframe
+        class="html-rendered-frame"
+        title="Rendered HTML preview"
+        sandbox
+        referrerpolicy="no-referrer"
+        srcdoc="${escapeAttribute(renderHtmlPreviewDocument(content || ""))}"
+      ></iframe>
+    </div>
+  `;
+}
+
+function renderHtmlPreviewDocument(content) {
+  const csp = [
+    "default-src 'none'",
+    "script-src 'none'",
+    "connect-src 'none'",
+    "form-action 'none'",
+    "base-uri 'none'",
+    "object-src 'none'",
+    "frame-src 'none'",
+    "img-src data: blob:",
+    "media-src data: blob:",
+    "font-src data:",
+    "style-src 'unsafe-inline'",
+    "navigate-to 'none'",
+  ].join("; ");
+  return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="${csp}">
+<base href="about:blank">
+<style>
+  html, body {
+    margin: 0;
+    min-height: 100%;
+    background: white;
+    color: black;
+  }
+</style>
+</head>
+<body>
+${content}
+</body>
+</html>`;
 }
 
 function renderMarkdownPreview(preview) {

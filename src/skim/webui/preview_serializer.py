@@ -198,6 +198,7 @@ def serialize_preview(
             relative_path,
             content,
             language=SYNTAX_MAP.get(suffix),
+            html_renderable=suffix == ".html",
         ),
         source_path=resolved,
         annotation_store=store,
@@ -949,8 +950,9 @@ def _text_payload(
     content: str,
     *,
     language: str | None,
+    html_renderable: bool = False,
 ) -> dict[str, Any]:
-    return {
+    payload = {
         "kind": "text",
         "name": name,
         "path": relative_path,
@@ -958,6 +960,9 @@ def _text_payload(
         "content": content,
         "render": _syntax_payload(content, language=language, line_numbers=True),
     }
+    if html_renderable:
+        payload["html_renderable"] = True
+    return payload
 
 
 def _with_file_annotation_payload(

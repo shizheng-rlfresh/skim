@@ -1225,6 +1225,40 @@ button {
   margin: 0 0 10px;
 }
 
+.html-preview-toggle {
+  display: inline-flex;
+  align-self: flex-start;
+  gap: 0;
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.html-preview-toggle-button {
+  border: 0;
+  border-radius: 0;
+}
+
+.html-preview-toggle-button[aria-pressed="true"] {
+  background: var(--bg-highlight);
+  color: var(--fg-primary);
+}
+
+.html-rendered-preview {
+  min-height: 320px;
+  border: 1px solid var(--border-subtle);
+  background: white;
+}
+
+.html-rendered-frame {
+  display: block;
+  width: 100%;
+  min-height: 520px;
+  border: 0;
+  background: white;
+}
+
 .table-wrap {
   overflow: auto;
 }

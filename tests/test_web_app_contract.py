@@ -120,6 +120,115 @@ console.log(JSON.stringify({
     }
 
 
+def test_render_html_preview_defaults_to_source_with_toggle():
+    """Renderable HTML previews should keep source mode as the default."""
+    result = run_app_js(
+        """
+const pane = ctx.createPaneState("pane-1");
+pane.preview = {
+  kind: "text",
+  path: "example.html",
+  language: "html",
+  content: "<!doctype html><h1>Hello</h1>",
+  html_renderable: true,
+  render: {
+    kind: "syntax",
+    html: '<div class="syntax-block"><span class="tok-nt">h1</span></div>',
+    value: "<!doctype html><h1>Hello</h1>",
+  },
+};
+const html = ctx.renderTextPreview(pane);
+console.log(JSON.stringify({
+  hasToggle: html.includes('data-html-preview-mode="source"') &&
+    html.includes('data-html-preview-mode="rendered"'),
+  sourcePressed: html.includes('data-html-preview-mode="source"') &&
+    html.includes('aria-pressed="true"'),
+  hasSyntax: html.includes("syntax-block"),
+  hasFrame: html.includes("<iframe"),
+}));
+"""
+    )
+
+    assert result == {
+        "hasToggle": True,
+        "sourcePressed": True,
+        "hasSyntax": True,
+        "hasFrame": False,
+    }
+
+
+def test_render_html_preview_rendered_mode_uses_sandboxed_srcdoc_iframe():
+    """Rendered HTML mode should isolate document content in a sandboxed iframe."""
+    result = run_app_js(
+        """
+const pane = ctx.createPaneState("pane-1");
+pane.htmlPreviewMode = "rendered";
+pane.preview = {
+  kind: "text",
+  path: "example.html",
+  language: "html",
+  content: '<h1>Hello</h1><script>globalThis.bad = true</script><form action="/x"></form>',
+  html_renderable: true,
+  render: { kind: "syntax", html: '<div class="syntax-block"></div>', value: "" },
+};
+const html = ctx.renderTextPreview(pane);
+console.log(JSON.stringify({
+  renderedPressed: html.includes('data-html-preview-mode="rendered"') &&
+    html.includes('aria-pressed="true"'),
+  hasFrame: html.includes('<iframe'),
+  hasSandbox: html.includes(' sandbox'),
+  hasSrcdoc: html.includes('srcdoc='),
+  hasCsp: html.includes('Content-Security-Policy'),
+  blocksScripts: html.includes("script-src &#39;none&#39;"),
+  blocksForms: html.includes("form-action &#39;none&#39;"),
+  blocksRemoteResources: html.includes("img-src data: blob:"),
+  hidesSyntax: !html.includes("syntax-block"),
+}));
+"""
+    )
+
+    assert result == {
+        "renderedPressed": True,
+        "hasFrame": True,
+        "hasSandbox": True,
+        "hasSrcdoc": True,
+        "hasCsp": True,
+        "blocksScripts": True,
+        "blocksForms": True,
+        "blocksRemoteResources": True,
+        "hidesSyntax": True,
+    }
+
+
+def test_render_non_html_text_preview_omits_html_toggle_and_frame():
+    """Non-HTML text previews should keep the existing single source view."""
+    result = run_app_js(
+        """
+const pane = ctx.createPaneState("pane-1");
+pane.htmlPreviewMode = "rendered";
+pane.preview = {
+  kind: "text",
+  path: "example.py",
+  language: "python",
+  content: "print('hello')",
+  render: {
+    kind: "syntax",
+    html: '<div class="syntax-block"><span class="tok-nb">print</span></div>',
+    value: "print('hello')",
+  },
+};
+const html = ctx.renderTextPreview(pane);
+console.log(JSON.stringify({
+  hasToggle: html.includes("data-html-preview-mode"),
+  hasFrame: html.includes("<iframe"),
+  hasSyntax: html.includes("syntax-block"),
+}));
+"""
+    )
+
+    assert result == {"hasToggle": False, "hasFrame": False, "hasSyntax": True}
+
+
 def test_render_detail_block_supports_syntax_payloads():
     """Structured detail blocks should render syntax HTML fragments directly."""
     result = run_app_js(

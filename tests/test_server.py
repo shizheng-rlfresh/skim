@@ -113,6 +113,35 @@ def test_api_preview_returns_text_payload_for_plain_file(tmp_path):
     assert "tok-nb" in payload["render"]["html"] or "tok-n" in payload["render"]["html"]
 
 
+def test_api_preview_marks_html_as_renderable_without_changing_source_payload(tmp_path):
+    """HTML previews should keep source rendering while advertising rendered mode."""
+    test_file = tmp_path / "example.html"
+    test_file.write_text("<!doctype html><html><body><h1>Hi</h1></body></html>\n")
+
+    payload = serialize_preview(test_file, browse_root=tmp_path)
+
+    assert payload["kind"] == "text"
+    assert payload["path"] == "example.html"
+    assert payload["language"] == "html"
+    assert payload["content"].startswith("<!doctype html>")
+    assert payload["render"]["kind"] == "syntax"
+    assert payload["render"]["language"] == "html"
+    assert payload["render"]["line_numbers"] is True
+    assert payload["html_renderable"] is True
+
+
+def test_api_preview_does_not_mark_non_html_text_as_renderable(tmp_path):
+    """Only HTML files should advertise the rendered HTML option."""
+    test_file = tmp_path / "example.css"
+    test_file.write_text("body { color: red; }\n")
+
+    payload = serialize_preview(test_file, browse_root=tmp_path)
+
+    assert payload["kind"] == "text"
+    assert payload["language"] == "css"
+    assert "html_renderable" not in payload
+
+
 def test_api_preview_omits_wildcard_cors_headers(tmp_path):
     """Local API responses should not be exposed cross-origin to arbitrary websites."""
     test_file = tmp_path / "example.py"
