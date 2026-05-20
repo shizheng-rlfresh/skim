@@ -12,7 +12,7 @@ dependencies = [
     "openpyxl>=3.1.5",
     "pygments>=2.20.0",
     "rich>=15.0.0",
-    "textual[syntax]>=8.2.5",
+    "textual[syntax]>=8.2.7",
 ]
 
 
