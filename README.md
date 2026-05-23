@@ -1,18 +1,16 @@
 # skim
 
+<img src="./docs/assets/skim-retro-reviewer.png" alt="SKIM retro reviewer icon" width="96">
+
+⚡ Vibe-coded note: except for the product/design direction, the code and reviews
+here were produced by AI agents, not hand-written by me.
+
 SKIM is a lightweight file-system review and annotation tool for humans and AI
-agents working over complex folders, codebases, datasets, and agent traces.
+agents working over messy folders, codebases, datasets, and agent traces.
 
-The core idea is simple: reading a file system should leave structured evidence
-behind. Instead of inspecting files once and losing the context, SKIM lets users
-annotate review targets from the CLI, TUI, or web UI, then revisit those
-annotations as durable local review state.
-
-Today, SKIM stores annotations in `<browse-root>/.skim/review.json`, supports
-file-level annotations for non-JSON files, and supports UI-visible JSON targets
-for structured artifacts such as agent trajectories. The first wedge is narrow
-on purpose: make messy local file systems inspectable, reviewable, and
-traceable without a database or external service.
+The idea is simple: when you read a file system, you should be able to leave
+structured evidence behind. SKIM keeps those notes local, durable, and reusable
+across the CLI, TUI, and web UI.
 
 ## Why
 
