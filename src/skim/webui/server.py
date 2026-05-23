@@ -161,8 +161,9 @@ class SkimHandler(SimpleHTTPRequestHandler):
         if not isinstance(annotation_id, str):
             self._error(400, "Missing annotation_id field")
             return
-        if not self._is_annotatable_path(source_path, annotation_path):
-            self._error(400, "path is not an annotatable target")
+        existing = self.store.annotations_for_path(source_path, annotation_path)
+        if not any(record.id == annotation_id for record in existing):
+            self._error(404, "Annotation not found")
             return
 
         self.store.delete_annotation(source_path, annotation_path, annotation_id)

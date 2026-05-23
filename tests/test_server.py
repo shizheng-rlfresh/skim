@@ -745,8 +745,59 @@ def test_api_annotations_reject_deep_trajectory_payload_paths(tmp_path):
     assert created["ok"] is True
     assert update_deep_status == 400
     assert update_deep_payload == expected
-    assert delete_deep_status == 400
-    assert delete_deep_payload == expected
+    assert delete_deep_status == 404
+    assert delete_deep_payload == {"error": "Annotation not found"}
+
+
+def test_api_annotations_delete_stale_path_by_id(tmp_path):
+    """DELETE should remove exact stored annotations even after the path goes stale."""
+    test_file = tmp_path / "output.json"
+    test_file.write_text(json.dumps({"task": {"prompt": "Review this."}}))
+
+    with running_server(tmp_path) as base_url:
+        save_status, save_payload = request_json(
+            base_url,
+            "/api/annotations",
+            method="POST",
+            body={
+                "file": "output.json",
+                "path": "$.task.prompt",
+                "tags": ["issue"],
+                "note": "This target may become stale.",
+            },
+        )
+        test_file.write_text(json.dumps({"task": {}}))
+        _, stored = request_json(base_url, "/api/annotations")
+        delete_status, delete_payload = request_json(
+            base_url,
+            "/api/annotations",
+            method="DELETE",
+            body={
+                "file": "output.json",
+                "path": "$.task.prompt",
+                "annotation_id": save_payload["annotation"]["id"],
+            },
+        )
+        missing_status, missing_payload = request_json(
+            base_url,
+            "/api/annotations",
+            method="DELETE",
+            body={
+                "file": "output.json",
+                "path": "$.task.prompt",
+                "annotation_id": "missing-id",
+            },
+        )
+        _, after_delete = request_json(base_url, "/api/annotations")
+
+    assert save_status == 200
+    saved = stored["files"]["output.json"]["annotations"]["$.task.prompt"]
+    assert [entry["id"] for entry in saved] == [save_payload["annotation"]["id"]]
+    assert delete_status == 200
+    assert delete_payload == {"ok": True}
+    assert missing_status == 404
+    assert missing_payload == {"error": "Annotation not found"}
+    assert after_delete["files"]["output.json"]["annotations"] == {}
 
 
 def test_api_annotations_support_file_level_targets(tmp_path):

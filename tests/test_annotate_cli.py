@@ -146,6 +146,79 @@ def test_annotate_add_list_update_and_delete_round_trip(
     assert run_annotate(["list", "--root", str(tmp_path)], capsys)["items"] == []
 
 
+def test_annotate_delete_removes_stale_annotation_by_id(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Delete should allow cleanup when a stored path is no longer annotatable."""
+    source = tmp_path / "output.json"
+    source.write_text(json.dumps({"task": {"prompt": "Review this."}}))
+    created = run_annotate(
+        [
+            "add",
+            "--root",
+            str(tmp_path),
+            "--file",
+            "output.json",
+            "--path",
+            "$.task.prompt",
+            "--note",
+            "This target may become stale.",
+        ],
+        capsys,
+    )
+    annotation_id = created["annotation"]["id"]
+    source.write_text(json.dumps({"task": {}}))
+
+    listed = run_annotate(["list", "--root", str(tmp_path), "--file", "output.json"], capsys)
+    assert listed["items"][0]["id"] == annotation_id
+    assert listed["items"][0]["path"] == "$.task.prompt"
+
+    deleted = run_annotate(
+        [
+            "delete",
+            "--root",
+            str(tmp_path),
+            "--file",
+            "output.json",
+            "--path",
+            "$.task.prompt",
+            "--id",
+            annotation_id,
+        ],
+        capsys,
+    )
+
+    assert deleted["deleted"] == {
+        "id": annotation_id,
+        "file": "output.json",
+        "path": "$.task.prompt",
+    }
+    assert (
+        run_annotate(["list", "--root", str(tmp_path), "--file", "output.json"], capsys)["items"]
+        == []
+    )
+
+    status = annotate_main(
+        [
+            "delete",
+            "--root",
+            str(tmp_path),
+            "--file",
+            "output.json",
+            "--path",
+            "$.task.prompt",
+            "--id",
+            "missing-id",
+            "--json",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert status == 1
+    assert json.loads(captured.err) == {"error": "annotation not found"}
+
+
 def test_annotate_rejects_deep_trajectory_payload_paths(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -190,9 +263,30 @@ def test_annotate_rejects_deep_trajectory_payload_paths(
     )
     annotation_id = created["annotation"]["id"]
 
-    for command in ("update", "delete"):
-        args = [
-            command,
+    status = annotate_main(
+        [
+            "update",
+            "--root",
+            str(tmp_path),
+            "--file",
+            "output.json",
+            "--path",
+            "$.trajectory.steps[0].output[3].output.text",
+            "--id",
+            annotation_id,
+            "--note",
+            "Still invalid.",
+            "--json",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert status == 2
+    assert json.loads(captured.err) == {"error": "path is not an annotatable target"}
+
+    status = annotate_main(
+        [
+            "delete",
             "--root",
             str(tmp_path),
             "--file",
@@ -203,13 +297,11 @@ def test_annotate_rejects_deep_trajectory_payload_paths(
             annotation_id,
             "--json",
         ]
-        if command == "update":
-            args.extend(["--note", "Still invalid."])
-        status = annotate_main(args)
-        captured = capsys.readouterr()
+    )
+    captured = capsys.readouterr()
 
-        assert status == 2
-        assert json.loads(captured.err) == {"error": "path is not an annotatable target"}
+    assert status == 1
+    assert json.loads(captured.err) == {"error": "annotation not found"}
 
 
 def test_annotate_update_rejects_noop(

@@ -112,7 +112,6 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
         return {"ok": True, "annotation": _annotation_payload(annotation, args.file, args.path)}
     if args.command == "delete":
         source = _resolve_existing_file(root, args.file)
-        _ensure_annotatable_path(root, store, source, args.path)
         existing = store.annotations_for_path(source, args.path)
         if not any(record.id == args.id for record in existing):
             raise _CliError("annotation not found", status=1)
