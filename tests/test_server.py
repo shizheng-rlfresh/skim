@@ -91,6 +91,17 @@ def request_json_with_headers(
     return status, payload, headers
 
 
+def _flatten_payload_nodes(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return one flat list from a serialized JSON-inspector tree."""
+    flattened: list[dict[str, Any]] = []
+    for node in nodes:
+        flattened.append(node)
+        children = node.get("children", [])
+        if isinstance(children, list):
+            flattened.extend(_flatten_payload_nodes(cast(list[dict[str, Any]], children)))
+    return flattened
+
+
 def test_api_preview_returns_text_payload_for_plain_file(tmp_path):
     """The preview API should classify plain source files as text payloads."""
     test_file = tmp_path / "example.py"
@@ -677,6 +688,67 @@ def test_api_annotations_support_multi_entry_round_trip(tmp_path):
     assert [entry["id"] for entry in remaining] == [first["annotation"]["id"]]
 
 
+def test_api_annotations_reject_deep_trajectory_payload_paths(tmp_path):
+    """The web API should enforce the same annotation target guardrail as the UI."""
+    test_file = tmp_path / "output.json"
+    test_file.write_text(json.dumps({"trajectory": sample_trajectory()}))
+
+    with running_server(tmp_path) as base_url:
+        add_deep_status, add_deep_payload = request_json(
+            base_url,
+            "/api/annotations",
+            method="POST",
+            body={
+                "file": "output.json",
+                "path": "$.trajectory.steps[0].output[3].output.text",
+                "tags": ["issue"],
+                "note": "Reject this deep target.",
+            },
+        )
+        _, created = request_json(
+            base_url,
+            "/api/annotations",
+            method="POST",
+            body={
+                "file": "output.json",
+                "path": "$.trajectory.steps[0].output[3]",
+                "tags": ["evidence"],
+                "note": "Allow the parent target.",
+            },
+        )
+        update_deep_status, update_deep_payload = request_json(
+            base_url,
+            "/api/annotations",
+            method="POST",
+            body={
+                "file": "output.json",
+                "path": "$.trajectory.steps[0].output[3].output.text",
+                "annotation_id": created["annotation"]["id"],
+                "tags": ["issue"],
+                "note": "Still reject this deep target.",
+            },
+        )
+        delete_deep_status, delete_deep_payload = request_json(
+            base_url,
+            "/api/annotations",
+            method="DELETE",
+            body={
+                "file": "output.json",
+                "path": "$.trajectory.steps[0].output[3].output.text",
+                "annotation_id": created["annotation"]["id"],
+            },
+        )
+
+    expected = {"error": "path is not an annotatable target"}
+    assert add_deep_status == 400
+    assert add_deep_payload == expected
+    assert created["ok"] is True
+    assert update_deep_status == 400
+    assert update_deep_payload == expected
+    assert delete_deep_status == 400
+    assert delete_deep_payload == expected
+
+
 def test_api_annotations_support_file_level_targets(tmp_path):
     """File-level annotations should round-trip through the shared annotations API."""
     test_file = tmp_path / "notes.md"
@@ -950,6 +1022,30 @@ def test_wrapped_output_json_stays_in_json_inspector_and_keeps_trajectory_branch
         "Final Output",
         "Step 1",
     ]
+
+
+def test_wrapped_trajectory_raw_payload_descendants_are_not_annotatable(tmp_path):
+    """Raw internals below trajectory events should not be annotation targets."""
+    test_file = tmp_path / "output.json"
+    test_file.write_text(json.dumps({"trajectory": sample_trajectory()}))
+
+    payload = serialize_preview(test_file, browse_root=tmp_path)
+    nodes = _flatten_payload_nodes(payload["tree"])
+
+    parent_node = next(
+        node
+        for node in nodes
+        if node["path"] == "$.trajectory.steps[0].output[3]"
+        and node["kind"] == "trajectory_tool_output"
+    )
+    deep_node = next(
+        node for node in nodes if node["path"] == "$.trajectory.steps[0].output[3].output.text"
+    )
+
+    assert parent_node["annotatable"] is True
+    assert parent_node["annotation_path"] == "$.trajectory.steps[0].output[3]"
+    assert deep_node["annotatable"] is False
+    assert deep_node["annotation_path"] is None
 
 
 def test_submission_json_serializes_structured_detail_blocks(tmp_path):

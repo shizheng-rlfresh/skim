@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from .core.annotation_targets import annotatable_paths_from_preview
 from .core.filesystem import resolve_browse_path
 from .core.review import FILE_ANNOTATION_KEY, AnnotationRecord, AnnotationStore, TriageItem
 from .webui.preview_serializer import serialize_preview
@@ -80,6 +81,7 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
         return _inspect(root, store, args.file)
     if args.command == "add":
         source = _resolve_existing_file(root, args.file)
+        _ensure_annotatable_path(root, store, source, args.path)
         annotation = store.add_annotation(
             source,
             args.path,
@@ -93,6 +95,7 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
         if args.note is None and args.tag is None:
             raise _CliError("update requires --note or --tag")
         source = _resolve_existing_file(root, args.file)
+        _ensure_annotatable_path(root, store, source, args.path)
         existing = store.annotations_for_path(source, args.path)
         current = next((record for record in existing if record.id == args.id), None)
         if current is None:
@@ -109,6 +112,7 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
         return {"ok": True, "annotation": _annotation_payload(annotation, args.file, args.path)}
     if args.command == "delete":
         source = _resolve_existing_file(root, args.file)
+        _ensure_annotatable_path(root, store, source, args.path)
         existing = store.annotations_for_path(source, args.path)
         if not any(record.id == args.id for record in existing):
             raise _CliError("annotation not found", status=1)
@@ -147,6 +151,21 @@ def _inspect_structured_preview(preview: dict[str, Any]) -> list[dict[str, Any]]
     if preview.get("kind") == "trajectory":
         return _trajectory_targets(preview)
     return []
+
+
+def _ensure_annotatable_path(
+    root: Path,
+    store: AnnotationStore,
+    source: Path,
+    path: str,
+) -> None:
+    if path not in _allowed_annotation_paths(root, store, source):
+        raise _CliError("path is not an annotatable target")
+
+
+def _allowed_annotation_paths(root: Path, store: AnnotationStore, source: Path) -> set[str]:
+    preview = serialize_preview(source, browse_root=root, annotation_store=store)
+    return annotatable_paths_from_preview(preview)
 
 
 def _collect_json_targets(node: dict[str, Any], targets: list[dict[str, Any]]) -> None:

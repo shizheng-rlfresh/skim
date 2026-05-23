@@ -1821,6 +1821,38 @@ async def test_output_json_exposes_raw_path_on_selectable_nodes(tmp_path):
     assert trajectory_node.data.raw_path == ("trajectory",)
 
 
+def test_json_inspector_rejects_deep_trajectory_payload_annotation_targets(tmp_path):
+    """TUI annotation eligibility should match visible trajectory review targets."""
+    test_file = tmp_path / "output.json"
+    test_file.write_text(json.dumps({"trajectory": sample_trajectory()}))
+    widgets = render_file(test_file, browse_root=tmp_path)
+    inspector = widgets[0]
+    assert isinstance(inspector, JsonInspector)
+
+    def walk(node):
+        for child in node.children:
+            yield child
+            yield from walk(child)
+
+    items = [node.data for node in walk(inspector._tree.root) if node.data is not None]
+    parent_item = next(
+        item
+        for item in items
+        if item.kind == "trajectory_tool_output"
+        and item.raw_path == ("trajectory", "steps", 0, "output", 3)
+    )
+    deep_item = next(
+        item
+        for item in items
+        if item.raw_path == ("trajectory", "steps", 0, "output", 3, "output", "text")
+    )
+
+    assert inspector._is_annotatable(parent_item)
+    assert inspector._annotation_key(parent_item) == "$.trajectory.steps[0].output[3]"
+    assert not inspector._is_annotatable(deep_item)
+    assert inspector._annotation_key(deep_item) is None
+
+
 @pytest.mark.parametrize(
     ("filename", "lexer", "content"),
     [

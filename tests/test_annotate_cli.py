@@ -26,7 +26,7 @@ def test_annotate_inspect_json_lists_annotatable_targets(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Inspect should expose raw JSON and trajectory annotation paths for agents."""
+    """Inspect should expose only UI-visible JSON and trajectory annotation paths."""
     source = tmp_path / "output.json"
     source.write_text(
         json.dumps({"task": {"prompt": "Review this."}, "trajectory": sample_trajectory()})
@@ -43,6 +43,8 @@ def test_annotate_inspect_json_lists_annotatable_targets(
     assert "$.task" in paths
     assert "$.trajectory.metadata" in paths
     assert "$.trajectory.steps[0].output[0]" in paths
+    assert "$.trajectory.steps[0].output[3]" in paths
+    assert "$.trajectory.steps[0].output[3].output.text" not in paths
     task_target = next(target for target in targets if target["path"] == "$.task")
     assert task_target["annotation_count"] == 0
     assert task_target["preview"]
@@ -141,6 +143,72 @@ def test_annotate_add_list_update_and_delete_round_trip(
         "path": "$.task",
     }
     assert run_annotate(["list", "--root", str(tmp_path)], capsys)["items"] == []
+
+
+def test_annotate_rejects_deep_trajectory_payload_paths(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Mutation commands should reject targets that are not UI-visible."""
+    source = tmp_path / "output.json"
+    source.write_text(json.dumps({"trajectory": sample_trajectory()}))
+
+    status = annotate_main(
+        [
+            "add",
+            "--root",
+            str(tmp_path),
+            "--file",
+            "output.json",
+            "--path",
+            "$.trajectory.steps[0].output[3].output.text",
+            "--note",
+            "This deep target should be rejected.",
+            "--json",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert status == 2
+    assert json.loads(captured.err) == {"error": "path is not an annotatable target"}
+    assert not (tmp_path / ".skim" / "review.json").exists()
+
+    created = run_annotate(
+        [
+            "add",
+            "--root",
+            str(tmp_path),
+            "--file",
+            "output.json",
+            "--path",
+            "$.trajectory.steps[0].output[3]",
+            "--note",
+            "Parent UI-visible target is valid.",
+        ],
+        capsys,
+    )
+    annotation_id = created["annotation"]["id"]
+
+    for command in ("update", "delete"):
+        args = [
+            command,
+            "--root",
+            str(tmp_path),
+            "--file",
+            "output.json",
+            "--path",
+            "$.trajectory.steps[0].output[3].output.text",
+            "--id",
+            annotation_id,
+            "--json",
+        ]
+        if command == "update":
+            args.extend(["--note", "Still invalid."])
+        status = annotate_main(args)
+        captured = capsys.readouterr()
+
+        assert status == 2
+        assert json.loads(captured.err) == {"error": "path is not an annotatable target"}
 
 
 def test_annotate_update_rejects_noop(
