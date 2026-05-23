@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 from conftest import sample_trajectory
@@ -13,7 +14,7 @@ from skim.annotate_cli import main as annotate_main
 from skim.review import FILE_ANNOTATION_KEY
 
 
-def run_annotate(args: list[str], capsys: pytest.CaptureFixture[str]) -> dict[str, object]:
+def run_annotate(args: list[str], capsys: pytest.CaptureFixture[str]) -> dict[str, Any]:
     """Run the annotation CLI with JSON output and return its payload."""
     status = annotate_main([*args, "--json"])
     captured = capsys.readouterr()
