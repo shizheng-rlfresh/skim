@@ -1,159 +1,76 @@
 # skim
 
-A terminal UI for browsing folders and reviewing local artifacts. Built with
-[Textual](https://textual.textualize.io/).
+SKIM is a lightweight file-system review and annotation tool for humans and AI
+agents working over complex folders, codebases, datasets, and agent traces.
 
-Point it at any directory to get a file tree on the left and a content preview on the
-right, with syntax highlighting, markdown rendering, split panes, flat `.ipynb`
-rendering, and a **JSON inspector** that now supports `local node annotations`.
+The core idea is simple: reading a file system should leave structured evidence
+behind. Instead of inspecting files once and losing the context, SKIM lets users
+annotate review targets from the CLI, TUI, or web UI, then revisit those
+annotations as durable local review state.
 
-## Install
+Today, SKIM stores annotations in `<browse-root>/.skim/review.json`, supports
+file-level annotations for non-JSON files, and supports UI-visible JSON targets
+for structured artifacts such as agent trajectories. The first wedge is narrow
+on purpose: make messy local file systems inspectable, reviewable, and
+traceable without a database or external service.
+
+## Why
+
+Reviewing a local folder is often an ephemeral activity. A human opens files,
+spots evidence, closes the tool, and the reasoning disappears. An agent later
+reopens the same folder and has to guess from scratch.
+
+SKIM aims to make that review memory explicit:
+
+- mark files or JSON targets as important, suspicious, incomplete, useful, or
+  needing review
+- keep notes and tags next to the local artifact being reviewed
+- let humans and agents share the same annotation source of truth
+- turn file exploration into a repeatable, auditable workflow
+
+SKIM is not trying to be a full agent evaluation platform at the beginning. Over
+time, the same annotation layer can support agent handoff, taxonomy-guided
+labels, MCP integration, query/export workflows, and evaluation tooling.
+
+## Surfaces
+
+- **TUI:** terminal-first folder browser with split panes, rich previews,
+  structural JSON inspection, trajectory overlays, annotation editing, and
+  workspace triage.
+- **Web UI:** localhost browser UI backed by the same Python preview and
+  annotation model.
+- **CLI:** agent- and script-friendly `skim annotate ...` commands for
+  discovering valid targets and mutating `.skim/review.json`.
+
+All surfaces share local files as the source of truth. Review annotations remain
+inside the browsed workspace under `.skim/review.json`.
+
+## Demo
+
+Demo GIF coming soon. The intended demo should show a local folder review flow:
+opening a trajectory, inspecting evidence in the TUI or web UI, adding
+annotations, and then listing those annotations from the CLI.
+
+## Quickstart
 
 ```bash
 git clone https://github.com/shizheng-rlfresh/skim.git
 cd skim
 uv sync
+uv run skim .
 ```
 
 Requires Python 3.12 or newer.
 
-## Usage
+See [docs/usage.md](./docs/usage.md) for TUI, Web UI, and annotation CLI
+commands.
 
-```bash
-uv run skim              # open current directory
-uv run skim ~/my/folder  # open a specific folder
-uv run skim . --triage   # start directly in triage mode
-uv run skim-dev          # launch Textual dev mode
-uv run skim-web .        # run the localhost web UI
-```
+## Documentation
 
-## Local Verification
-
-Before commit or push, run local verification in this order so it matches CI:
-
-```bash
-uv run ruff format .
-uv run ruff check .
-uv run pytest -v
-```
-
-## Web UI
-
-The repo also includes a localhost browser UI:
-
-```bash
-uv run skim-web .
-```
-
-The current implementation is Python-first and localhost-only, backed by typed
-preview payloads from `/api/preview`. The browser shell now includes a
-`Browse | Triage` mode switch, multi-pane preview work, an active-pane file
-target, workspace-level annotation triage, local file-level annotations for
-non-JSON previews, a command palette, local dark/light themes, bundled
-JetBrains Mono assets, and explicit notebook previews for `.ipynb` files.
-
-See the full target design spec here:
-
-- [docs/skim-web-ui-spec.md](./docs/skim-web-ui-spec.md)
-
-## Keybindings
-
-### Shell And Pane Navigation
-
-| Key | Action |
-|---|---|
-| `Up/Down` or `j/k` | Scroll the active preview pane |
-| `PageUp/PageDown` | Page-scroll the active preview pane; in JSON inspector mode, scroll the detail panel |
-| `f` | Toggle file-tree mode |
-| `t` | Switch to triage mode |
-| `b` | Switch back to browse mode |
-| `Shift+Up/Down` | Move the file-tree cursor without leaving the active preview |
-| `Enter` | Open the current file-tree selection in the active pane |
-| `s` then arrow or `h/j/k/l` | Split in a direction |
-| `d` | Close the active pane |
-| `w` | Cycle to the next pane |
-| `q` | Quit |
-
-### File-Tree Mode
-
-| Key | Action |
-|---|---|
-| `Up/Down` or `j/k` | Move the file-tree cursor |
-| `Left/Right` | Collapse, expand, or move across file-tree branches |
-| `Right` on a file | Open that file in the active pane |
-| `Enter` | Open the selected file or directory entry |
-| `Esc` | Return to the active preview pane |
-
-Trajectory and JSON previews show their own local command footers when they have
-specialized navigation. Flat notebook previews use the generic pane scrolling above.
-
-### Trajectory Preview
-
-Trajectory previews use a tree/detail model:
-
-| Key | Action |
-|---|---|
-| `Up/Down` | Move through the trajectory tree while in tree mode |
-| `Left/Right` | Collapse, expand, or move across trajectory tree branches |
-| `Enter` | Open the selected trajectory node in the detail pane |
-| `Esc` | Return from the detail pane to the trajectory tree |
-
-### JSON Inspector
-
-JSON previews use a live inspector model:
-
-| Key | Action |
-|---|---|
-| `Up/Down` | Move the JSON tree cursor |
-| `Left/Right` | Collapse, expand, or move across JSON tree branches |
-| `PageUp/PageDown` | Scroll the right-hand detail panel |
-| `a` | Open the annotation editor for the selected annotatable node |
-
-### Annotation Modal
-
-| Key | Action |
-|---|---|
-| `Esc` | Close the modal |
-| `Tab` | Move to the next editor control |
-| `Enter` in tags | Jump directly to the note field |
-| `PageUp/PageDown` | Scroll the right-hand node preview |
-
-## Split panes
-
-You can have up to 6 panes arranged in a 2 row by 3 column grid. Press `s` followed by a direction key to split. The active pane is highlighted with a border. Click a pane or press `w` to switch which pane is active. New files always open in the active pane.
-
-## JSON review workflow
-
-JSON files open in a structural inspector rather than a plain text dump. The inspector:
-
-- shows a tree on the left and detail panels on the right
-- adds schema-aware overlays for supported artifacts such as raw agent trajectories.
-- keeps annotations local in `<browse-root>/.skim/review.json`
-- marks annotated nodes in the tree and shows annotation state in a separate status panel
-- opens a split annotation modal with tags and note editing on the left and a read-only
-  preview of the selected node on the right
-
-Annotations bind to the underlying raw JSON location, using `annotation_path` when an
-overlay node maps to a raw node and falling back to `raw_path` otherwise.
-
-## Workspace triage
-
-- `uv run skim . --triage` starts the TUI in triage mode
-- `t` and `b` switch between triage and browse in the same TUI session
-- the web UI exposes the same queue behind the `Browse | Triage` toggle
-- triage queues are grouped by file in both the TUI and web UI to reduce repeated metadata
-- triage rows are normalized in Python from `.skim/review.json`
-- non-JSON previews store file-level annotations under the reserved `@file` target key
-- the web UI exposes `/api/triage` and `/api/annotation-version` for queue data and refresh
-
-## File size limits
-
-Rich previews are capped to keep the TUI and web UI responsive: most text-like
-files use a `1MB` rich-preview limit, while JSON and notebook (`.ipynb`) files
-use a `10MB` rich-preview limit. Recognized text-like files above those rich
-preview limits fall back to plain text, without syntax highlighting, markdown
-rendering, CSV tables, notebook rendering, or JSON trees, up to `25MB`.
-Unknown or binary files, and any file above `25MB`, still render as too large.
+- [Usage guide](./docs/usage.md)
+- [Architecture](./docs/architecture.md)
+- [Web UI design spec](./docs/skim-web-ui-spec.md)
+- [Project overview](./docs/v1/overview.md)
 
 ## License
 
