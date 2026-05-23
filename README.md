@@ -2,54 +2,107 @@
 
 <img src="./docs/assets/skim-retro-reviewer.png" alt="SKIM retro reviewer icon" width="96">
 
-⚡ Vibe-coded note: except for the product/design direction, the code and reviews
-here were produced by AI agents, not hand-written by me.
+**A local review layer for agent trace, evaluation artifacts and messy workspaces.**
 
-SKIM is a lightweight file-system review and annotation tool for humans and AI
-agents working over messy folders, codebases, datasets, and agent traces.
+SKIM helps inspect traces, trajectories, tool-call logs, model outputs, prompts,
+eval artifacts, generated folders, and other local files produced during agent
+system development or evaluation.
 
-The idea is simple: when you read a file system, you should be able to leave
-structured evidence behind. SKIM keeps those notes local, durable, and reusable
-across the CLI, TUI, and web UI.
+Annotations can be attached to review targets: whole files, directories, or
+structured nodes inside JSON. The same review state can then be inspected from
+the CLI, TUI, or Web UI.
 
-## Why
+When an agent run gets messy, SKIM lets the review leave evidence behind.
 
-Reviewing a local folder is often an ephemeral activity. A human opens files,
-spots evidence, closes the tool, and the reasoning disappears. An agent later
-reopens the same folder and has to guess from scratch.
+## The loop
 
-SKIM aims to make that review memory explicit:
+Start in interactive mode: open a local workspace in the TUI or Web UI. Inspect
+the artifacts, e.g., tool calls, traces, and intermediate files. Mark what
+matters: unsupported claims, suspicious tool use, missing evidence, useful
+examples, or follow-up items.
 
-- mark files or JSON targets as important, suspicious, incomplete, useful, or
-  needing review
-- keep notes and tags next to the local artifact being reviewed
-- let humans and agents share the same annotation source of truth
-- turn file exploration into a repeatable, auditable workflow
+Return later and see what was already found.
 
-SKIM is not trying to be a full agent evaluation platform at the beginning. Over
-time, the same annotation layer can support agent handoff, taxonomy-guided
-labels, MCP integration, query/export workflows, and evaluation tooling.
+```text
+agent run → inspect → annotate → review later
+```
 
-## Surfaces
+**Note:** Because the CLI is scriptable, you can use a coding agent for bulk
+annotation. For example: “Add a `needs_review` tag to every trajectory where the
+final answer cites evidence that does not appear in the trace.”
 
-- **TUI:** terminal-first folder browser with split panes, rich previews,
-  structural JSON inspection, trajectory overlays, annotation editing, and
-  workspace triage.
-- **Web UI:** localhost browser UI backed by the same Python preview and
-  annotation model.
-- **CLI:** agent- and script-friendly `skim annotate ...` commands for
-  discovering valid targets and mutating `.skim/review.json`.
-
-All surfaces share local files as the source of truth. Review annotations remain
-inside the browsed workspace under `.skim/review.json`.
+SKIM stores annotations locally under `.skim/review.json`, so every surface reads
+from the same source of truth.
 
 ## Demo
 
-Demo GIF coming soon. The intended demo should show a local folder review flow:
-opening a trajectory, inspecting evidence in the TUI or web UI, adding
-annotations, and then listing those annotations from the CLI.
+Annotate a review target from the CLI, then inspect it in the TUI or Web UI.
+
+Demo GIF coming soon.
+
+<!--
+![SKIM demo](./docs/assets/skim-demo.gif)
+-->
+
+## Surfaces
+
+SKIM is local-first and works across three surfaces:
+
+- **CLI:** annotate files or structured review targets, discover valid targets,
+  and support scriptable review workflows through `uv run skim ...` from the workspace root.
+- **TUI:** browse folders, inspect files, explore JSON structures, and edit
+  annotations from the terminal with `uv run skim <path>`.
+- **Web UI:** review the same workspace in a localhost browser interface with
+  `uv run skim-web <path>`.
+
+All annotations stay inside the workspace. No server-side state, no external
+database, no hidden project account.
+
+## Example
+
+Annotate a suspicious trajectory from the CLI:
+
+```bash
+uv run skim annotation examples/agent-run/trajectory.json \
+  --label needs_review \
+  --tag tool_mismatch \
+  --note "The final answer mentions evidence that does not appear in the trace."
+```
+
+Open the same workspace in the TUI:
+
+```bash
+uv run skim examples/agent-run
+```
+
+Or inspect it in the Web UI:
+
+```bash
+uv run skim-web examples/agent-run
+```
+
+## What SKIM is for
+
+SKIM is useful when reviewing local artifacts should leave a trail:
+
+- reviewing traces and trajectories
+- inspecting tool-call logs and model outputs
+- annotating specific JSON nodes inside large structured files
+- triaging generated files
+- walking through JSON-heavy artifacts
+- marking files or structured targets for follow-up
+- keeping review notes close to the artifact being reviewed
+
+SKIM starts smaller than a full agent evaluation platform. It focuses first on
+structured inspection of messy local workspaces.
+
+Over time, the same annotation layer can support export, filter/query workflows,
+taxonomy-guided labels, MCP integration, automated review, and evaluation
+tooling.
 
 ## Quickstart
+
+Run SKIM from source:
 
 ```bash
 git clone https://github.com/shizheng-rlfresh/skim.git
