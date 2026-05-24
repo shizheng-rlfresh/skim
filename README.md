@@ -1,159 +1,107 @@
-# skim
+# SKIM
 
-A terminal UI for browsing folders and reviewing local artifacts. Built with
-[Textual](https://textual.textualize.io/).
+<img src="./docs/assets/skim-retro-reviewer.png" alt="SKIM retro reviewer icon" width="96">
 
-Point it at any directory to get a file tree on the left and a content preview on the
-right, with syntax highlighting, markdown rendering, split panes, flat `.ipynb`
-rendering, and a **JSON inspector** that now supports `local node annotations`.
+SKIM helps inspect agent artifacts: traces, trajectories, logs, and outputs for development or evaluation. It works across the CLI, TUI, and Web UI, and keeps annotations local to the workspace.
 
-## Install
+- At the base, SKIM is a local artifact explorer: tree navigation, syntax-highlighted file previews, and structured JSON inspection.
+- On top of that, SKIM adds durable review annotations. Whole files or structured targets such as JSON nodes can be marked during inspection, then reviewed again from the same local state.
+- Annotations can be added by human reviewers, scripts, or LLM/agent evaluators. SKIM collects and preserves the evidence so follow-up actions such as triage, export, evaluation, or automated review can happen with context.
+
+## Surfaces
+
+SKIM is local-first and works across three surfaces:
+
+- **CLI:** annotate files or structured review targets, discover valid targets, and support automatic workflows through `uv run skim annotate ...` from the workspace root.
+- **TUI:** browse folders, inspect files, explore JSON structures, and edit annotations from the terminal with `uv run skim <path>`.
+- **Web UI:** review the same workspace in a localhost browser interface with `uv run skim-web <path>`.
+
+All annotations stay inside the workspace under `.skim/review.json`. The CLI, TUI, and Web UI read and write the same local review state.
+
+## Example
+
+Inspect a sample trajectory artifact and list the targets that can be annotated:
+
+```bash
+uv run skim annotate inspect \
+  --root data \
+  --file output.json \
+  --json
+```
+
+Add a note to one suspicious JSON target returned by `inspect`:
+
+```bash
+uv run skim annotate add \
+  --root data \
+  --file output.json \
+  --path '$.trajectory.steps[0].output[7]' \
+  --tag missing_evidence \
+  --tag red_keycard \
+  --note "Agent claims the red keycard was found, but this step does not show evidence for that claim." \
+  --json
+```
+
+List the newest annotations in the workspace:
+
+```bash
+uv run skim annotate list \
+  --root data \
+  --json
+```
+
+Update the annotation after another pass:
+
+```bash
+uv run skim annotate update \
+  --root data \
+  --file output.json \
+  --path '$.trajectory.steps[0].output[7]' \
+  --id ann_001 \
+  --tag missing_evidence \
+  --tag needs_review \
+  --note "Still missing evidence: no trace event shows the red keycard being picked up before the final answer." \
+  --json
+```
+
+Delete the annotation if it is no longer needed:
+
+```bash
+uv run skim annotate delete \
+  --root data \
+  --file output.json \
+  --path '$.trajectory.steps[0].output[7]' \
+  --id ann_001 \
+  --json
+```
+
+Open the same workspace in the TUI:
+
+```bash
+uv run skim data
+```
+
+Or inspect it in the Web UI:
+
+```bash
+uv run skim-web data
+```
+
+## Quickstart
+
+Run SKIM from source:
 
 ```bash
 git clone https://github.com/shizheng-rlfresh/skim.git
 cd skim
 uv sync
+uv run skim .
 ```
 
 Requires Python 3.12 or newer.
 
-## Usage
-
-```bash
-uv run skim              # open current directory
-uv run skim ~/my/folder  # open a specific folder
-uv run skim . --triage   # start directly in triage mode
-uv run skim-dev          # launch Textual dev mode
-uv run skim-web .        # run the localhost web UI
-```
-
-## Local Verification
-
-Before commit or push, run local verification in this order so it matches CI:
-
-```bash
-uv run ruff format .
-uv run ruff check .
-uv run pytest -v
-```
-
-## Web UI
-
-The repo also includes a localhost browser UI:
-
-```bash
-uv run skim-web .
-```
-
-The current implementation is Python-first and localhost-only, backed by typed
-preview payloads from `/api/preview`. The browser shell now includes a
-`Browse | Triage` mode switch, multi-pane preview work, an active-pane file
-target, workspace-level annotation triage, local file-level annotations for
-non-JSON previews, a command palette, local dark/light themes, bundled
-JetBrains Mono assets, and explicit notebook previews for `.ipynb` files.
-
-See the full target design spec here:
-
-- [docs/skim-web-ui-spec.md](./docs/skim-web-ui-spec.md)
-
-## Keybindings
-
-### Shell And Pane Navigation
-
-| Key | Action |
-|---|---|
-| `Up/Down` or `j/k` | Scroll the active preview pane |
-| `PageUp/PageDown` | Page-scroll the active preview pane; in JSON inspector mode, scroll the detail panel |
-| `f` | Toggle file-tree mode |
-| `t` | Switch to triage mode |
-| `b` | Switch back to browse mode |
-| `Shift+Up/Down` | Move the file-tree cursor without leaving the active preview |
-| `Enter` | Open the current file-tree selection in the active pane |
-| `s` then arrow or `h/j/k/l` | Split in a direction |
-| `d` | Close the active pane |
-| `w` | Cycle to the next pane |
-| `q` | Quit |
-
-### File-Tree Mode
-
-| Key | Action |
-|---|---|
-| `Up/Down` or `j/k` | Move the file-tree cursor |
-| `Left/Right` | Collapse, expand, or move across file-tree branches |
-| `Right` on a file | Open that file in the active pane |
-| `Enter` | Open the selected file or directory entry |
-| `Esc` | Return to the active preview pane |
-
-Trajectory and JSON previews show their own local command footers when they have
-specialized navigation. Flat notebook previews use the generic pane scrolling above.
-
-### Trajectory Preview
-
-Trajectory previews use a tree/detail model:
-
-| Key | Action |
-|---|---|
-| `Up/Down` | Move through the trajectory tree while in tree mode |
-| `Left/Right` | Collapse, expand, or move across trajectory tree branches |
-| `Enter` | Open the selected trajectory node in the detail pane |
-| `Esc` | Return from the detail pane to the trajectory tree |
-
-### JSON Inspector
-
-JSON previews use a live inspector model:
-
-| Key | Action |
-|---|---|
-| `Up/Down` | Move the JSON tree cursor |
-| `Left/Right` | Collapse, expand, or move across JSON tree branches |
-| `PageUp/PageDown` | Scroll the right-hand detail panel |
-| `a` | Open the annotation editor for the selected annotatable node |
-
-### Annotation Modal
-
-| Key | Action |
-|---|---|
-| `Esc` | Close the modal |
-| `Tab` | Move to the next editor control |
-| `Enter` in tags | Jump directly to the note field |
-| `PageUp/PageDown` | Scroll the right-hand node preview |
-
-## Split panes
-
-You can have up to 6 panes arranged in a 2 row by 3 column grid. Press `s` followed by a direction key to split. The active pane is highlighted with a border. Click a pane or press `w` to switch which pane is active. New files always open in the active pane.
-
-## JSON review workflow
-
-JSON files open in a structural inspector rather than a plain text dump. The inspector:
-
-- shows a tree on the left and detail panels on the right
-- adds schema-aware overlays for supported artifacts such as raw agent trajectories.
-- keeps annotations local in `<browse-root>/.skim/review.json`
-- marks annotated nodes in the tree and shows annotation state in a separate status panel
-- opens a split annotation modal with tags and note editing on the left and a read-only
-  preview of the selected node on the right
-
-Annotations bind to the underlying raw JSON location, using `annotation_path` when an
-overlay node maps to a raw node and falling back to `raw_path` otherwise.
-
-## Workspace triage
-
-- `uv run skim . --triage` starts the TUI in triage mode
-- `t` and `b` switch between triage and browse in the same TUI session
-- the web UI exposes the same queue behind the `Browse | Triage` toggle
-- triage queues are grouped by file in both the TUI and web UI to reduce repeated metadata
-- triage rows are normalized in Python from `.skim/review.json`
-- non-JSON previews store file-level annotations under the reserved `@file` target key
-- the web UI exposes `/api/triage` and `/api/annotation-version` for queue data and refresh
-
-## File size limits
-
-Rich previews are capped to keep the TUI and web UI responsive: most text-like
-files use a `1MB` rich-preview limit, while JSON and notebook (`.ipynb`) files
-use a `10MB` rich-preview limit. Recognized text-like files above those rich
-preview limits fall back to plain text, without syntax highlighting, markdown
-rendering, CSV tables, notebook rendering, or JSON trees, up to `25MB`.
-Unknown or binary files, and any file above `25MB`, still render as too large.
+See [docs/usage.md](./docs/usage.md) for TUI, Web UI, and annotation CLI
+commands.
 
 ## License
 

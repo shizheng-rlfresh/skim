@@ -24,6 +24,7 @@ from textual.widgets import Button, Collapsible, Input, Markdown, Static, TextAr
 from textual.widgets import Tree as TextualTree
 from textual.widgets.tree import TreeNode
 
+from ..core.annotation_targets import is_ui_aligned_annotation_target
 from ..core.review import AnnotationRecord, AnnotationStore
 from .scrolling import AnnotationStatusWrap, DragTree, FocusableDetailWrap
 
@@ -1865,8 +1866,12 @@ class JsonInspector(Vertical):
         return self._current_item
 
     def _is_annotatable(self, item: JsonInspectorItem) -> bool:
-        """Return whether the item can be annotated in the MVP."""
-        return item.annotation_path is not None or not item.synthetic
+        """Return whether the item can be annotated from the current UI."""
+        return is_ui_aligned_annotation_target(
+            item.raw_path,
+            synthetic=item.synthetic,
+            annotation_path=item.annotation_path,
+        )
 
     def _annotation_key(self, item: JsonInspectorItem) -> str | None:
         """Return the persisted annotation key for one item."""

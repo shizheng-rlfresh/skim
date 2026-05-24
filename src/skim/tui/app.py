@@ -784,6 +784,8 @@ class SkimApp(App):
             return None
         if pane.current_path is None:
             return None
+        if not pane.file_annotation_available:
+            return None
         viewer = pane.active_json_navigator()
         if viewer is not None:
             return None

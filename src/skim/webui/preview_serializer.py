@@ -18,6 +18,7 @@ from pygments.formatters import HtmlFormatter
 from pygments.lexers import get_lexer_by_name
 from pygments.util import ClassNotFound
 
+from ..core.annotation_targets import is_ui_aligned_annotation_target
 from ..core.previewing import (
     JSON_EXTENSIONS,
     MARKDOWN_EXTENSIONS,
@@ -888,11 +889,13 @@ class _JsonInspectorSerializer:
                 parent_children.append(self._make_node(item, children=children))
 
     def _annotation_key(self, item: JsonInspectorItem) -> str | None:
-        if item.annotation_path is not None:
-            return _format_raw_path(item.annotation_path)
-        if item.synthetic:
+        if not is_ui_aligned_annotation_target(
+            item.raw_path,
+            synthetic=item.synthetic,
+            annotation_path=item.annotation_path,
+        ):
             return None
-        return _format_raw_path(item.raw_path)
+        return _format_raw_path(item.annotation_path or item.raw_path)
 
     def _annotation_for_path(self, path: str | None) -> list[dict[str, Any]]:
         if path is None:

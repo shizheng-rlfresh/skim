@@ -30,7 +30,7 @@ import skim.preview as preview_module
 import skim.tui.trajectory as trajectory_module
 from skim import JsonInspector, PreviewPane, SkimApp, render_file
 from skim.app import ReviewAnnotationEditor
-from skim.preview import CsvPreview, XlsxPreview, _xlsx_sheet_preview_data
+from skim.preview import CsvPreview, FileAnnotationStatus, XlsxPreview, _xlsx_sheet_preview_data
 from skim.review import FILE_ANNOTATION_KEY
 from skim.scrolling import FocusableDetailWrap
 from skim.trajectory import AnnotationEditor, AnnotationStore
@@ -1511,6 +1511,9 @@ async def test_non_json_file_annotation_modal_saves_file_level_annotation(tmp_pa
         pane.show_file(test_file)
         await pilot.pause()
 
+        assert pane.file_annotation_available
+        assert len(pane.query(FileAnnotationStatus)) == 1
+
         await pilot.press("a")
         await pilot.pause()
 
@@ -1528,6 +1531,27 @@ async def test_non_json_file_annotation_modal_saves_file_level_annotation(tmp_pa
         assert saved[0]["tags"] == ["important"]
         assert saved[0]["note"] == "Review the whole file."
         assert "File Annotation" in pane_text
+
+
+async def test_too_large_non_json_preview_does_not_offer_file_annotation(tmp_path):
+    """TUI file annotation affordances should match CLI/Web target eligibility."""
+    test_file = tmp_path / "huge.bin"
+    test_file.write_bytes(b"x" * 1_000_001)
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        pane.show_file(test_file)
+        await pilot.pause()
+
+        assert not pane.file_annotation_available
+        assert len(pane.query(FileAnnotationStatus)) == 0
+
+        await pilot.press("a")
+        await pilot.pause()
+
+        assert not isinstance(app.screen, ReviewAnnotationEditor)
+        assert not (tmp_path / ".skim" / "review.json").exists()
 
 
 async def test_non_json_file_annotations_support_multiple_entries_and_selection_mode(tmp_path):
@@ -1819,6 +1843,38 @@ async def test_output_json_exposes_raw_path_on_selectable_nodes(tmp_path):
     assert trajectory_node.data is not None
     assert metadata_node.data.raw_path == ("trajectory", "metadata")
     assert trajectory_node.data.raw_path == ("trajectory",)
+
+
+def test_json_inspector_rejects_deep_trajectory_payload_annotation_targets(tmp_path):
+    """TUI annotation eligibility should match visible trajectory review targets."""
+    test_file = tmp_path / "output.json"
+    test_file.write_text(json.dumps({"trajectory": sample_trajectory()}))
+    widgets = render_file(test_file, browse_root=tmp_path)
+    inspector = widgets[0]
+    assert isinstance(inspector, JsonInspector)
+
+    def walk(node):
+        for child in node.children:
+            yield child
+            yield from walk(child)
+
+    items = [node.data for node in walk(inspector._tree.root) if node.data is not None]
+    parent_item = next(
+        item
+        for item in items
+        if item.kind == "trajectory_tool_output"
+        and item.raw_path == ("trajectory", "steps", 0, "output", 3)
+    )
+    deep_item = next(
+        item
+        for item in items
+        if item.raw_path == ("trajectory", "steps", 0, "output", 3, "output", "text")
+    )
+
+    assert inspector._is_annotatable(parent_item)
+    assert inspector._annotation_key(parent_item) == "$.trajectory.steps[0].output[3]"
+    assert not inspector._is_annotatable(deep_item)
+    assert inspector._annotation_key(deep_item) is None
 
 
 @pytest.mark.parametrize(

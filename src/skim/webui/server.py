@@ -15,6 +15,7 @@ from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from ..core.annotation_targets import annotatable_paths_from_preview
 from ..core.filesystem import build_tree, resolve_browse_path
 from ..core.review import AnnotationStore
 from .preview_serializer import serialize_preview
@@ -99,6 +100,9 @@ class SkimHandler(SimpleHTTPRequestHandler):
         if not source_path.is_file():
             self._error(404, "File not found")
             return
+        if not self._is_annotatable_path(source_path, annotation_path):
+            self._error(400, "path is not an annotatable target")
+            return
 
         if annotation_id:
             annotation = self.store.update_annotation(
@@ -157,6 +161,10 @@ class SkimHandler(SimpleHTTPRequestHandler):
         if not isinstance(annotation_id, str):
             self._error(400, "Missing annotation_id field")
             return
+        existing = self.store.annotations_for_path(source_path, annotation_path)
+        if not any(record.id == annotation_id for record in existing):
+            self._error(404, "Annotation not found")
+            return
 
         self.store.delete_annotation(source_path, annotation_path, annotation_id)
         self._json_response({"ok": True})
@@ -191,6 +199,15 @@ class SkimHandler(SimpleHTTPRequestHandler):
     def _resolve_browse_target(self, relative_path: str) -> Path | None:
         """Return one browse-root-relative path or ``None`` when it escapes."""
         return resolve_browse_path(self.browse_root, relative_path)
+
+    def _is_annotatable_path(self, source_path: Path, annotation_path: str) -> bool:
+        """Return whether the current preview exposes an annotation path."""
+        preview = serialize_preview(
+            source_path,
+            browse_root=self.browse_root,
+            annotation_store=self.store,
+        )
+        return annotation_path in annotatable_paths_from_preview(preview)
 
     def _read_json_body(self) -> dict[str, object] | None:
         """Decode one JSON request body, responding with 400 on failure."""

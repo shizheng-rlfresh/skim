@@ -1,4 +1,6 @@
 # Documentation
 
-- [skim web UI design spec](./skim-web-ui-spec.md)
-- [skim architecture](./architecture.md)
+- [Usage guide](./usage.md)
+- [Architecture](./architecture.md)
+- [Web UI design spec](./skim-web-ui-spec.md)
+- [Project overview](./v1/overview.md)
