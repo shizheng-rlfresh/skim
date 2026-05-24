@@ -2,103 +2,95 @@
 
 <img src="./docs/assets/skim-retro-reviewer.png" alt="SKIM retro reviewer icon" width="96">
 
-**A local review layer for agent trace, evaluation artifacts and messy workspaces.**
+**A local review layer for agent traces, evaluation artifacts, and messy workspaces.**
 
-SKIM helps inspect traces, trajectories, tool-call logs, model outputs, prompts,
-eval artifacts, generated folders, and other local files produced during agent
-system development or evaluation.
+SKIM helps inspect agent artifacts: traces, trajectories, logs, and outputs for development or evaluation. It works across the CLI, TUI, and Web UI, and keeps annotations local to the workspace.
 
-Annotations can be attached to review targets: whole files, directories, or
-structured nodes inside JSON. The same review state can then be inspected from
-the CLI, TUI, or Web UI.
+- At the base, SKIM is a local artifact explorer: tree navigation, syntax-highlighted file previews, and structured JSON inspection.
 
-When an agent run gets messy, SKIM lets the review leave evidence behind.
+- On top of that, SKIM adds durable review annotations. Whole files or structured targets such as JSON nodes can be marked during inspection, then reviewed again from the same local state.
 
-## The loop
+- Annotations can be added by human reviewers, scripts, or LLM/agent evaluators. SKIM collects and preserves the evidence so follow-up actions such as triage, export, evaluation, or automated review can happen with context.
 
-Start in interactive mode: open a local workspace in the TUI or Web UI. Inspect
-the artifacts, e.g., tool calls, traces, and intermediate files. Mark what
-matters: unsupported claims, suspicious tool use, missing evidence, useful
-examples, or follow-up items.
-
-Return later and see what was already found.
-
-```text
-agent run → inspect → annotate → review later
-```
-
-**Note:** Because the CLI is scriptable, you can use a coding agent for bulk
-annotation. For example: “Add a `needs_review` tag to every trajectory where the
-final answer cites evidence that does not appear in the trace.”
-
-SKIM stores annotations locally under `.skim/review.json`, so every surface reads
-from the same source of truth.
-
-## Demo
-
-Annotate a review target from the CLI, then inspect it in the TUI or Web UI.
-
-Demo GIF coming soon.
-
-<!--
-![SKIM demo](./docs/assets/skim-demo.gif)
--->
 
 ## Surfaces
 
 SKIM is local-first and works across three surfaces:
 
-- **CLI:** annotate files or structured review targets, discover valid targets,
-  and support scriptable review workflows through `uv run skim ...` from the workspace root.
-- **TUI:** browse folders, inspect files, explore JSON structures, and edit
-  annotations from the terminal with `uv run skim <path>`.
-- **Web UI:** review the same workspace in a localhost browser interface with
-  `uv run skim-web <path>`.
+- **CLI:** annotate files or structured review targets, discover valid targets, and support automatic workflows through `uv run skim annotate ...` from the workspace root.
+- **TUI:** browse folders, inspect files, explore JSON structures, and edit annotations from the terminal with `uv run skim <path>`.
+- **Web UI:** review the same workspace in a localhost browser interface with `uv run skim-web <path>`.
 
-All annotations stay inside the workspace. No server-side state, no external
-database, no hidden project account.
+All annotations stay inside the workspace under `.skim/review.json`. The CLI, TUI, and Web UI read and write the same local review state.
 
 ## Example
 
-Annotate a suspicious trajectory from the CLI:
+Inspect a messy Mars-base trajectory and list the targets that can be annotated:
 
 ```bash
-uv run skim annotation examples/agent-run/trajectory.json \
-  --label needs_review \
-  --tag tool_mismatch \
-  --note "The final answer mentions evidence that does not appear in the trace."
+uv run skim annotate inspect \
+  --root examples/mars-base-run \
+  --file trajectory.json \
+  --json
+```
+
+Add a note to one suspicious JSON target returned by `inspect`:
+
+```bash
+uv run skim annotate add \
+  --root examples/mars-base-run \
+  --file trajectory.json \
+  --path '$.trajectory.steps[7]' \
+  --tag missing_evidence \
+  --tag red_keycard \
+  --note "Agent claims the red keycard was found, but this step does not show evidence for that claim." \
+  --json
+```
+
+List the newest annotations in the workspace:
+
+```bash
+uv run skim annotate list \
+  --root examples/mars-base-run \
+  --json
+```
+
+Update the annotation after another pass:
+
+```bash
+uv run skim annotate update \
+  --root examples/mars-base-run \
+  --file trajectory.json \
+  --path '$.trajectory.steps[7]' \
+  --id ann_001 \
+  --tag missing_evidence \
+  --tag needs_review \
+  --note "Still missing evidence: no trace event shows the red keycard being picked up before the final answer." \
+  --json
+```
+
+Delete the annotation if it is no longer needed:
+
+```bash
+uv run skim annotate delete \
+  --root examples/mars-base-run \
+  --file trajectory.json \
+  --path '$.trajectory.steps[7]' \
+  --id ann_001 \
+  --json
 ```
 
 Open the same workspace in the TUI:
 
 ```bash
-uv run skim examples/agent-run
+uv run skim examples/mars-base-run
 ```
 
 Or inspect it in the Web UI:
 
 ```bash
-uv run skim-web examples/agent-run
+uv run skim-web examples/mars-base-run
 ```
-
-## What SKIM is for
-
-SKIM is useful when reviewing local artifacts should leave a trail:
-
-- reviewing traces and trajectories
-- inspecting tool-call logs and model outputs
-- annotating specific JSON nodes inside large structured files
-- triaging generated files
-- walking through JSON-heavy artifacts
-- marking files or structured targets for follow-up
-- keeping review notes close to the artifact being reviewed
-
-SKIM starts smaller than a full agent evaluation platform. It focuses first on
-structured inspection of messy local workspaces.
-
-Over time, the same annotation layer can support export, filter/query workflows,
-taxonomy-guided labels, MCP integration, automated review, and evaluation
-tooling.
 
 ## Quickstart
 
@@ -115,13 +107,6 @@ Requires Python 3.12 or newer.
 
 See [docs/usage.md](./docs/usage.md) for TUI, Web UI, and annotation CLI
 commands.
-
-## Documentation
-
-- [Usage guide](./docs/usage.md)
-- [Architecture](./docs/architecture.md)
-- [Web UI design spec](./docs/skim-web-ui-spec.md)
-- [Project overview](./docs/v1/overview.md)
 
 ## License
 
