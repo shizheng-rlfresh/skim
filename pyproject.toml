@@ -5,7 +5,7 @@ build-backend = "uv_build"
 [project]
 name = "skim"
 version = "0.1.0"
-description = "Add your description here"
+description = "Inspect, annotate, and review agentartifacts"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
