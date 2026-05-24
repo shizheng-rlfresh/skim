@@ -12,6 +12,7 @@ from conftest import sample_trajectory
 from skim import cli
 from skim.annotate_cli import main as annotate_main
 from skim.review import FILE_ANNOTATION_KEY
+from skim.webui import preview_serializer as web_preview_module
 
 
 def run_annotate(args: list[str], capsys: pytest.CaptureFixture[str]) -> dict[str, Any]:
@@ -51,6 +52,55 @@ def test_annotate_inspect_json_lists_annotatable_targets(
     assert task_target["preview"]
 
 
+def test_annotate_allows_non_trajectory_steps_output_paths(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Trajectory guardrails should not hide unrelated JSON with similar keys."""
+    source = tmp_path / "workflow.json"
+    target_path = "$.workflow.steps[0].output[0].text"
+    source.write_text(
+        json.dumps(
+            {
+                "workflow": {
+                    "steps": [
+                        {
+                            "output": [
+                                {
+                                    "text": "Generic workflow output.",
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        )
+    )
+
+    inspected = run_annotate(
+        ["inspect", "--root", str(tmp_path), "--file", "workflow.json"],
+        capsys,
+    )
+    paths = {target["path"] for target in inspected["targets"]}
+    assert target_path in paths
+
+    created = run_annotate(
+        [
+            "add",
+            "--root",
+            str(tmp_path),
+            "--file",
+            "workflow.json",
+            "--path",
+            target_path,
+            "--note",
+            "Generic output remains annotatable.",
+        ],
+        capsys,
+    )
+    assert created["annotation"]["path"] == target_path
+
+
 def test_annotate_inspect_non_json_returns_file_target(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -73,6 +123,44 @@ def test_annotate_inspect_non_json_returns_file_target(
             "preview": "# Review",
         }
     ]
+
+
+def test_annotate_inspect_too_large_file_exposes_no_targets(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Inspect should not advertise targets that add will reject."""
+    monkeypatch.setattr(web_preview_module, "MAX_FILE_SIZE", 24)
+    source = tmp_path / "big.bin"
+    source.write_text("x" * 25)
+
+    payload = run_annotate(
+        ["inspect", "--root", str(tmp_path), "--file", "big.bin"],
+        capsys,
+    )
+
+    assert payload["kind"] == "too_large"
+    assert payload["targets"] == []
+
+    status = annotate_main(
+        [
+            "add",
+            "--root",
+            str(tmp_path),
+            "--file",
+            "big.bin",
+            "--path",
+            FILE_ANNOTATION_KEY,
+            "--note",
+            "This target should not be writable.",
+            "--json",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert status == 2
+    assert json.loads(captured.err) == {"error": "path is not an annotatable target"}
 
 
 def test_annotate_add_list_update_and_delete_round_trip(

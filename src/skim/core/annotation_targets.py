@@ -24,14 +24,15 @@ def is_ui_aligned_annotation_target(
 
 def is_trajectory_event_payload_descendant(raw_path: RawPath) -> bool:
     """Return whether a path points below a trajectory event item."""
-    for index in range(len(raw_path) - 3):
+    for index in range(len(raw_path) - 4):
         if (
-            raw_path[index] == "steps"
-            and isinstance(raw_path[index + 1], int)
-            and raw_path[index + 2] == "output"
-            and isinstance(raw_path[index + 3], int)
+            raw_path[index] == "trajectory"
+            and raw_path[index + 1] == "steps"
+            and isinstance(raw_path[index + 2], int)
+            and raw_path[index + 3] == "output"
+            and isinstance(raw_path[index + 4], int)
         ):
-            return len(raw_path) > index + 4
+            return len(raw_path) > index + 5
     return False
 
 

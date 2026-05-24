@@ -127,17 +127,28 @@ def _inspect(root: Path, store: AnnotationStore, file_path: str) -> dict[str, An
     if kind in {"json_inspector", "trajectory"}:
         targets = _inspect_structured_preview(preview)
     else:
-        annotations = store.annotations_for_path(source, FILE_ANNOTATION_KEY)
-        targets = [
-            {
-                "path": FILE_ANNOTATION_KEY,
-                "label": "File",
-                "kind": "file",
-                "annotation_count": len(annotations),
-                "preview": _file_preview_text(preview),
-            }
-        ]
+        targets = _inspect_file_preview(preview, store, source)
     return {"file": file_path, "kind": kind, "targets": targets}
+
+
+def _inspect_file_preview(
+    preview: dict[str, Any],
+    store: AnnotationStore,
+    source: Path,
+) -> list[dict[str, Any]]:
+    allowed_paths = annotatable_paths_from_preview(preview)
+    if FILE_ANNOTATION_KEY not in allowed_paths:
+        return []
+    annotations = store.annotations_for_path(source, FILE_ANNOTATION_KEY)
+    return [
+        {
+            "path": FILE_ANNOTATION_KEY,
+            "label": "File",
+            "kind": "file",
+            "annotation_count": len(annotations),
+            "preview": _file_preview_text(preview),
+        }
+    ]
 
 
 def _inspect_structured_preview(preview: dict[str, Any]) -> list[dict[str, Any]]:
