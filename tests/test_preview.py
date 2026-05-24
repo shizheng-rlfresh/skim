@@ -30,7 +30,7 @@ import skim.preview as preview_module
 import skim.tui.trajectory as trajectory_module
 from skim import JsonInspector, PreviewPane, SkimApp, render_file
 from skim.app import ReviewAnnotationEditor
-from skim.preview import CsvPreview, XlsxPreview, _xlsx_sheet_preview_data
+from skim.preview import CsvPreview, FileAnnotationStatus, XlsxPreview, _xlsx_sheet_preview_data
 from skim.review import FILE_ANNOTATION_KEY
 from skim.scrolling import FocusableDetailWrap
 from skim.trajectory import AnnotationEditor, AnnotationStore
@@ -1511,6 +1511,9 @@ async def test_non_json_file_annotation_modal_saves_file_level_annotation(tmp_pa
         pane.show_file(test_file)
         await pilot.pause()
 
+        assert pane.file_annotation_available
+        assert len(pane.query(FileAnnotationStatus)) == 1
+
         await pilot.press("a")
         await pilot.pause()
 
@@ -1528,6 +1531,27 @@ async def test_non_json_file_annotation_modal_saves_file_level_annotation(tmp_pa
         assert saved[0]["tags"] == ["important"]
         assert saved[0]["note"] == "Review the whole file."
         assert "File Annotation" in pane_text
+
+
+async def test_too_large_non_json_preview_does_not_offer_file_annotation(tmp_path):
+    """TUI file annotation affordances should match CLI/Web target eligibility."""
+    test_file = tmp_path / "huge.bin"
+    test_file.write_bytes(b"x" * 1_000_001)
+    app = SkimApp(path=str(tmp_path))
+
+    async with app.run_test() as pilot:
+        pane = app.query_one(f"#{app.active_pane_id}", PreviewPane)
+        pane.show_file(test_file)
+        await pilot.pause()
+
+        assert not pane.file_annotation_available
+        assert len(pane.query(FileAnnotationStatus)) == 0
+
+        await pilot.press("a")
+        await pilot.pause()
+
+        assert not isinstance(app.screen, ReviewAnnotationEditor)
+        assert not (tmp_path / ".skim" / "review.json").exists()
 
 
 async def test_non_json_file_annotations_support_multiple_entries_and_selection_mode(tmp_path):

@@ -23,6 +23,7 @@ from textual.css.query import NoMatches
 from textual.widget import Widget
 from textual.widgets import Collapsible, Markdown, Static
 
+from ..core.annotation_targets import annotatable_paths_from_preview
 from ..core.previewing import (
     MAX_FILE_SIZE,
     MAX_JSON_FILE_SIZE,
@@ -145,11 +146,13 @@ class PreviewPane(DragScrollMixin, VerticalScroll, can_focus=True):
         self._init_drag_scroll()
         self.current_path: Path | None = None
         self.selected_annotation_ids: dict[str, str] = {}
+        self.file_annotation_available = False
         self.file_annotation_mode = False
 
     def show_placeholder(self, message: str = "Select a file") -> None:
         """Show placeholder text when no file is selected."""
         self.current_path = None
+        self.file_annotation_available = False
         self.file_annotation_mode = False
         self.remove_children()
         self.mount(Static(Text(message, style="dim italic")))
@@ -160,22 +163,31 @@ class PreviewPane(DragScrollMixin, VerticalScroll, can_focus=True):
         self.current_path = path
         if not same_file:
             self.file_annotation_mode = False
+        self.file_annotation_available = False
         self.remove_children()
         browse_root = getattr(self.app, "browse_path", path.parent)
         widgets = render_file(path, browse_root=browse_root)
         store = getattr(self.app, "review_store", None)
         if widgets and not isinstance(widgets[0], (JsonInspector, TrajectoryViewer)):
             if isinstance(store, AnnotationStore):
-                annotations = store.annotations_for_path(path, FILE_ANNOTATION_KEY)
-                widgets = [
-                    FileAnnotationStatus(
-                        annotations,
-                        selected_annotation_id=self.selected_file_annotation_id(annotations),
-                        annotation_mode=self.file_annotation_mode,
-                        classes="annotation-status-panel",
-                    ),
-                    *widgets,
-                ]
+                self.file_annotation_available = _file_annotation_available(
+                    path,
+                    browse_root=browse_root,
+                    annotation_store=store,
+                )
+                if self.file_annotation_available:
+                    annotations = store.annotations_for_path(path, FILE_ANNOTATION_KEY)
+                    widgets = [
+                        FileAnnotationStatus(
+                            annotations,
+                            selected_annotation_id=self.selected_file_annotation_id(annotations),
+                            annotation_mode=self.file_annotation_mode,
+                            classes="annotation-status-panel",
+                        ),
+                        *widgets,
+                    ]
+                else:
+                    self.file_annotation_mode = False
         for widget in widgets:
             self.mount(widget)
         self.scroll_home(animate=False)
@@ -240,6 +252,23 @@ class PreviewPane(DragScrollMixin, VerticalScroll, can_focus=True):
             self.selected_annotation_ids.pop(key, None)
         else:
             self.selected_annotation_ids[key] = annotation_id
+
+
+def _file_annotation_available(
+    path: Path,
+    *,
+    browse_root: Path,
+    annotation_store: AnnotationStore,
+) -> bool:
+    """Return whether the shared preview contract exposes the file target."""
+    from ..webui.preview_serializer import serialize_preview
+
+    preview = serialize_preview(
+        path,
+        browse_root=browse_root,
+        annotation_store=annotation_store,
+    )
+    return FILE_ANNOTATION_KEY in annotatable_paths_from_preview(preview)
 
 
 def render_file(path: Path, *, browse_root: Path | None = None) -> list[Widget]:

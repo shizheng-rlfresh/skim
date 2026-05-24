@@ -20,12 +20,12 @@ All annotations stay inside the workspace under `.skim/review.json`. The CLI, TU
 
 ## Example
 
-Inspect a messy Mars-base trajectory and list the targets that can be annotated:
+Inspect a sample trajectory artifact and list the targets that can be annotated:
 
 ```bash
 uv run skim annotate inspect \
-  --root examples/mars-base-run \
-  --file trajectory.json \
+  --root data \
+  --file output.json \
   --json
 ```
 
@@ -33,9 +33,9 @@ Add a note to one suspicious JSON target returned by `inspect`:
 
 ```bash
 uv run skim annotate add \
-  --root examples/mars-base-run \
-  --file trajectory.json \
-  --path '$.trajectory.steps[7]' \
+  --root data \
+  --file output.json \
+  --path '$.trajectory.steps[0].output[7]' \
   --tag missing_evidence \
   --tag red_keycard \
   --note "Agent claims the red keycard was found, but this step does not show evidence for that claim." \
@@ -46,7 +46,7 @@ List the newest annotations in the workspace:
 
 ```bash
 uv run skim annotate list \
-  --root examples/mars-base-run \
+  --root data \
   --json
 ```
 
@@ -54,9 +54,9 @@ Update the annotation after another pass:
 
 ```bash
 uv run skim annotate update \
-  --root examples/mars-base-run \
-  --file trajectory.json \
-  --path '$.trajectory.steps[7]' \
+  --root data \
+  --file output.json \
+  --path '$.trajectory.steps[0].output[7]' \
   --id ann_001 \
   --tag missing_evidence \
   --tag needs_review \
@@ -68,9 +68,9 @@ Delete the annotation if it is no longer needed:
 
 ```bash
 uv run skim annotate delete \
-  --root examples/mars-base-run \
-  --file trajectory.json \
-  --path '$.trajectory.steps[7]' \
+  --root data \
+  --file output.json \
+  --path '$.trajectory.steps[0].output[7]' \
   --id ann_001 \
   --json
 ```
@@ -78,13 +78,13 @@ uv run skim annotate delete \
 Open the same workspace in the TUI:
 
 ```bash
-uv run skim examples/mars-base-run
+uv run skim data
 ```
 
 Or inspect it in the Web UI:
 
 ```bash
-uv run skim-web examples/mars-base-run
+uv run skim-web data
 ```
 
 ## Quickstart
