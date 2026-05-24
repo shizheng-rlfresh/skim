@@ -1,4 +1,4 @@
-# skim
+# SKIM
 
 <img src="./docs/assets/skim-retro-reviewer.png" alt="SKIM retro reviewer icon" width="96">
 
@@ -7,11 +7,8 @@
 SKIM helps inspect agent artifacts: traces, trajectories, logs, and outputs for development or evaluation. It works across the CLI, TUI, and Web UI, and keeps annotations local to the workspace.
 
 - At the base, SKIM is a local artifact explorer: tree navigation, syntax-highlighted file previews, and structured JSON inspection.
-
 - On top of that, SKIM adds durable review annotations. Whole files or structured targets such as JSON nodes can be marked during inspection, then reviewed again from the same local state.
-
 - Annotations can be added by human reviewers, scripts, or LLM/agent evaluators. SKIM collects and preserves the evidence so follow-up actions such as triage, export, evaluation, or automated review can happen with context.
-
 
 ## Surfaces
 
