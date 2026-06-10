@@ -8,7 +8,7 @@
   <img src="./docs/assets/skim-header-badge.svg" alt="SKIM header badge" width="520">
 </p>
 
-SKIM makes an agent eval review/inspection smooth, and works across the CLI, TUI, and Web UI.
+<p align="center"> SKIM makes agent eval review/inspection a smooth and interactive process, and works across the CLI, TUI, and Web UI. </p>
 
 <hr>
 
