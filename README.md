@@ -8,7 +8,7 @@
   <img src="./docs/assets/skim-header-badge.svg" alt="SKIM header badge" width="520">
 </p>
 
-SKIM makes an agent eval review/inspection smooth: traces, trajectories, logs, and outputs for development or evaluation. It works across the CLI, TUI, and Web UI, and keeps annotations local to the workspace.
+SKIM makes an agent eval review/inspection smooth, and works across the CLI, TUI, and Web UI.
 
 <hr>
 
