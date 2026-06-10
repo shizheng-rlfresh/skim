@@ -8,6 +8,7 @@
   <img src="./docs/assets/skim-header-badge.svg" alt="SKIM header badge" width="520">
 </p>
 
+<hr>
 <br>
 
 SKIM helps inspect agent artifacts: traces, trajectories, logs, and outputs for development or evaluation. It works across the CLI, TUI, and Web UI, and keeps annotations local to the workspace.
