@@ -1,8 +1,12 @@
-![Codex: vibe coded](https://img.shields.io/badge/Codex-vibe%20coded-ff69b4?style=flat-square&logo=openai&logoColor=white)
-![Surfaces: CLI, TUI, Web UI](https://img.shields.io/badge/surfaces-CLI%20%7C%20TUI%20%7C%20Web%20UI-2ea44f?style=flat-square)
-![Version: v0.1.0](https://img.shields.io/badge/version-v0.1.0-blue?style=flat-square)
+<p align="center">
+  <img alt="Codex: vibe coded" src="https://img.shields.io/badge/Codex-vibe%20coded-ff69b4?style=flat-square&amp;logo=openai&amp;logoColor=white">
+  <img alt="Surfaces: CLI, TUI, Web UI" src="https://img.shields.io/badge/surfaces-CLI%20%7C%20TUI%20%7C%20Web%20UI-2ea44f?style=flat-square">
+  <img alt="Version: v0.1.0" src="https://img.shields.io/badge/version-v0.1.0-blue?style=flat-square">
+</p>
 
-![SKIM header badge](./docs/assets/skim-header-badge.svg)
+<p align="center">
+  <img src="./docs/assets/skim-header-badge.svg" alt="SKIM header badge" width="520">
+</p>
 
 SKIM helps inspect agent artifacts: traces, trajectories, logs, and outputs for development or evaluation. It works across the CLI, TUI, and Web UI, and keeps annotations local to the workspace.
 
