@@ -1,4 +1,5 @@
 ![Codex: vibe coded](https://img.shields.io/badge/Codex-vibe%20coded-ff69b4?style=flat-square&logo=openai&logoColor=white)
+![Surfaces: CLI, TUI, Web UI](https://img.shields.io/badge/surfaces-CLI%20%7C%20TUI%20%7C%20Web%20UI-2ea44f?style=flat-square)
 ![Version: v0.1.0](https://img.shields.io/badge/version-v0.1.0-blue?style=flat-square)
 
 # SKIM
