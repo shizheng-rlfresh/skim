@@ -1,3 +1,5 @@
+![Vibe coded](https://img.shields.io/badge/vibe%20coding-vibe%20coded-ff69b4?style=flat-square)
+
 # SKIM
 
 <img src="./docs/assets/skim-retro-reviewer.png" alt="SKIM retro reviewer icon" width="96">
