@@ -1,8 +1,19 @@
-# SKIM
+<p align="center">
+  <img alt="Codex: vibe coded" src="https://img.shields.io/badge/Codex-vibe%20coded-ff69b4?style=flat-square&amp;logo=openai&amp;logoColor=white">
+  <img alt="Surfaces: CLI, TUI, Web UI" src="https://img.shields.io/badge/surfaces-CLI%20%7C%20TUI%20%7C%20Web%20UI-2ea44f?style=flat-square">
+  <img alt="Version: v0.1.0" src="https://img.shields.io/badge/version-v0.1.0-blue?style=flat-square">
+</p>
 
-<img src="./docs/assets/skim-retro-reviewer.png" alt="SKIM retro reviewer icon" width="96">
+<p align="center">
+  <img src="./docs/assets/skim-header-badge.svg" alt="SKIM header badge" width="520">
+</p>
+
+<hr>
+<br>
 
 SKIM helps inspect agent artifacts: traces, trajectories, logs, and outputs for development or evaluation. It works across the CLI, TUI, and Web UI, and keeps annotations local to the workspace.
+
+<br>
 
 - At the base, SKIM is a local artifact explorer: tree navigation, syntax-highlighted file previews, and structured JSON inspection.
 - On top of that, SKIM adds durable review annotations. Whole files or structured targets such as JSON nodes can be marked during inspection, then reviewed again from the same local state.
