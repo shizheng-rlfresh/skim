@@ -1,4 +1,5 @@
 ![Codex: vibe coded](https://img.shields.io/badge/Codex-vibe%20coded-ff69b4?style=flat-square&logo=openai&logoColor=white)
+![Version: v0.1.0](https://img.shields.io/badge/version-v0.1.0-blue?style=flat-square)
 
 # SKIM
 
