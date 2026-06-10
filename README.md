@@ -2,8 +2,6 @@
 ![Surfaces: CLI, TUI, Web UI](https://img.shields.io/badge/surfaces-CLI%20%7C%20TUI%20%7C%20Web%20UI-2ea44f?style=flat-square)
 ![Version: v0.1.0](https://img.shields.io/badge/version-v0.1.0-blue?style=flat-square)
 
-# SKIM
-
 ![SKIM header badge](./docs/assets/skim-header-badge.svg)
 
 SKIM helps inspect agent artifacts: traces, trajectories, logs, and outputs for development or evaluation. It works across the CLI, TUI, and Web UI, and keeps annotations local to the workspace.
