@@ -21,7 +21,14 @@ skim-dev = "skim.cli:dev"
 skim-web = "skim.cli:web"
 
 [dependency-groups]
-dev = ["ruff", "pytest", "pyright", "poethepoet"]
+dev = [
+    "ruff",
+    "pytest",
+    "pytest-asyncio",
+    "pytest-textual-snapshot",
+    "pyright",
+    "poethepoet",
+]
 
 [tool.ruff]
 line-length = 100
