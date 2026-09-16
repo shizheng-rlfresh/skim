@@ -5,7 +5,7 @@ build-backend = "uv_build"
 [project]
 name = "skim"
 version = "0.1.0"
-description = "Inspect, annotate, and review agentartifacts"
+description = "Inspect, annotate, and review agent artifacts"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -15,19 +15,13 @@ dependencies = [
     "textual[syntax]>=8.2.8",
 ]
 
-
-[project.optional-dependencies]
-dev = [
-    "pytest>=9.1.1",
-    "pytest-asyncio>=1.4.0",
-    "pytest-textual-snapshot>=1.0.0",
-    "ruff>=0.16.7",
-]
-
 [project.scripts]
 skim = "skim.cli:main"
 skim-dev = "skim.cli:dev"
 skim-web = "skim.cli:web"
+
+[dependency-groups]
+dev = ["ruff", "pytest", "pyright", "poethepoet"]
 
 [tool.ruff]
 line-length = 100
@@ -35,31 +29,44 @@ src = ["src"]
 
 [tool.ruff.lint]
 select = [
-    "E",   # pycodestyle errors
-    "W",   # pycodestyle warnings
-    "F",   # pyflakes
-    "I",   # isort
-    "UP",  # pyupgrade
-    "B",   # flake8-bugbear
-    "D",   # pydocstyle
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+    "I",  # isort
+    "UP", # pyupgrade
+    "B",  # flake8-bugbear
+    "D",  # pydocstyle
 ]
 ignore = []
+
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = [
-    "D",
-]
+"tests/**/*.py" = ["D"]
 
-[tool.pyright]
-typeCheckingMode = "basic"
-pythonVersion = "3.12"
-include = ["src", "tests"]
+[tool.ruff.lint.isort]
+known-first-party = ["mlflow_monitor"]
 
 [tool.pytest.ini_options]
 minversion = "8.0"
 testpaths = ["tests"]
 addopts = "-v"
-asyncio_mode = "auto"
+
+[tool.pyright]
+include = ["src"]
+pythonVersion = "3.12"
+typeCheckingMode = "standard"
+
+[tool.poe]
+executor = "simple"
+
+[tool.poe.tasks]
+test = "pytest"
+lint = "ruff check ."
+format-check = "ruff format --check ."
+format = "ruff format ."
+typecheck = "pyright"
+build = "uv build"
+validate = ["test", "lint", "format-check", "typecheck", "docs", "build"]
