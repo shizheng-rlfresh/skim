@@ -1,5 +1,4 @@
 <p align="center">
-  <img alt="Codex: vibe coded" src="https://img.shields.io/badge/Codex-vibe%20coded-ff69b4?style=flat-square&amp;logo=openai&amp;logoColor=white">
   <img alt="Surfaces: CLI, TUI, Web UI" src="https://img.shields.io/badge/surfaces-CLI%20%7C%20TUI%20%7C%20Web%20UI-2ea44f?style=flat-square">
   <img alt="Version: v0.1.0" src="https://img.shields.io/badge/version-v0.1.0-blue?style=flat-square">
 </p>
