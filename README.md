@@ -1,4 +1,7 @@
 <p align="center">
+  <a href="https://github.com/shizheng-rlfresh/skim/actions/workflows/checks.yml">
+    <img alt="CI status" src="https://github.com/shizheng-rlfresh/skim/actions/workflows/checks.yml/badge.svg">
+  </a>
   <img alt="Surfaces: CLI, TUI, Web UI" src="https://img.shields.io/badge/surfaces-CLI%20%7C%20TUI%20%7C%20Web%20UI-2ea44f?style=flat-square">
   <img alt="Version: v0.1.0" src="https://img.shields.io/badge/version-v0.1.0-blue?style=flat-square">
   <a href="./LICENSE">
