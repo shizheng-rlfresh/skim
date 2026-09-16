@@ -11,6 +11,9 @@
 
 <hr>
 
+![Browser walkthrough](docs/assets/walkthrough-browser.gif)
+![VS Code walkthrough](docs/assets/walkthrough-vscode.gif)
+
 💥 **Local artifact explorer:** tree navigation, syntax-highlighted file previews, and structured JSON inspection.
 
 🛡️ **Durable review annotaation:** annotating whole files or structured targets such as JSON nodes can be marked during inspection, then reviewed again from the same local state.
