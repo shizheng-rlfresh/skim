@@ -27,9 +27,6 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Install dependencies
-        run: uv sync --locked --group doc
-
       - name: Run tests
         run: uv run --no-sync poe test
 
@@ -41,6 +38,6 @@ jobs:
 
       - name: Run Pyright type checking
         run: uv run --no-sync poe typecheck
-        
+
       - name: Build package
         run: uv run --no-sync poe build

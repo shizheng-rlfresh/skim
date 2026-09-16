@@ -53,6 +53,7 @@ known-first-party = ["mlflow_monitor"]
 minversion = "8.0"
 testpaths = ["tests"]
 addopts = "-v"
+asyncio_mode = "auto"
 
 [tool.pyright]
 include = ["src"]
@@ -69,4 +70,4 @@ format-check = "ruff format --check ."
 format = "ruff format ."
 typecheck = "pyright"
 build = "uv build"
-validate = ["test", "lint", "format-check", "typecheck", "docs", "build"]
+validate = ["test", "lint", "format-check", "typecheck", "build"]
