@@ -11,8 +11,10 @@
 
 <hr>
 
-![Browser walkthrough](docs/assets/walkthrough-browser.gif)
-![VS Code walkthrough](docs/assets/walkthrough-vscode.gif)
+<p align="center">
+  <img src="./docs/walkthrough-TUI.gif" alt="TUI walkthrough" width="49%">
+  <img src="./docs/walkthrough-WebUI.gif" alt="Web UI walkthrough" width="49%">
+</p>
 
 💥 **Local artifact explorer:** tree navigation, syntax-highlighted file previews, and structured JSON inspection.
 
