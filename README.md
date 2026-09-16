@@ -1,6 +1,12 @@
 <p align="center">
+  <a href="https://github.com/shizheng-rlfresh/skim/actions/workflows/checks.yml">
+    <img alt="CI status" src="https://github.com/shizheng-rlfresh/skim/actions/workflows/checks.yml/badge.svg">
+  </a>
   <img alt="Surfaces: CLI, TUI, Web UI" src="https://img.shields.io/badge/surfaces-CLI%20%7C%20TUI%20%7C%20Web%20UI-2ea44f?style=flat-square">
   <img alt="Version: v0.1.0" src="https://img.shields.io/badge/version-v0.1.0-blue?style=flat-square">
+  <a href="./LICENSE">
+    <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-yellow.svg?style=flat-square">
+  </a>
 </p>
 
 <p align="center">
@@ -10,6 +16,11 @@
 <p align="center"> SKIM makes agent eval review/inspection a smooth and interactive process, and works across the CLI, TUI, and Web UI. </p>
 
 <hr>
+
+<p align="center">
+  <img src="./docs/walkthrough-TUI.gif" alt="TUI walkthrough" width="49%">
+  <img src="./docs/walkthrough-WebUI.gif" alt="Web UI walkthrough" width="49%">
+</p>
 
 💥 **Local artifact explorer:** tree navigation, syntax-highlighted file previews, and structured JSON inspection.
 
