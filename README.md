@@ -24,7 +24,7 @@
 
 💥 **Local artifact explorer:** tree navigation, syntax-highlighted file previews, and structured JSON inspection.
 
-🛡️ **Durable review annotaation:** annotating whole files or structured targets such as JSON nodes can be marked during inspection, then reviewed again from the same local state.
+🛡️ **Durable review annotations:** annotate whole files (for non-json files) or structured targets such as JSON nodes, then revisit those annotations from the same local state.
 
 👹 **Human/AI-Agent review:** SKIM collects and preserves the evidence so follow-up actions such as triage, export, evaluation, or automated review can happen with context.
 
