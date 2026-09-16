@@ -1,6 +1,9 @@
 <p align="center">
   <img alt="Surfaces: CLI, TUI, Web UI" src="https://img.shields.io/badge/surfaces-CLI%20%7C%20TUI%20%7C%20Web%20UI-2ea44f?style=flat-square">
   <img alt="Version: v0.1.0" src="https://img.shields.io/badge/version-v0.1.0-blue?style=flat-square">
+  <a href="./LICENSE">
+    <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-yellow.svg?style=flat-square">
+  </a>
 </p>
 
 <p align="center">
